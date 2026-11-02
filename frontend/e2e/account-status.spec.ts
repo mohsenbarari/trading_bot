@@ -240,37 +240,28 @@ async function setAuthTokens(page: Page, tokens: AuthTokens) {
 async function openAdminUserProfile(page: Page, user: SessionUser) {
   await page.goto(`/admin/users/${user.userId}`)
   await expect(page.getByRole('heading', { name: 'پروفایل کاربر' })).toBeVisible({ timeout: 30000 })
-  await expect(page.getByText(user.accountName)).toBeVisible({ timeout: 30000 })
+  await expect(page.locator('[data-test="profile-identity-header"]').getByText(user.accountName, { exact: true })).toBeVisible({ timeout: 30000 })
 }
 
 async function toggleAccountStatusFromAdminProfile(page: any) {
-  const settingsHeading = page.getByRole('heading', { name: 'مدیریت کاربر' })
-  if (!(await settingsHeading.isVisible())) {
-    await page.getByRole('button', { name: /تنظیمات کاربر/ }).click()
-    await expect(settingsHeading).toBeVisible()
-  }
   const toggleButton = page.getByRole('button', { name: /تغییر وضعیت حساب/ }).first()
   if (!(await toggleButton.isVisible().catch(() => false))) {
+    const managementTitle = page.locator('.main-actions .ui-inset-group__title')
+    await expect(managementTitle).toHaveText('مدیریت کاربر')
     await page.getByRole('button', { name: /تنظیمات کاربر/ }).click()
-    await expect(toggleButton).toBeVisible({ timeout: 30000 })
+    await expect(page.locator('.settings-menu .ui-inset-group__title')).toHaveText('تنظیمات کاربر')
   }
-  const playwrightPage = page as any
-  const dialogHandler: any = async (dialog: any) => {
-    await dialog.accept()
-  }
-  // @ts-expect-error Workspace diagnostics misresolve Playwright's dialog event overload here.
-  playwrightPage.on('dialog', dialogHandler)
+  await expect(toggleButton).toBeVisible({ timeout: 30000 })
+  await toggleButton.click()
+  const confirmationDialog = page.getByRole('dialog', { name: /^تأیید (?:غیرفعال|فعال)‌سازی حساب$/ })
+  await expect(confirmationDialog).toBeVisible()
   const updateResponsePromise = page.waitForResponse((response) => {
     return response.request().method() === 'PUT' && /\/api\/users\/\d+$/.test(response.url())
   })
-  try {
-    await toggleButton.click()
-    const response = await updateResponsePromise
-    expect(response.ok()).toBeTruthy()
-  } finally {
-    // @ts-expect-error Workspace diagnostics misresolve Playwright's dialog event overload here.
-    playwrightPage.off('dialog', dialogHandler)
-  }
+  await confirmationDialog.getByRole('button', { name: /^(?:غیرفعال|فعال) کردن$/ }).click()
+  const response = await updateResponsePromise
+  expect(response.ok()).toBeTruthy()
+  await expect(confirmationDialog).toBeHidden()
 }
 
 async function createIsolatedPage(browser: any, tokens: AuthTokens) {
@@ -341,14 +332,16 @@ test.describe('Account status browser regression', () => {
       const blockedAlert = userPage.locator('.alert-blocked')
       await expect(blockedAlert).toContainText('حساب کاربری غیرفعال شده است')
       await expect(blockedAlert).toContainText(/اگر حساب تا/)
-      await expect(userPage.locator('.hero-btn')).toBeDisabled()
+      await expect(userPage.locator('.hero-btn')).toHaveCount(0)
 
       const lockResult = forceGlobalLock(targetUser.userId)
       expect(lockResult.blocked).toBeGreaterThanOrEqual(1)
 
       await userPage.reload({ waitUntil: 'domcontentloaded' })
-      await userPage.waitForURL(/\/login$/)
-      await expect(userPage.getByRole('heading', { name: 'ورود به بازار' })).toBeVisible()
+      // Session revocation can replace the document more than once; assert the
+      // final route, then genuine login readiness, without waiting on an aborted load.
+      await expect(userPage).toHaveURL(/\/login$/)
+      await expect(userPage.getByRole('heading', { name: 'ورود به سامانه' })).toBeVisible()
 
       await toggleAccountStatusFromAdminProfile(adminPage)
 

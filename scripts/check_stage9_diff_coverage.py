@@ -5,9 +5,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import resource
 import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from pathlib import Path
@@ -20,6 +23,108 @@ from coverage.parser import PythonParser
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EXCLUSIONS = REPO_ROOT / "config/stage9_coverage_exclusions.json"
 HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+# Parse source only; this program never imports or executes component code.
+# Keep template expressions, dynamic CSS and unknown script tokens fail-closed.
+VUE_NON_EXECUTABLE_PROGRAM = r"""
+const fs = require('node:fs');
+const { parse, babelParse } = require('@vue/compiler-sfc');
+const filename = process.argv[1];
+const fd = fs.openSync(filename, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+let source;
+try {
+  const before = fs.fstatSync(fd);
+  if (!before.isFile() || before.size > 1048576) throw Error('source_bound');
+  const bytes = Buffer.alloc(before.size + 1);
+  const count = fs.readSync(fd, bytes, 0, bytes.length, 0);
+  const after = fs.fstatSync(fd);
+  if (count !== before.size || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw Error('source_changed');
+  source = bytes.subarray(0, count).toString('utf8');
+} finally { fs.closeSync(fd); }
+const result = parse(source, { filename });
+if (result.errors.length) throw Error('sfc_parse');
+const { descriptor } = result;
+const nonExecutable = new Set();
+const blockedLines = new Set();
+const lineCount = source.split('\n').length;
+if (lineCount > 50000) throw Error('line_bound');
+for (const block of [descriptor.script, descriptor.scriptSetup].filter(Boolean)) {
+  if (block.src) throw Error('external_script');
+  const plugins = block.lang === 'ts' || block.lang === 'tsx' ? ['typescript'] : [];
+  if (block.lang === 'jsx' || block.lang === 'tsx') plugins.push('jsx');
+  if (block.lang && !['js', 'ts', 'jsx', 'tsx'].includes(block.lang)) throw Error('script_language');
+  const ast = babelParse(block.content, { sourceType: 'module', plugins, tokens: true,
+    startLine: block.loc.start.line, startColumn: block.loc.start.column });
+  const runtimeTokens = new Set();
+  for (const token of ast.tokens) {
+    const label = token.type.label || token.type;
+    if (['{', '}', ';', 'eof', 'CommentLine', 'CommentBlock'].includes(label)) continue;
+    for (let line = token.loc.start.line; line <= token.loc.end.line; line++) {
+      runtimeTokens.add(line); blockedLines.add(line);
+    }
+  }
+  for (let line = block.loc.start.line; line <= block.loc.end.line; line++) {
+    if (!runtimeTokens.has(line)) nonExecutable.add(line);
+  }
+}
+// v-bind() styles generate JavaScript. Do not classify any style as static
+// when the primary SFC parser identifies such expressions in this component.
+if (descriptor.cssVars.length === 0) {
+  for (const block of descriptor.styles) {
+    for (let line = block.loc.start.line; line <= block.loc.end.line; line++) nonExecutable.add(line);
+  }
+} else {
+  for (const block of descriptor.styles) {
+    for (let line = block.loc.start.line; line <= block.loc.end.line; line++) blockedLines.add(line);
+  }
+}
+// A physical line can contain several SFC blocks. CSS or a blank script
+// fragment must never waive JavaScript/template/custom content on that line.
+for (const block of [descriptor.template, ...descriptor.customBlocks].filter(Boolean)) {
+  for (let line = block.loc.start.line; line <= block.loc.end.line; line++) blockedLines.add(line);
+}
+for (const line of blockedLines) nonExecutable.delete(line);
+process.stdout.write(JSON.stringify({ schema: 1, line_count: lineCount,
+  non_executable: [...nonExecutable].sort((a, b) => a - b) }));
+"""
+
+
+def _vue_non_executable_lines(path: Path) -> set[int]:
+    root = REPO_ROOT / "frontend/src"
+    if path.resolve(strict=True) != path or not path.is_relative_to(root):
+        raise ValueError("frontend_source_path_invalid")
+    maximum = 512 * 1024
+
+    def bounds():
+        resource.setrlimit(resource.RLIMIT_FSIZE, (maximum, maximum))
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+    with tempfile.TemporaryFile() as output:
+        subprocess.run(
+            ["node", "-e", VUE_NON_EXECUTABLE_PROGRAM, str(path)],
+            cwd=REPO_ROOT / "frontend",
+            stdin=subprocess.DEVNULL,
+            stdout=output,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=True,
+            preexec_fn=bounds,
+            env={"PATH": os.environ.get("PATH", ""), "LC_ALL": "C.UTF-8"},
+        )
+        if output.tell() >= maximum:
+            raise ValueError("frontend_source_parser_output_bound")
+        output.seek(0)
+        payload = json.loads(output.read(maximum))
+    if not isinstance(payload, dict):
+        raise ValueError("frontend_source_parser_shape")
+    lines = payload.get("non_executable")
+    count = payload.get("line_count")
+    if (payload.get("schema") != 1 or type(count) is not int or not 0 < count <= 50000
+            or not isinstance(lines, list)
+            or any(type(line) is not int or not 0 < line <= count for line in lines)
+            or len(lines) != len(set(lines))):
+        raise ValueError("frontend_source_parser_shape")
+    return set(lines)
 
 
 def changed_lines_from_diff(diff_text: str) -> dict[str, set[int]]:
@@ -144,6 +249,7 @@ def check_frontend(
             continue
         file_report = {metric: {"total": 0, "covered": 0, "uncovered": []} for metric in ("lines", "statements", "branches", "functions")}
         file_report["excluded"] = []
+        file_report["non_executable"] = []
         mapped_lines: set[int] = set()
 
         statements = data.get("statementMap", {})
@@ -204,6 +310,9 @@ def check_frontend(
                 location = function.get("loc") or function.get("decl")
                 if not lines.intersection(_location_lines(location)):
                     continue
+                # A declaration is represented by function coverage, not by a
+                # statement. Never use the whole body to pad missing JS maps.
+                mapped_lines.update(lines.intersection(_location_lines(function.get("decl"))))
                 count = int(function_counts.get(key, 0) or 0)
                 item = file_report["functions"]
                 item["total"] += 1
@@ -213,8 +322,15 @@ def check_frontend(
                     item["uncovered"].append(str(key))
 
         unmapped = lines - mapped_lines
+        non_executable: set[int] = set()
+        if path.endswith(".vue") and unmapped:
+            try:
+                non_executable = unmapped & _vue_non_executable_lines(REPO_ROOT / path)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                failures.append(f"coverage_source_classification_failed:{path}")
+        file_report["non_executable"] = sorted(non_executable)
         allowed = exclusions.get(path, {})
-        unexplained = sorted(line for line in unmapped if line not in allowed)
+        unexplained = sorted(line for line in unmapped if line not in allowed and line not in non_executable)
         stale_exclusions = sorted(line for line in allowed if line not in unmapped)
         file_report["excluded"] = [
             {"line": line, "reason": allowed[line]} for line in sorted(unmapped & set(allowed))
@@ -224,7 +340,7 @@ def check_frontend(
         if stale_exclusions:
             failures.append(f"stale_coverage_exclusion:{path}:{','.join(map(str, stale_exclusions))}")
         for metric, item in file_report.items():
-            if metric == "excluded":
+            if metric in {"excluded", "non_executable"}:
                 continue
             if item["uncovered"]:
                 failures.append(f"uncovered_{metric}:{path}:{','.join(map(str, item['uncovered']))}")

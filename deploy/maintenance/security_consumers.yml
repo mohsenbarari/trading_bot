@@ -1,0 +1,175 @@
+---
+# Finite Web then Native execution; target mode names exactly ONE service.
+- name: Stage or check the five fixed App security consumers
+  hosts: security_web:security_bot
+  order: inventory
+  serial: 1
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Bind the exact hosts nonce mode and private operation directory
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | sort == ['security_bot', 'security_web']
+          - security_coordinator_nonce is match('^[a-f0-9]{32}$')
+          - security_acceptance_sha256 is match('^[a-f0-9]{64}$')
+          - security_action in ['stage', 'check', 'snapshot', 'target', 'rollback', 'verify', 'recovered_verify']
+          - security_service in ['', 'app', 'bot', 'sync_worker']
+          - security_action not in ['target', 'rollback'] or security_service != ''
+          - security_site != 'web' or security_service != 'bot'
+          - security_public_assets | selectattr('name', 'equalto', 'security_consumer_site.py') | list | length == 1
+          - ansible_user == 'root'
+          - (inventory_hostname == 'security_web' and ansible_host == '65.109.220.59' and ansible_port | int == 37067 and security_site == 'web' and security_workspace == '/srv/trading-bot/security-consumers-20261024-02-' + security_coordinator_nonce) or (inventory_hostname == 'security_bot' and ansible_connection == 'local' and ansible_host == '65.109.216.187' and ansible_port | int == 22 and security_site == 'bot' and security_workspace == '/root/trading-bot/trading_bot/.local/security-consumers-20261024-02-' + security_coordinator_nonce)
+      no_log: true
+
+    - name: Check the operation directory without following a link
+      ansible.builtin.stat:
+        path: '{{ security_workspace }}'
+        follow: false
+        get_checksum: false
+        get_mime: false
+      register: task_directory
+
+    - name: Require a new stage or the exact existing private code directory
+      ansible.builtin.assert:
+        that:
+          - (security_action == 'stage' and not task_directory.stat.exists) or (security_action != 'stage' and task_directory.stat.exists and task_directory.stat.isdir and not task_directory.stat.islnk and task_directory.stat.uid == 0 and task_directory.stat.mode == '0700')
+
+    - name: Validate ancestry and exclusively create only a requested new stage
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import os,pathlib,stat,sys
+            path=pathlib.Path(sys.argv[1]);stage=sys.argv[2]=='stage'
+            assert path.is_absolute() and path.resolve(strict=False)==path
+            for parent in path.parents:
+                s=parent.lstat();assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022
+            if stage:
+                os.umask(0o077);os.mkdir(path,0o700)
+                for name in ('evidence','docker-config','results'):os.mkdir(path/name,0o700)
+            else:
+                for p in (path,*(path/n for n in ('evidence','docker-config','results'))):
+                    s=p.lstat();assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and stat.S_IMODE(s.st_mode)==0o700 and p.resolve(strict=True)==p
+                assert not any((path/'docker-config').iterdir())
+          - '{{ security_workspace }}'
+          - '{{ security_action }}'
+      changed_when: security_action == 'stage'
+      no_log: true
+
+    - name: Stage only pinned public controls and the immutable fresh window
+      when: security_action == 'stage'
+      ansible.builtin.copy:
+        src: '{{ item.source }}'
+        dest: '{{ security_workspace }}/{{ item.name }}'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      loop: '{{ security_public_assets }}'
+      no_log: true
+
+    - name: Stage filtered public facts and evidence without Config or Env values
+      when: security_action == 'stage'
+      ansible.builtin.copy:
+        src: '{{ item.source }}'
+        dest: '{{ security_workspace }}/evidence/{{ item.name }}.json'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      loop: '{{ security_public_evidence }}'
+      no_log: true
+
+    - name: Authenticate all public executable and authority bytes before import
+      ansible.builtin.stat:
+        path: '{{ security_workspace }}/{{ item.name }}'
+        follow: false
+        checksum_algorithm: sha256
+        get_checksum: true
+        get_mime: false
+      loop: '{{ security_public_assets }}'
+      register: staged_assets
+      no_log: true
+
+    - name: Refuse redirected replaced or changed public controls
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists and item.stat.isreg and not item.stat.islnk
+          - item.stat.uid == 0 and item.stat.nlink == 1 and item.stat.mode == '0600'
+          - item.stat.size > 0 and item.stat.size <= 2097152
+          - item.stat.checksum == item.item.sha256
+      loop: '{{ staged_assets.results }}'
+      no_log: true
+
+    - name: Invoke one bounded worker with public identity arguments only
+      when: security_action != 'stage'
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            from hashlib import sha256
+            import os,pathlib,re,stat,sys
+            path=pathlib.Path(sys.argv[1]);expected=sys.argv[2];arguments=sys.argv[3:]
+            assert path.is_absolute() and path.name=='security_consumer_site.py' and path.resolve(strict=True)==path
+            assert re.fullmatch('[a-f0-9]{64}',expected)
+            fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            try:
+                def identity(s):return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                before=identity(os.fstat(fd))
+                assert stat.S_ISREG(before[2]) and stat.S_IMODE(before[2])==0o600 and before[3:6]==(0,0,1) and 0<before[6]<=131072
+                def check():assert before==identity(os.fstat(fd))==identity(path.lstat()),'site_entrypoint_changed'
+                check();raw=os.pread(fd,before[6]+1,0);check()
+                assert len(raw)==before[6] and sha256(raw).hexdigest()==expected,'site_entrypoint_digest'
+                code=compile(raw,str(path),'exec');check()
+                sys.argv=[str(path),*arguments]
+                namespace={'__name__':'__main__','__file__':str(path),'__package__':None,'__spec__':None,'__cached__':None,'__builtins__':__builtins__}
+                try:exec(code,namespace)
+                finally:check()
+            finally:os.close(fd)
+          - '{{ security_workspace }}/security_consumer_site.py'
+          - '{{ (security_public_assets | selectattr("name", "equalto", "security_consumer_site.py") | list | first).sha256 }}'
+          - '{{ security_action }}'
+          - --site
+          - '{{ security_site }}'
+          - --service
+          - '{{ security_service if security_service else "app" }}'
+          - --projection
+          - '{{ security_projection_json }}'
+          - --directory
+          - '{{ security_workspace }}'
+          - --evidence
+          - '{{ security_workspace }}/window.json'
+          - --evidence-sha256
+          - '{{ security_acceptance_sha256 }}'
+          - --primitives
+          - '{{ security_workspace }}/validate_docker_daemon_maintenance.py'
+          - --apply
+          - SECURITY-APP-8DA-ONLY-20261024-02
+      changed_when: security_action in ['snapshot', 'target', 'rollback']
+      timeout: 900
+      failed_when: false
+      register: worker_result
+      no_log: true
+
+    - name: Fetch only the known public per-target outcome for explicit validation
+      when: security_action in ['target', 'rollback']
+      ansible.builtin.fetch:
+        src: '{{ security_workspace }}/result-{{ security_action }}-{{ security_service }}.json'
+        dest: '{{ security_result_destination }}'
+        flat: true
+        validate_checksum: true
+      no_log: true
+
+    - name: Require worker completion while preserving distinct target validation status
+      when: security_action != 'stage'
+      ansible.builtin.assert:
+        that:
+          - worker_result.rc == 0
+      no_log: true

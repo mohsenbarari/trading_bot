@@ -52,6 +52,7 @@ const persianDigits = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹
 
 const rootRef = ref<HTMLElement | null>(null)
 const isOpen = ref(false)
+const popoverShift = ref(0)
 const visibleMonth = ref(moment())
 
 function toEnglishDigits(value: string) {
@@ -232,6 +233,17 @@ function handleKeydown(event: KeyboardEvent) {
   }
 }
 
+function alignPopoverInViewport() {
+  if (props.inline || !isOpen.value || !rootRef.value) return
+  const panel = rootRef.value.querySelector<HTMLElement>('.jalali-calendar-panel')
+  if (!panel) return
+  const anchor = rootRef.value.getBoundingClientRect()
+  const width = panel.getBoundingClientRect().width
+  const centeredLeft = anchor.left + (anchor.width - width) / 2
+  const boundedLeft = Math.max(8, Math.min(centeredLeft, window.innerWidth - width - 8))
+  popoverShift.value = boundedLeft - centeredLeft
+}
+
 function focusCalendarDay(date: JalaliMoment) {
   const key = date.format('jYYYY/jMM/jDD')
   void nextTick(() => {
@@ -264,14 +276,18 @@ function handleDayKeydown(event: KeyboardEvent, date: JalaliMoment | null) {
 
 onMounted(() => {
   document.addEventListener('pointerdown', handleDocumentPointerDown)
+  window.addEventListener('resize', alignPopoverInViewport)
 })
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', handleDocumentPointerDown)
+  window.removeEventListener('resize', alignPopoverInViewport)
 })
 
 watch(isOpen, async (opened) => {
   if (!opened) return
+  await nextTick()
+  alignPopoverInViewport()
   await nextTick()
   rootRef.value?.querySelector<HTMLButtonElement>('.jalali-calendar-day.is-selected, .jalali-calendar-day.is-today')?.focus()
 })
@@ -297,7 +313,7 @@ watch(isOpen, async (opened) => {
       </span>
     </button>
 
-    <div v-if="inline || isOpen" class="jalali-calendar-panel" :class="{ 'is-popover': !inline }" role="dialog" aria-label="تقویم جلالی">
+    <div v-if="inline || isOpen" class="jalali-calendar-panel" :class="{ 'is-popover': !inline }" :style="!inline ? { '--jalali-popover-shift': `${popoverShift}px` } : undefined" role="dialog" aria-label="تقویم جلالی">
       <div class="jalali-calendar-header">
         <button type="button" class="jalali-calendar-nav" aria-label="ماه قبل" @click="goToPreviousMonth">
           <ChevronRight :size="20" />
@@ -433,9 +449,19 @@ watch(isOpen, async (opened) => {
 }
 
 .jalali-calendar-panel.is-popover {
+  /* A date field can be much narrower than seven accessible day targets. */
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 16px));
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 50%;
+  right: auto;
+  transform: translateX(calc(-50% + var(--jalali-popover-shift, 0px)));
+}
+
+.jalali-calendar-panel.is-popover .jalali-calendar-day {
+  width: 100%;
+  min-width: 40px;
 }
 
 .jalali-date-picker.is-inline .jalali-calendar-panel {
@@ -593,6 +619,17 @@ watch(isOpen, async (opened) => {
 @media (max-width: 420px) {
   .jalali-calendar-panel {
     width: min(100%, calc(100vw - 32px));
+  }
+}
+
+@media (max-width: 360px) {
+  .jalali-calendar-panel.is-popover {
+    padding: 8px;
+  }
+
+  .jalali-calendar-panel.is-popover .jalali-calendar-weekdays,
+  .jalali-calendar-panel.is-popover .jalali-calendar-grid {
+    gap: 1px;
   }
 }
 </style>

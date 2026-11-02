@@ -3,7 +3,7 @@ import json
 import multiprocessing
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import urlparse
 
 import redis
@@ -80,10 +80,31 @@ def _listener_process(redis_url: str, ready, result) -> None:
     try:
         asyncio.run(run())
     except Exception as exc:
-        result.send({"error": f"{type(exc).__name__}:{exc}"})
+        # Startup errors must fail readiness explicitly, without exposing
+        # validation inputs or environment values in CI diagnostics.
+        failure = {"error": type(exc).__name__}
+        for pipe in (ready, result):
+            try:
+                pipe.send(failure)
+            except OSError:
+                pass
 
 
 class RealtimeMultiworkerRedisSafetyTests(unittest.TestCase):
+    def test_worker_startup_failure_reports_only_exception_class(self):
+        ready = Mock()
+        result = Mock()
+
+        def fail_run(coroutine):
+            coroutine.close()
+            raise RuntimeError("sensitive validation input must not be reported")
+
+        with patch("asyncio.run", side_effect=fail_run):
+            _listener_process("redis://127.0.0.1:6379/14", ready, result)
+
+        ready.send.assert_called_once_with({"error": "RuntimeError"})
+        result.send.assert_called_once_with({"error": "RuntimeError"})
+
     def test_rejects_nonlocal_or_shared_redis_target(self):
         with patch.dict(
             os.environ,
@@ -121,7 +142,7 @@ class RealtimeMultiworkerRedisTests(unittest.TestCase):
                     ready.poll(WORKER_STARTUP_TIMEOUT_SECONDS),
                     "worker did not subscribe to Redis",
                 )
-                self.assertTrue(ready.recv())
+                self.assertIs(ready.recv(), True)
 
             payload = json.dumps({"id": 7, "_realtime_event_id": "stage14-process-event"})
             client.publish("events:offer:updated", payload)

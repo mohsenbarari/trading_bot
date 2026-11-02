@@ -1,0 +1,182 @@
+# Existing App OS composition: source packet, not acceptance
+
+This manual CI-only recipe composes the already exported image
+`sha256:3b4f58b071f3a7c51778e1f6a1ae66d03beaa401fdefee6f8fd2af69999512cf`
+with exactly fifteen previously built runtime DEBs. It does not rebuild the
+App, frontend, Python dependencies or vendor packages. Product baseline remains
+`ba1f7616ade57558f51bb3a7fbb903243a33aab4`, security overlay remains
+`19d4c2da778f8f1edc567db4c9616c2d153980c9`. The first actual attempt failed
+before composition. The second composed and tested a derived image but failed
+finalization. The third exported successfully; security acceptance remains false.
+
+## First actual attempt and diagnostic correction
+
+[Run40120574253](https://github.com/mohsenbarari/trading_bot/actions/runs/40120574253),
+job120951019216, used source531196246c9b916f2101f85e93722b2e0536d79f.
+Evidence artifact12571460348 is2555 bytes, SHA256
+caebd806e21663a02643906fed4ab9ef4d55879ffc0267e6aba604641a84e665.
+Its three files prove original image admission with31 layers/31 legacy metadata
+nodes, and a successful baseline audit:14173 App/Python entries,245377653 bytes,
+fingerprint1cb7dca2bf546138ffdde7a1be10851887da0e58445f7ecca2ff9ca3c202ca04,
+libc2.41-12+deb13u4 with bytes SHA256
+9792e3cbb541c8f44c7acf5f14f4022ea62998ecc787d326bed4d8b6547dfd92.
+No build log exists. The old generic failure message cannot distinguish the
+following cleanup, alias or builder boundary; it does not prove a sole cause.
+
+A deterministic source error follows that audit: [buildx inspect](https://docs.docker.com/reference/cli/docker/buildx/inspect/)
+does not support --format. The correction uses documented, bounded text output
+from inspect default, requires its default name, one docker driver, running
+status and no error field, and retains builder-inspect.log. It starts no new
+builder. Every major boundary now writes an atomic public phase.json before
+work. Closed public error codes retain the first failed phase across later
+cleanup, without reflecting exception text, command arguments or environment.
+The historical failed attempt stays unchanged. A fresh reviewed CI result is
+still required; Config, layer, inventory and scanner gates remain intact.
+
+## Second actual attempt and baseline alias lifetime
+
+[Run40122254053](https://github.com/mohsenbarari/trading_bot/actions/runs/40122254053),
+job120956154554, used source983758c0c0a9da8ce34febb0a5ef0cdf53bf1d81.
+Evidence artifact12570884975 is157584 bytes, SHA256
+c6ac1681effb7646b460ff6c4b73241b1f90835d8e81c91994bfc61732ada6c4.
+It records derived image
+`sha256:2d1f18d41a50cd52592dc2b2ceb11d3201dfbc2fbe59a042630910a40231944f`,
+unchanged Config/App/Python/libc, the complete31-layer baseline prefix followed
+by one new layer, native/component checks and56 tests in five modules passing.
+Raw scan and SBOM collection succeeded; raw findings include44 HIGH rows.
+Finalization then failed with command_failed at finalize_admission. No export
+receipt was produced. That phase covered both candidate and baseline lookups,
+so the retained evidence does not identify which command failed.
+
+A source lifetime error could remove the baseline before those final checks:
+[Docker image rm](https://docs.docker.com/reference/cli/docker/image/rm/)
+removes the image record when removing its only tag. The original exported
+archive and loaded baseline tag lists were not recorded in that attempt; the
+earlier scanner tag list does not prove tags survived image-save/load by ID.
+This is a verified failure path, not a claim of the sole historical cause.
+The correction retains the exact run-owned baseline alias through final
+candidate/baseline checks and export. A subsequent always step validates the
+immutable alias plan, current run/source and exact image identity before
+removing only that alias with --no-prune and no force. A successful empty
+post-removal listing is an observation, never daemon cancellation proof.
+Failure paths attempt the same bounded owned cleanup and preserve the first
+failure. Image upload requires both finalization and cleanup success.
+
+Future attempts retain the archive RepoTags and daemon RepoTags before alias
+creation in baseline-image-identity.json, bind it and the immutable alias plan
+into composition/export evidence, and record separate phases immediately
+before final candidate inspection, baseline inspection and archive reading.
+Hermetic tests model actual last-tag eviction: normal finalization/export
+passes before cleanup, while premature cleanup makes the baseline lookup fail
+at its distinct phase. Both historical failed attempts remain unchanged.
+
+## Third actual attempt: export and owned cleanup completed
+
+[Run40125049596](https://github.com/mohsenbarari/trading_bot/actions/runs/40125049596),
+job120964572785, used source03bb7e0a06e8d785e5be52548c5616148ac9b69c
+and completed successfully. Its image is
+`sha256:0e4f132a9696569af9c138204fea381d3a7b02e43a7f845dc613eba107ef377c`.
+Public evidence artifact12573185101 has158889 bytes, ZIP SHA256
+`f527eec0fbaf472a65d04e8fc98c95f0580436e8bd21540e690476a42e2f4acb`.
+Root independently checked all13 composition evidence hashes, the56 focused
+tests, unchanged App/Python/libc and runtime configuration, and final owned
+alias cleanup. The final phase is complete with no first failure. Actual
+archive RepoTags are null and the daemon baseline RepoTags before aliasing are
+empty; keeping that alias until the last consumer addresses a demonstrated
+real input condition. This does not retrospectively identify the sole cause
+of the second attempt's broad finalization failure.
+
+Image artifact12573205069 has183817639 bytes, ZIP SHA256
+`c6dec94877c954e41434bc04206a054eb7b51e9836073842a6e550b0e106626b`.
+It was retained by CI only after both export and owned cleanup succeeded; the
+large image was not downloaded onto Native's constrained root disk. Public
+artifact metadata and small evidence were checked, not a local independent
+admission of the large image archive. The raw report SHA256 is
+`bd4bb593a87a9c28d1251b924a466296d39219749232785c652bdf88bb2e4ff0`.
+It retains44 HIGH,68 MEDIUM,82 LOW and one UNKNOWN row, with no CRITICAL row.
+The same eight HIGH advisory IDs, caller-level ACL work, full runtime matrix,
+final artifact admission and live activation remain open. Successful collection
+and export never change security_accepted or raw_scanner_gate_waived to true.
+
+| Packages | Run / public artifact | ZIP bytes / SHA256 | Build receipt SHA256 |
+|---|---|---|---|
+| util-linux nine |40112666640 /12567076825|2362423 /a53a204c2ad0b04d2526811eaeb2fa40e0799d720c3d57a9650db9ada4279e8b|3a799ad92549c9d3c5e18013463743d9bc2b721eb83557e5ee3a0273d4514dde|
+| ncurses four |40112668891 /12567123180|1319510 /5d4f181112b2965d177c10e3923b2ba2ff4d2b0ee6716818acc9b7f784bfee08|0903c9fbcd69d5dbc6e381f2c84d2718f85899e23c375de2e1c8ec57e81483fd|
+| ACL and tar two |40115339187 /12567979094|933904 /d367fb3c1b92f069538a6e90a77ea110efec6dccd9286a8f0e1359b285bc1765|c0114c344ec6103c1d8053421f5e63dc06721b16d8e318f21cde95608d9b465c|
+
+## Additional static ACL caller inventory: source integration
+
+The existing recipe now seals a fourth published source,
+verify_acl_consumer_presence.py, SHA256
+001e51d270c079153cc38db1be53c723fbbc8a8bb9e981e718e7b657127bc778.
+After composition, the same immutable image runs those hash-checked literal
+bytes inside the existing read-only, networkless, capability-free bounded
+container. No inventoried ELF is executed or loaded. Returned image, recipe
+commit, verifier hash, scope and false safety/acceptance flags must match.
+The JSON and bounded log join the composition/export hash chain, and the final
+export rechecks the receipt. The prior thirteen-hash actual run remains unchanged;
+this integration requires its own new CI result and does not close ACL54369.
+It adds no App/vendor rebuild or alternative archive-admission framework.
+
+Package admission checks ZIP bytes/hash, bounded closed member names, pinned
+receipts and all fifteen exact archive hashes/versions. The ACL/tar receipt
+also binds the actual ACL compiler receipt. The public installation capsule
+contains only those DEBs and its checked manifest, using0755/0644 permissions.
+The existing image admission API checks the exact original image archive;
+its historical component-only receipt is not reinterpreted as composition
+acceptance. Missing or changed inputs fail without compiling a replacement.
+
+The generated Dockerfile has only FROM and RUN. It uses the admitted base's
+owned local alias under the built-in Docker builder, without registry pulls.
+Read-only build-context mounts avoid storing a duplicate package capsule in
+new image layers. RUN has network=none. Existing setpriv drops to exactly
+CHOWN/FOWNER/FSETID/SETUID/SETGID and no-new-privileges before the sealed installer;
+the installer checks the actual kernel capability masks. BuildKit installer
+CPU/memory/PID cgroup caps are **NOT_ASSERTED**. The job, client commands,
+outputs and artifacts have finite bounds; test/probe containers have explicit
+memory/CPU/PID limits, read-only roots, no network and no capabilities.
+
+Normal APT first simulates exactly fifteen upgrades and no removals, then
+installs the same absolute local paths with normal Pre-Depends ordering. Only
+simulation uses --no-download; the real command must acquire local files.
+Before/after complete package inventories reject any additional package,
+unrelated upgrade, removal or libc change. App and Python trees and libc bytes
+are fingerprinted before and after. Clean dpkg audit remains required.
+
+No USER, ENV, CMD, ENTRYPOINT, LABEL or SHELL directive changes the original
+runtime configuration. Whole Docker Config equality and the ordered complete
+baseline RootFS prefix are mandatory. Full original OCI config is additionally
+compared with the actual composed-image scanner metadata. This avoids the
+[Docker commit merge behavior](https://github.com/moby/moby/blob/v28.5.1/daemon/commit.go)
+that can retain temporary installer environment variables or labels.
+
+The original public19d evidence ZIP is artifact12553191740,190111 bytes,
+SHA256976a32a2c5284b27cf1f007992495d1a2353f0ca957133916f2fd27871d7d30a.
+Its test-sources proof is SHA256
+39826fc608153f0ce34cd0a48cfe5e6712914e2d157c8c5475c4262445319593.
+CI fetches only six pinned Git blobs, checking Git blob identity, SHA256 and
+size. Three security modules and the example Env come from19d; two Market
+modules come fromba1. The older coin-rate-engine test is absent from the current
+checkout, so current tests are never substituted. Exactly56 tests in five
+modules must pass without skips inside the new image. Existing native trust,
+psycopg2/SQLite/libmagic checks and the sealed component probe also run. The full
+browser/API/Bot runtime matrix remains **NOT_TESTED**.
+
+Completed composition/export receipts bind the native/component/focused results,
+both complete inventories and bounded public build/test logs by SHA256. The
+component receipt must identify the same image, source and verifier and retain
+its false acceptance/suppression flags. A create timeout or malformed returned
+ID triggers bounded cleanup by the exact generated name, owner label and image;
+only its resolved immutable owned ID can be removed. The original job still
+fails and records daemon outcome **UNKNOWN**, even if that best-effort removal
+returns successfully. Client termination never proves daemon cancellation.
+
+All severities and unfixed rows remain in the raw Trivy report, with an empty
+scan config and no ignore file. Raw JSON and SBOM must identify the exact new
+image and all fifteen installed versions. Export retains the original baseline
+and overlay provenance in a separate composition receipt bound to the new
+image/config/layers/package/test/report hashes. Scanner collection exit0 never
+means admission. Existing HIGH/CRITICAL gates, real util-linux privileged-test
+gaps, ncurses interactive coverage and ACL legacy-path API questions remain
+open. Security accepted, gate waived, deployment and production installation
+remain false. No VEX, policy exception, production mount or private data is used.

@@ -1,0 +1,238 @@
+name: Canonical App image build evidence
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: canonical-app-image-evidence
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout the exact dispatched main revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Seal the Git-only builder and prepare its pinned OS cache
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import os,pathlib,re,resource,stat,subprocess,sys,tempfile
+          assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          os.umask(0o077)
+          repo=pathlib.Path(os.environ['GITHUB_WORKSPACE']).resolve(strict=True)
+          commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
+          def capture(argv,maximum):
+              fd=os.memfd_create('public-app-builder-source',os.MFD_CLOEXEC)
+              def limits():
+                  resource.setrlimit(resource.RLIMIT_FSIZE,(maximum+1,maximum+1))
+                  resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+              try:
+                  subprocess.run(argv,cwd=repo,stdin=subprocess.DEVNULL,stdout=fd,stderr=subprocess.DEVNULL,
+                      env={'PATH':os.defpath,'LC_ALL':'C.UTF-8'},timeout=15,check=True,preexec_fn=limits)
+                  size=os.fstat(fd).st_size;assert 0<size<=maximum
+                  value=os.pread(fd,size+1,0);assert len(value)==size
+                  return value
+              finally:os.close(fd)
+          assert capture(['git','--no-optional-locks','rev-parse','HEAD'],64).strip()==commit.encode()
+          operand=commit+':scripts/prepare_canonical_app_image.py'
+          size=capture(['git','--no-optional-locks','cat-file','-s',operand],64)
+          assert re.fullmatch(rb'[1-9][0-9]{0,5}\n',size) and int(size)<=131072
+          raw=capture(['git','--no-optional-locks','cat-file','blob',operand],int(size))
+          assert len(raw)==int(size)
+          parent=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          assert parent.stat().st_uid==1001 and not parent.stat().st_mode&0o022
+          root=pathlib.Path(tempfile.mkdtemp(prefix='canonical-app-image-',dir=parent))
+          assert not root.is_relative_to(repo)
+          (root/'source').mkdir(mode=0o700)
+          path=root/'source/prepare_canonical_app_image.py'
+          fd=os.open(path,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW|os.O_CLOEXEC,0o600)
+          try:
+              view=memoryview(raw)
+              while view:
+                  count=os.write(fd,view);assert count>0;view=view[count:]
+              os.fsync(fd)
+              identity=lambda q:(q.st_dev,q.st_ino,q.st_mode,q.st_uid,q.st_gid,q.st_nlink,q.st_size,q.st_mtime_ns,q.st_ctime_ns)
+              before=identity(os.fstat(fd))
+              assert before[2]==0o100600 and before[3]==1001 and before[5]==1
+              with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+                  output.write('root='+str(root)+'\nhelper_sha256='+sha256(raw).hexdigest()+'\n')
+              sys.argv=[str(path),'prepare','--root',str(root),'--repo',str(repo)]
+              try:exec(compile(raw,str(path),'exec'),{'__name__':'__main__','__file__':str(path)})
+              finally:
+                  assert before==identity(os.fstat(fd))==identity(path.lstat()) and os.pread(fd,len(raw)+1,0)==raw
+          finally:os.close(fd)
+          PY
+
+      - name: Setup the normal security-pinned frontend runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build the normal frontend distribution
+        working-directory: frontend
+        env:
+          FRONTEND_BUILD_OUT_DIR: ''
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the ordinary App Dockerfile from sealed current inputs
+        id: build
+        env:
+          CAPSULE_ROOT: ${{ steps.prepare.outputs.root }}
+          BUILDER_SHA256: ${{ steps.prepare.outputs.helper_sha256 }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import os,pathlib,stat,sys
+          assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          root=pathlib.Path(os.environ['CAPSULE_ROOT']);path=root/'source/prepare_canonical_app_image.py'
+          fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+          identity=lambda q:(q.st_dev,q.st_ino,q.st_mode,q.st_uid,q.st_gid,q.st_nlink,q.st_size,q.st_mtime_ns,q.st_ctime_ns)
+          try:
+              before=os.fstat(fd)
+              assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1
+              assert stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=131072
+              raw=os.pread(fd,before.st_size+1,0)
+              assert len(raw)==before.st_size and sha256(raw).hexdigest()==os.environ['BUILDER_SHA256']
+              before=identity(before);assert before==identity(os.fstat(fd))==identity(path.lstat())
+              sys.argv=[str(path),'build','--root',str(root)]
+              try:exec(compile(raw,str(path),'exec'),{'__name__':'__main__','__file__':str(path)})
+              finally:
+                  assert before==identity(os.fstat(fd))==identity(path.lstat()) and os.pread(fd,len(raw)+1,0)==raw
+          finally:os.close(fd)
+          PY
+
+      - name: Preserve every raw vulnerability on the exact built image
+        id: vulnerabilities
+        if: always() && steps.build.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.build.outputs.image_id }}
+          cache-dir: ${{ steps.prepare.outputs.root }}/trivy-cache
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: ${{ steps.prepare.outputs.root }}/reports/vulnerabilities.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '0'
+          trivy-config: ${{ steps.prepare.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Preserve the actual SBOM of that same image
+        id: sbom
+        if: always() && steps.build.outcome == 'success'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.build.outputs.image_id }}
+          cache-dir: ${{ steps.prepare.outputs.root }}/trivy-cache
+          format: cyclonedx
+          output: ${{ steps.prepare.outputs.root }}/reports/sbom.cdx.json
+          trivy-config: ${{ steps.prepare.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+
+      - name: Bind raw reports and export the same unaccepted App image
+        id: finalize
+        if: always() && steps.build.outcome == 'success' && steps.vulnerabilities.outcome == 'success' && steps.sbom.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.prepare.outputs.root }}
+          BUILDER_SHA256: ${{ steps.prepare.outputs.helper_sha256 }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import os,pathlib,stat,sys
+          assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          root=pathlib.Path(os.environ['CAPSULE_ROOT']);path=root/'source/prepare_canonical_app_image.py'
+          fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+          identity=lambda q:(q.st_dev,q.st_ino,q.st_mode,q.st_uid,q.st_gid,q.st_nlink,q.st_size,q.st_mtime_ns,q.st_ctime_ns)
+          try:
+              before=os.fstat(fd)
+              assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1
+              assert stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=131072
+              raw=os.pread(fd,before.st_size+1,0)
+              assert len(raw)==before.st_size and sha256(raw).hexdigest()==os.environ['BUILDER_SHA256']
+              before=identity(before);assert before==identity(os.fstat(fd))==identity(path.lstat())
+              sys.argv=[str(path),'finalize','--root',str(root)]
+              try:exec(compile(raw,str(path),'exec'),{'__name__':'__main__','__file__':str(path)})
+              finally:
+                  assert before==identity(os.fstat(fd))==identity(path.lstat()) and os.pread(fd,len(raw)+1,0)==raw
+          finally:os.close(fd)
+          PY
+
+      - name: Preserve the complete unaccepted App image export
+        if: always() && steps.finalize.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-app-image-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ steps.prepare.outputs.root }}/candidate-image.tar.gz
+            ${{ steps.prepare.outputs.root }}/image-export.json
+
+      - name: Preserve public build and scan evidence including failed attempts
+        if: always() && steps.prepare.outputs.root != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-app-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            ${{ steps.prepare.outputs.root }}/source-identity.json
+            ${{ steps.prepare.outputs.root }}/input-manifest.json
+            ${{ steps.prepare.outputs.root }}/image-build.json
+            ${{ steps.prepare.outputs.root }}/prepare.json
+            ${{ steps.prepare.outputs.root }}/finalize.json
+            ${{ steps.prepare.outputs.root }}/reports/*.json
+
+      - name: Enforce the strict raw HIGH and CRITICAL gate after preserving evidence
+        if: always() && steps.finalize.outcome == 'success'
+        env:
+          CAPSULE_ROOT: ${{ steps.prepare.outputs.root }}
+          BUILDER_SHA256: ${{ steps.prepare.outputs.helper_sha256 }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import os,pathlib,stat,sys
+          assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          root=pathlib.Path(os.environ['CAPSULE_ROOT']);path=root/'source/prepare_canonical_app_image.py'
+          fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+          identity=lambda q:(q.st_dev,q.st_ino,q.st_mode,q.st_uid,q.st_gid,q.st_nlink,q.st_size,q.st_mtime_ns,q.st_ctime_ns)
+          try:
+              before=os.fstat(fd)
+              assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1
+              assert stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=131072
+              raw=os.pread(fd,before.st_size+1,0)
+              assert len(raw)==before.st_size and sha256(raw).hexdigest()==os.environ['BUILDER_SHA256']
+              before=identity(before);assert before==identity(os.fstat(fd))==identity(path.lstat())
+              sys.argv=[str(path),'gate','--root',str(root)]
+              try:exec(compile(raw,str(path),'exec'),{'__name__':'__main__','__file__':str(path)})
+              finally:
+                  assert before==identity(os.fstat(fd))==identity(path.lstat()) and os.pread(fd,len(raw)+1,0)==raw
+          finally:os.close(fd)
+          PY

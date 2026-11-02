@@ -1,0 +1,108 @@
+name: Supported Alpine Redis 7.4.12 candidate
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  redis7412:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Seal only the public fixed recipe from this Main commit
+        id: seal
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+          import json,os,re,subprocess,tempfile
+          assert os.geteuid()==1001 and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          assert os.environ['GITHUB_REF']=='refs/heads/main' and os.environ['GITHUB_REPOSITORY']=='mohsenbarari/trading_bot'
+          commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
+          os.umask(0o077)
+          root=Path(tempfile.mkdtemp(prefix='redis7412-supported-',dir=os.environ['RUNNER_TEMP']))
+          (root/'context').mkdir(mode=0o700);(root/'controller').mkdir(mode=0o700);(root/'empty-trivy.yaml').write_text('{}\n')
+          prefix='deploy/security/redis7412-alpine324/';files=[]
+          for name,local in [('Dockerfile','context/Dockerfile'),('docker-entrypoint.sh','context/docker-entrypoint.sh'),('recipe.json','controller/recipe.json'),('build_candidate.py','controller/build_candidate.py')]:
+              operand=commit+':'+prefix+name
+              size=subprocess.run(['git','--no-optional-locks','cat-file','-s',operand],check=True,capture_output=True,timeout=10).stdout
+              assert re.fullmatch(rb'[1-9][0-9]{0,5}\n',size) and int(size)<=65536
+              raw=subprocess.run(['git','--no-optional-locks','cat-file','blob',operand],check=True,capture_output=True,timeout=10).stdout
+              assert len(raw)==int(size)
+              with (root/local).open('xb')as f:f.write(raw);f.flush();os.fsync(f.fileno())
+              (root/local).chmod(0o755 if name=='docker-entrypoint.sh' else 0o600)
+              files.append({'path':prefix+name,'local':local,'bytes':len(raw),'sha256':sha256(raw).hexdigest()})
+          (root/'source-files.json').write_text(json.dumps({'commit':commit,'run_id':int(os.environ['GITHUB_RUN_ID']),'run_attempt':int(os.environ['GITHUB_RUN_ATTEMPT']),'files':files},sort_keys=True)+'\n')
+          with Path(os.environ['GITHUB_OUTPUT']).open('a')as f:f.write('root='+str(root)+'\n')
+          PY
+      - name: Build only this supported Redis variant and inspect actual runtime
+        id: build
+        env:
+          CANDIDATE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CANDIDATE_ROOT/controller/build_candidate.py" build --root "$CANDIDATE_ROOT"
+      - name: Preserve all actual vulnerability findings
+        id: scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.build.outputs.image_id }}
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: ${{ steps.seal.outputs.root }}/reports/vulnerabilities.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '0'
+          trivy-config: ${{ steps.seal.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+      - name: Preserve the same image SBOM
+        id: sbom
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        env:
+          DOCKER_HOST: unix:///var/run/docker.sock
+          TRIVY_IGNOREFILE: /dev/null
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.build.outputs.image_id }}
+          format: cyclonedx
+          output: ${{ steps.seal.outputs.root }}/reports/sbom.cdx.json
+          trivy-config: ${{ steps.seal.outputs.root }}/empty-trivy.yaml
+          timeout: 15m
+      - name: Require supported OS and no unresolved High/Critical, then export
+        id: export
+        env:
+          CANDIDATE_ROOT: ${{ steps.seal.outputs.root }}
+        run: python3 -I -B "$CANDIDATE_ROOT/controller/build_candidate.py" finalize --root "$CANDIDATE_ROOT"
+      - name: Retain only a complete image export
+        if: always() && steps.export.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: redis7412-supported-alpine-image-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ steps.seal.outputs.root }}/candidate-image.tar.gz
+            ${{ steps.seal.outputs.root }}/image-export.json
+      - name: Preserve public source and raw evidence including failures
+        if: always() && steps.seal.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: redis7412-supported-alpine-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            ${{ steps.seal.outputs.root }}/source-files.json
+            ${{ steps.seal.outputs.root }}/context/Dockerfile
+            ${{ steps.seal.outputs.root }}/controller/recipe.json
+            ${{ steps.seal.outputs.root }}/build.json
+            ${{ steps.seal.outputs.root }}/image-export.json
+            ${{ steps.seal.outputs.root }}/reports/*.json
+            ${{ steps.seal.outputs.root }}/reports/*.txt
+            ${{ steps.seal.outputs.root }}/reports/*.log

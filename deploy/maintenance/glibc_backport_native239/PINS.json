@@ -1,0 +1,65 @@
+{
+  "schema": "glibc84243_source_recipe/1",
+  "files": {
+    "CVE-2026-84243-Ubuntu-Native-2.39-0ubuntu8.9-CANDIDATE.patch": {
+      "bytes": 5601,
+      "sha256": "acb5cc224712e831787ff641750a96e5b278607d699f7bac0df513403250eca6"
+    },
+    "TESTONLY-invalid-flags-58a31b43.patch": {
+      "bytes": 891,
+      "sha256": "af67420d44cedbbbc0e36940545326ae87c28875deda19e962d731d360a46e58"
+    },
+    "build_hosted.py": {
+      "bytes": 28234,
+      "sha256": "cd9d282caa63f4049e1d182ddb9a277df8008d87c48d65176221c0dbdf63ac22"
+    },
+    "host_io_original.py": {
+      "bytes": 53351,
+      "sha256": "fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82"
+    },
+    "host_ubuntu239.py": {
+      "bytes": 3751,
+      "sha256": "017f32b9b026b50203791d4bfeec3174e997fd36dd46013efc3c6c3472da673a"
+    },
+    "native239-original-XPASS-classification.json": {
+      "bytes": 15662,
+      "sha256": "e275c91e7e983fad217ccef6406f4a12bb95b90ac9508b94ace5e051f69be09f"
+    },
+    "native239_evidence.py": {
+      "bytes": 19713,
+      "sha256": "77498de9a46d5b605bc67bf1700db68accb2c60d35a9df47e549f0e6f2fcfdfb"
+    },
+    "profile239.py": {
+      "bytes": 5262,
+      "sha256": "420c3b55567fd93d200386b4572dfc143da1df8b5bc2114409babf2209c9f767"
+    },
+    "snapshot-public-isrg-root-x1.crt": {
+      "bytes": 1939,
+      "sha256": "22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1"
+    },
+    "source_io.py": {
+      "bytes": 8831,
+      "sha256": "b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568"
+    },
+    "sourcebuild.py": {
+      "bytes": 36239,
+      "sha256": "625922e422080cd91e113fae531bcbfd420005299cd5a9d7b3a5d4bbe7aa575b"
+    },
+    "vendor-tst-gettext-path-traversal.c": {
+      "bytes": 3336,
+      "sha256": "c732e301bbe037a6aa612f1452d7768d0bb3efd893f4fbf1d4d02e4651e2d3f6"
+    },
+    "vendor_merge_ledger.py": {
+      "bytes": 3279,
+      "sha256": "196aa4ffff91679f3cebf4537ed210387d38aa0226b27472a4ae1ee2758fd55d"
+    },
+    "verify_build.py": {
+      "bytes": 7275,
+      "sha256": "26140d57fb5aa6a02625199641eb32f793597d558d0b9fecab5582e522589ae8"
+    },
+    "worker_ubuntu239.py": {
+      "bytes": 3751,
+      "sha256": "988f438acbe0cf4e3ed439d889bfa3bc0557ffc148e38841c6b0768205e4c819"
+    }
+  }
+}

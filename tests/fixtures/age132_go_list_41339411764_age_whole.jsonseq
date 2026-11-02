@@ -1,0 +1,3477 @@
+{
+	"ImportPath": "internal/goarch",
+	"Name": "goarch",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "unsafe",
+	"Name": "unsafe",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "internal/abi",
+	"Name": "abi",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/goarch",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/unsafeheader",
+	"Name": "unsafeheader",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/cpu",
+	"Name": "cpu",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/bytealg",
+	"Name": "bytealg",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/cpu",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/byteorder",
+	"Name": "byteorder",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "internal/chacha8rand",
+	"Name": "chacha8rand",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/byteorder",
+		"internal/cpu",
+		"internal/goarch",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/coverage/rtcov",
+	"Name": "rtcov",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/godebugs",
+	"Name": "godebugs",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "internal/goexperiment",
+	"Name": "goexperiment",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "internal/goos",
+	"Name": "goos",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "internal/profilerecord",
+	"Name": "profilerecord",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "internal/runtime/atomic",
+	"Name": "atomic",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/goarch",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/runtime/syscall/linux",
+	"Name": "linux",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/goarch",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "math/bits",
+	"Name": "bits",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/strconv",
+	"Name": "strconv",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"math/bits",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/runtime/cgroup",
+	"Name": "cgroup",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/bytealg",
+		"internal/runtime/syscall/linux",
+		"internal/strconv",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/runtime/exithook",
+	"Name": "exithook",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/runtime/atomic",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/runtime/gc",
+	"Name": "gc",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/goarch"
+	]
+}
+{
+	"ImportPath": "internal/runtime/sys",
+	"Name": "sys",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/goarch",
+		"internal/goos"
+	]
+}
+{
+	"ImportPath": "internal/runtime/gc/scan",
+	"Name": "scan",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/cpu",
+		"internal/goarch",
+		"internal/runtime/gc",
+		"internal/runtime/sys",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/asan",
+	"Name": "asan",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/msan",
+	"Name": "msan",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/race",
+	"Name": "race",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/abi",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/runtime/math",
+	"Name": "math",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/goarch"
+	]
+}
+{
+	"ImportPath": "internal/runtime/maps",
+	"Name": "maps",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/abi",
+		"internal/asan",
+		"internal/byteorder",
+		"internal/cpu",
+		"internal/goarch",
+		"internal/goexperiment",
+		"internal/msan",
+		"internal/race",
+		"internal/runtime/math",
+		"internal/runtime/sys",
+		"math/bits",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/runtime/pprof/label",
+	"Name": "label",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "internal/stringslite",
+	"Name": "stringslite",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/bytealg",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/trace/tracev2",
+	"Name": "tracev2",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "runtime",
+	"Name": "runtime",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/abi",
+		"internal/bytealg",
+		"internal/byteorder",
+		"internal/chacha8rand",
+		"internal/coverage/rtcov",
+		"internal/cpu",
+		"internal/goarch",
+		"internal/godebugs",
+		"internal/goexperiment",
+		"internal/goos",
+		"internal/profilerecord",
+		"internal/runtime/atomic",
+		"internal/runtime/cgroup",
+		"internal/runtime/exithook",
+		"internal/runtime/gc",
+		"internal/runtime/gc/scan",
+		"internal/runtime/maps",
+		"internal/runtime/math",
+		"internal/runtime/pprof/label",
+		"internal/runtime/sys",
+		"internal/runtime/syscall/linux",
+		"internal/strconv",
+		"internal/stringslite",
+		"internal/trace/tracev2",
+		"math/bits",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/reflectlite",
+	"Name": "reflectlite",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/abi",
+		"internal/goarch",
+		"internal/unsafeheader",
+		"runtime",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "errors",
+	"Name": "errors",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/reflectlite",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "sync/atomic",
+	"Name": "atomic",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/sync",
+	"Name": "sync",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/abi",
+		"internal/goarch",
+		"internal/race",
+		"sync/atomic",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/synctest",
+	"Name": "synctest",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/abi",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "sync",
+	"Name": "sync",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/race",
+		"internal/runtime/atomic",
+		"internal/sync",
+		"internal/synctest",
+		"runtime",
+		"sync/atomic",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "io",
+	"Name": "io",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"sync"
+	]
+}
+{
+	"ImportPath": "iter",
+	"Name": "iter",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/race",
+		"runtime",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "unicode",
+	"Name": "unicode",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "unicode/utf8",
+	"Name": "utf8",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "bytes",
+	"Name": "bytes",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/bytealg",
+		"io",
+		"iter",
+		"math/bits",
+		"unicode",
+		"unicode/utf8",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "strings",
+	"Name": "strings",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/abi",
+		"internal/bytealg",
+		"internal/stringslite",
+		"io",
+		"iter",
+		"math/bits",
+		"sync",
+		"unicode",
+		"unicode/utf8",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "bufio",
+	"Name": "bufio",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"errors",
+		"io",
+		"strings",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "hash",
+	"Name": "hash",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"io"
+	]
+}
+{
+	"ImportPath": "strconv",
+	"Name": "strconv",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/bytealg",
+		"internal/strconv",
+		"internal/stringslite",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "crypto",
+	"Name": "crypto",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"hash",
+		"io",
+		"strconv"
+	]
+}
+{
+	"ImportPath": "internal/bisect",
+	"Name": "bisect",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"runtime",
+		"sync",
+		"sync/atomic"
+	]
+}
+{
+	"ImportPath": "internal/godebug",
+	"Name": "godebug",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/bisect",
+		"internal/godebugs",
+		"sync",
+		"sync/atomic",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140deps/godebug",
+	"Name": "godebug",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/godebug"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140",
+	"Name": "fips140",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140deps/godebug",
+		"errors",
+		"runtime",
+		"strings",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/alias",
+	"Name": "alias",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140deps/byteorder",
+	"Name": "byteorder",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/byteorder"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140deps/cpu",
+	"Name": "cpu",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/cpu",
+		"internal/goarch"
+	]
+}
+{
+	"ImportPath": "crypto/internal/impl",
+	"Name": "impl",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"strings"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/sha256",
+	"Name": "sha256",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140deps/byteorder",
+		"crypto/internal/fips140deps/cpu",
+		"crypto/internal/impl",
+		"errors",
+		"hash",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "crypto/internal/constanttime",
+	"Name": "constanttime",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "crypto/internal/fips140/subtle",
+	"Name": "subtle",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/constanttime",
+		"crypto/internal/fips140/alias",
+		"crypto/internal/fips140deps/byteorder",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/sha3",
+	"Name": "sha3",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/subtle",
+		"crypto/internal/fips140deps/byteorder",
+		"crypto/internal/fips140deps/cpu",
+		"errors",
+		"math/bits",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/sha512",
+	"Name": "sha512",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140deps/byteorder",
+		"crypto/internal/fips140deps/cpu",
+		"crypto/internal/impl",
+		"errors",
+		"hash",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/hmac",
+	"Name": "hmac",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/sha256",
+		"crypto/internal/fips140/sha3",
+		"crypto/internal/fips140/sha512",
+		"errors",
+		"hash"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/check",
+	"Name": "check",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/hmac",
+		"crypto/internal/fips140/sha256",
+		"crypto/internal/fips140deps/byteorder",
+		"crypto/internal/fips140deps/godebug",
+		"io",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/aes",
+	"Name": "aes",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/alias",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/subtle",
+		"crypto/internal/fips140deps/byteorder",
+		"crypto/internal/fips140deps/cpu",
+		"crypto/internal/fips140deps/godebug",
+		"crypto/internal/impl",
+		"errors",
+		"math/bits",
+		"strconv"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140deps/time",
+	"Name": "time",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/entropy/v1.0.0",
+	"Name": "entropy",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140deps/time",
+		"errors",
+		"math/bits",
+		"sync/atomic",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/oserror",
+	"Name": "oserror",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors"
+	]
+}
+{
+	"ImportPath": "cmp",
+	"Name": "cmp",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "slices",
+	"Name": "slices",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"cmp",
+		"iter",
+		"math/bits",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "syscall",
+	"Name": "syscall",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/asan",
+		"internal/bytealg",
+		"internal/byteorder",
+		"internal/goarch",
+		"internal/msan",
+		"internal/oserror",
+		"internal/race",
+		"internal/runtime/syscall/linux",
+		"internal/strconv",
+		"runtime",
+		"slices",
+		"sync",
+		"sync/atomic",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/syscall/unix",
+	"Name": "unix",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/strconv",
+		"runtime",
+		"sync/atomic",
+		"syscall",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "math",
+	"Name": "math",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/cpu",
+		"math/bits",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "path",
+	"Name": "path",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/bytealg",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "time",
+	"Name": "time",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/bytealg",
+		"internal/stringslite",
+		"math/bits",
+		"runtime",
+		"sync",
+		"syscall",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "io/fs",
+	"Name": "fs",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/bytealg",
+		"internal/oserror",
+		"io",
+		"path",
+		"slices",
+		"time",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "internal/filepathlite",
+	"Name": "filepathlite",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/bytealg",
+		"internal/stringslite",
+		"io/fs",
+		"slices"
+	]
+}
+{
+	"ImportPath": "internal/poll",
+	"Name": "poll",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/strconv",
+		"internal/syscall/unix",
+		"io",
+		"runtime",
+		"sync",
+		"sync/atomic",
+		"syscall",
+		"time",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/syscall/execenv",
+	"Name": "execenv",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"syscall"
+	]
+}
+{
+	"ImportPath": "internal/testlog",
+	"Name": "testlog",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"sync",
+		"sync/atomic",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "os",
+	"Name": "os",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/bytealg",
+		"internal/byteorder",
+		"internal/filepathlite",
+		"internal/goarch",
+		"internal/poll",
+		"internal/strconv",
+		"internal/stringslite",
+		"internal/syscall/execenv",
+		"internal/syscall/unix",
+		"internal/testlog",
+		"io",
+		"io/fs",
+		"runtime",
+		"slices",
+		"sync",
+		"sync/atomic",
+		"syscall",
+		"time",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/sysrand",
+	"Name": "sysrand",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/syscall/unix",
+		"math",
+		"os",
+		"runtime",
+		"sync",
+		"sync/atomic",
+		"syscall",
+		"time",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/drbg",
+	"Name": "drbg",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/entropy/v1.0.0",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/aes",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/subtle",
+		"crypto/internal/fips140deps/byteorder",
+		"crypto/internal/sysrand",
+		"errors",
+		"io",
+		"math/bits",
+		"sync",
+		"sync/atomic"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/aes/gcm",
+	"Name": "gcm",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/aes",
+		"crypto/internal/fips140/alias",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/drbg",
+		"crypto/internal/fips140/subtle",
+		"crypto/internal/fips140deps/byteorder",
+		"crypto/internal/fips140deps/cpu",
+		"crypto/internal/impl",
+		"errors",
+		"math"
+	]
+}
+{
+	"ImportPath": "crypto/fips140",
+	"Name": "fips140",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/check",
+		"internal/godebug",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140only",
+	"Name": "fips140only",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/fips140",
+		"crypto/internal/fips140/drbg",
+		"crypto/internal/fips140/sha256",
+		"crypto/internal/fips140/sha3",
+		"crypto/internal/fips140/sha512",
+		"hash",
+		"io"
+	]
+}
+{
+	"ImportPath": "crypto/subtle",
+	"Name": "subtle",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/constanttime",
+		"crypto/internal/fips140/subtle",
+		"internal/runtime/sys",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/cipher",
+	"Name": "cipher",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140/aes",
+		"crypto/internal/fips140/aes/gcm",
+		"crypto/internal/fips140/alias",
+		"crypto/internal/fips140only",
+		"crypto/subtle",
+		"errors",
+		"internal/byteorder",
+		"io"
+	]
+}
+{
+	"ImportPath": "crypto/internal/boring/sig",
+	"Name": "sig",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "crypto/internal/boring",
+	"Name": "boring",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/cipher",
+		"crypto/internal/boring/sig",
+		"hash"
+	]
+}
+{
+	"ImportPath": "crypto/sha3",
+	"Name": "sha3",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/internal/fips140/sha3",
+		"hash",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140hash",
+	"Name": "fips140hash",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140/sha3",
+		"crypto/sha3",
+		"hash",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/hmac",
+	"Name": "hmac",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/boring",
+		"crypto/internal/fips140/hmac",
+		"crypto/internal/fips140hash",
+		"crypto/internal/fips140only",
+		"crypto/subtle",
+		"hash"
+	]
+}
+{
+	"ImportPath": "math/rand/v2",
+	"Name": "rand",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/byteorder",
+		"internal/chacha8rand",
+		"math",
+		"math/bits",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/randutil",
+	"Name": "randutil",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"io",
+		"math/rand/v2"
+	]
+}
+{
+	"ImportPath": "crypto/internal/rand",
+	"Name": "rand",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/boring",
+		"crypto/internal/fips140/drbg",
+		"crypto/internal/randutil",
+		"internal/godebug",
+		"io",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "reflect",
+	"Name": "reflect",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/abi",
+		"internal/bytealg",
+		"internal/goarch",
+		"internal/goexperiment",
+		"internal/race",
+		"internal/runtime/maps",
+		"internal/runtime/sys",
+		"internal/strconv",
+		"internal/unsafeheader",
+		"iter",
+		"math",
+		"runtime",
+		"strconv",
+		"sync",
+		"unicode",
+		"unicode/utf8",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "internal/fmtsort",
+	"Name": "fmtsort",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"cmp",
+		"reflect",
+		"slices"
+	]
+}
+{
+	"ImportPath": "fmt",
+	"Name": "fmt",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/fmtsort",
+		"internal/stringslite",
+		"io",
+		"math",
+		"os",
+		"reflect",
+		"slices",
+		"strconv",
+		"sync",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "math/rand",
+	"Name": "rand",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/godebug",
+		"math",
+		"sync",
+		"sync/atomic",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "math/big",
+	"Name": "big",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"errors",
+		"fmt",
+		"internal/byteorder",
+		"internal/cpu",
+		"io",
+		"math",
+		"math/bits",
+		"math/rand",
+		"slices",
+		"strconv",
+		"strings",
+		"sync",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/rand",
+	"Name": "rand",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/boring",
+		"crypto/internal/fips140/drbg",
+		"crypto/internal/fips140only",
+		"crypto/internal/rand",
+		"errors",
+		"io",
+		"math/big",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/sha256",
+	"Name": "sha256",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/internal/boring",
+		"crypto/internal/fips140/sha256",
+		"hash"
+	]
+}
+{
+	"ImportPath": "encoding/hex",
+	"Name": "hex",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"fmt",
+		"io",
+		"slices",
+		"strings"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/internal/bech32",
+	"Name": "bech32",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"fmt",
+		"strings"
+	]
+}
+{
+	"ImportPath": "encoding/base64",
+	"Name": "base64",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/byteorder",
+		"io",
+		"slices",
+		"strconv"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/internal/format",
+	"Name": "format",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"bufio",
+		"bytes",
+		"encoding/base64",
+		"errors",
+		"fmt",
+		"io",
+		"strings"
+	]
+}
+{
+	"ImportPath": "encoding/binary",
+	"Name": "binary",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"io",
+		"math",
+		"reflect",
+		"slices",
+		"sync"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/internal/alias",
+	"Name": "alias",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/chacha20",
+	"Name": "chacha20",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/cipher",
+		"encoding/binary",
+		"errors",
+		"golang.org/x/crypto/internal/alias",
+		"math/bits",
+		"runtime"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/internal/poly1305",
+	"Name": "poly1305",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/subtle",
+		"encoding/binary",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "golang.org/x/sys/cpu",
+	"Name": "cpu",
+	"Module": {
+		"Path": "golang.org/x/sys",
+		"Version": "v0.49.0",
+		"Time": "2026-10-06T18:35:47Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/sys@v0.49.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/sys/@v/v0.49.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=",
+		"GoModSum": "h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"os",
+		"runtime",
+		"strconv",
+		"strings",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/chacha20poly1305",
+	"Name": "chacha20poly1305",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/cipher",
+		"crypto/fips140",
+		"encoding/binary",
+		"errors",
+		"golang.org/x/crypto/chacha20",
+		"golang.org/x/crypto/internal/alias",
+		"golang.org/x/crypto/internal/poly1305",
+		"golang.org/x/sys/cpu"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/internal/stream",
+	"Name": "stream",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"bytes",
+		"crypto/cipher",
+		"encoding/binary",
+		"errors",
+		"fmt",
+		"golang.org/x/crypto/chacha20poly1305",
+		"io",
+		"math",
+		"sync/atomic"
+	]
+}
+{
+	"ImportPath": "crypto/aes",
+	"Name": "aes",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/cipher",
+		"crypto/internal/boring",
+		"crypto/internal/fips140/aes",
+		"strconv"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/hkdf",
+	"Name": "hkdf",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/hmac",
+		"crypto/internal/fips140/sha256",
+		"errors",
+		"hash"
+	]
+}
+{
+	"ImportPath": "crypto/hkdf",
+	"Name": "hkdf",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140/hkdf",
+		"crypto/internal/fips140hash",
+		"crypto/internal/fips140only",
+		"errors",
+		"hash"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/mlkem",
+	"Name": "mlkem",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/drbg",
+		"crypto/internal/fips140/sha256",
+		"crypto/internal/fips140/sha3",
+		"crypto/internal/fips140/subtle",
+		"crypto/internal/fips140deps/byteorder",
+		"errors",
+		"sync"
+	]
+}
+{
+	"ImportPath": "crypto/mlkem",
+	"Name": "mlkem",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/internal/fips140/mlkem"
+	]
+}
+{
+	"ImportPath": "crypto/sha512",
+	"Name": "sha512",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/internal/boring",
+		"crypto/internal/fips140/sha512",
+		"hash"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/nistec/fiat",
+	"Name": "fiat",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/subtle",
+		"errors",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/nistec",
+	"Name": "nistec",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/constanttime",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/nistec/fiat",
+		"crypto/internal/fips140deps/byteorder",
+		"errors",
+		"math/bits",
+		"runtime",
+		"sync",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/ecdh",
+	"Name": "ecdh",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/drbg",
+		"crypto/internal/fips140/nistec",
+		"crypto/internal/fips140deps/byteorder",
+		"errors",
+		"io",
+		"math/bits",
+		"sync"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/edwards25519/field",
+	"Name": "field",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/subtle",
+		"crypto/internal/fips140deps/byteorder",
+		"errors",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "crypto/ecdh",
+	"Name": "ecdh",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto",
+		"crypto/internal/boring",
+		"crypto/internal/fips140/ecdh",
+		"crypto/internal/fips140/edwards25519/field",
+		"crypto/internal/fips140only",
+		"crypto/internal/rand",
+		"crypto/subtle",
+		"errors",
+		"io"
+	]
+}
+{
+	"ImportPath": "filippo.io/hpke/crypto",
+	"Name": "crypto",
+	"Module": {
+		"Path": "filippo.io/hpke",
+		"Version": "v0.4.0",
+		"Time": "2025-12-05T14:43:42Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/filippo.io/hpke@v0.4.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/filippo.io/hpke/@v/v0.4.0.mod",
+		"GoVersion": "1.24.0",
+		"Sum": "h1:p575VVQ6ted4pL+it6M00V/f2qTZITO0zgmdKCkd5+A=",
+		"GoModSum": "h1:EmAN849/P3qdeK+PCMkDpDm83vRHM5cDipBJ8xbQLVY="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/ecdh",
+		"crypto/mlkem"
+	]
+}
+{
+	"ImportPath": "filippo.io/hpke/crypto/ecdh",
+	"Name": "ecdh",
+	"Module": {
+		"Path": "filippo.io/hpke",
+		"Version": "v0.4.0",
+		"Time": "2025-12-05T14:43:42Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/filippo.io/hpke@v0.4.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/filippo.io/hpke/@v/v0.4.0.mod",
+		"GoVersion": "1.24.0",
+		"Sum": "h1:p575VVQ6ted4pL+it6M00V/f2qTZITO0zgmdKCkd5+A=",
+		"GoModSum": "h1:EmAN849/P3qdeK+PCMkDpDm83vRHM5cDipBJ8xbQLVY="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/ecdh"
+	]
+}
+{
+	"ImportPath": "filippo.io/hpke/internal/byteorder",
+	"Name": "byteorder",
+	"Module": {
+		"Path": "filippo.io/hpke",
+		"Version": "v0.4.0",
+		"Time": "2025-12-05T14:43:42Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/filippo.io/hpke@v0.4.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/filippo.io/hpke/@v/v0.4.0.mod",
+		"GoVersion": "1.24.0",
+		"Sum": "h1:p575VVQ6ted4pL+it6M00V/f2qTZITO0zgmdKCkd5+A=",
+		"GoModSum": "h1:EmAN849/P3qdeK+PCMkDpDm83vRHM5cDipBJ8xbQLVY="
+	},
+	"DepOnly": true
+}
+{
+	"ImportPath": "filippo.io/hpke",
+	"Name": "hpke",
+	"Module": {
+		"Path": "filippo.io/hpke",
+		"Version": "v0.4.0",
+		"Time": "2025-12-05T14:43:42Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/filippo.io/hpke@v0.4.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/filippo.io/hpke/@v/v0.4.0.mod",
+		"GoVersion": "1.24.0",
+		"Sum": "h1:p575VVQ6ted4pL+it6M00V/f2qTZITO0zgmdKCkd5+A=",
+		"GoModSum": "h1:EmAN849/P3qdeK+PCMkDpDm83vRHM5cDipBJ8xbQLVY="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/aes",
+		"crypto/cipher",
+		"crypto/hkdf",
+		"crypto/mlkem",
+		"crypto/rand",
+		"crypto/sha256",
+		"crypto/sha3",
+		"crypto/sha512",
+		"errors",
+		"filippo.io/hpke/crypto",
+		"filippo.io/hpke/crypto/ecdh",
+		"filippo.io/hpke/internal/byteorder",
+		"fmt",
+		"golang.org/x/crypto/chacha20poly1305",
+		"hash"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/curve25519",
+	"Name": "curve25519",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/ecdh"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/hkdf",
+	"Name": "hkdf",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/hkdf",
+		"crypto/hmac",
+		"errors",
+		"hash",
+		"io"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/pbkdf2",
+	"Name": "pbkdf2",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/hmac",
+		"crypto/internal/fips140/sha256",
+		"errors",
+		"hash"
+	]
+}
+{
+	"ImportPath": "crypto/pbkdf2",
+	"Name": "pbkdf2",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140/pbkdf2",
+		"crypto/internal/fips140hash",
+		"crypto/internal/fips140only",
+		"errors",
+		"hash"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/pbkdf2",
+	"Name": "pbkdf2",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/pbkdf2",
+		"hash"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/scrypt",
+	"Name": "scrypt",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/sha256",
+		"encoding/binary",
+		"errors",
+		"golang.org/x/crypto/pbkdf2",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "sort",
+	"Name": "sort",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/reflectlite",
+		"math/bits",
+		"slices"
+	]
+}
+{
+	"ImportPath": "regexp/syntax",
+	"Name": "syntax",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"slices",
+		"sort",
+		"strconv",
+		"strings",
+		"sync",
+		"unicode",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "regexp",
+	"Name": "regexp",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"io",
+		"iter",
+		"regexp/syntax",
+		"slices",
+		"strconv",
+		"strings",
+		"sync",
+		"unicode",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "filippo.io/age",
+	"Name": "age",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"bufio",
+		"bytes",
+		"crypto/hmac",
+		"crypto/rand",
+		"crypto/sha256",
+		"encoding/hex",
+		"errors",
+		"filippo.io/age/internal/bech32",
+		"filippo.io/age/internal/format",
+		"filippo.io/age/internal/stream",
+		"filippo.io/hpke",
+		"fmt",
+		"golang.org/x/crypto/chacha20poly1305",
+		"golang.org/x/crypto/curve25519",
+		"golang.org/x/crypto/hkdf",
+		"golang.org/x/crypto/scrypt",
+		"io",
+		"regexp",
+		"slices",
+		"sort",
+		"strconv",
+		"strings",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/edwards25519",
+	"Name": "edwards25519",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/constanttime",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/edwards25519/field",
+		"crypto/internal/fips140deps/byteorder",
+		"errors",
+		"math/bits",
+		"sync"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/ed25519",
+	"Name": "ed25519",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/drbg",
+		"crypto/internal/fips140/edwards25519",
+		"crypto/internal/fips140/sha512",
+		"errors",
+		"strconv",
+		"sync"
+	]
+}
+{
+	"ImportPath": "weak",
+	"Name": "weak",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/abi",
+		"runtime",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140cache",
+	"Name": "fips140cache",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"runtime",
+		"sync",
+		"weak"
+	]
+}
+{
+	"ImportPath": "crypto/ed25519",
+	"Name": "ed25519",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/internal/fips140/ed25519",
+		"crypto/internal/fips140cache",
+		"crypto/internal/fips140only",
+		"crypto/internal/rand",
+		"crypto/rand",
+		"crypto/subtle",
+		"errors",
+		"internal/godebug",
+		"io",
+		"strconv"
+	]
+}
+{
+	"ImportPath": "crypto/internal/boring/bbig",
+	"Name": "bbig",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/boring",
+		"math/big",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/bigmod",
+	"Name": "bigmod",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140deps/byteorder",
+		"crypto/internal/fips140deps/cpu",
+		"crypto/internal/impl",
+		"errors",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/rsa",
+	"Name": "rsa",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/constanttime",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/bigmod",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/drbg",
+		"crypto/internal/fips140/sha256",
+		"crypto/internal/fips140/sha3",
+		"crypto/internal/fips140/sha512",
+		"crypto/internal/fips140/subtle",
+		"errors",
+		"hash",
+		"io",
+		"sync"
+	]
+}
+{
+	"ImportPath": "crypto/rsa",
+	"Name": "rsa",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/internal/boring",
+		"crypto/internal/boring/bbig",
+		"crypto/internal/fips140/bigmod",
+		"crypto/internal/fips140/rsa",
+		"crypto/internal/fips140hash",
+		"crypto/internal/fips140only",
+		"crypto/internal/rand",
+		"crypto/rand",
+		"crypto/subtle",
+		"errors",
+		"fmt",
+		"hash",
+		"internal/godebug",
+		"io",
+		"math",
+		"math/big"
+	]
+}
+{
+	"ImportPath": "filippo.io/edwards25519/field",
+	"Name": "field",
+	"Module": {
+		"Path": "filippo.io/edwards25519",
+		"Version": "v1.2.0",
+		"Time": "2026-02-17T17:23:26Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/filippo.io/edwards25519@v1.2.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/filippo.io/edwards25519/@v/v1.2.0.mod",
+		"GoVersion": "1.24.0",
+		"Sum": "h1:crnVqOiS4jqYleHd9vaKZ+HKtHfllngJIiOpNpoJsjo=",
+		"GoModSum": "h1:xzAOLCNug/yB62zG1bQ8uziwrIqIuxhctzJT18Q77mc="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/subtle",
+		"encoding/binary",
+		"errors",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "filippo.io/edwards25519",
+	"Name": "edwards25519",
+	"Module": {
+		"Path": "filippo.io/edwards25519",
+		"Version": "v1.2.0",
+		"Time": "2026-02-17T17:23:26Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/filippo.io/edwards25519@v1.2.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/filippo.io/edwards25519/@v/v1.2.0.mod",
+		"GoVersion": "1.24.0",
+		"Sum": "h1:crnVqOiS4jqYleHd9vaKZ+HKtHfllngJIiOpNpoJsjo=",
+		"GoModSum": "h1:xzAOLCNug/yB62zG1bQ8uziwrIqIuxhctzJT18Q77mc="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/subtle",
+		"encoding/binary",
+		"errors",
+		"filippo.io/edwards25519/field",
+		"math/bits",
+		"slices",
+		"sync"
+	]
+}
+{
+	"ImportPath": "context",
+	"Name": "context",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/reflectlite",
+		"sync",
+		"sync/atomic",
+		"time"
+	]
+}
+{
+	"ImportPath": "crypto/des",
+	"Name": "des",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/cipher",
+		"crypto/internal/fips140/alias",
+		"crypto/internal/fips140only",
+		"errors",
+		"internal/byteorder",
+		"strconv",
+		"sync"
+	]
+}
+{
+	"ImportPath": "crypto/dsa",
+	"Name": "dsa",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140only",
+		"crypto/internal/rand",
+		"errors",
+		"io",
+		"math/big"
+	]
+}
+{
+	"ImportPath": "crypto/elliptic",
+	"Name": "elliptic",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140/nistec",
+		"errors",
+		"io",
+		"math/big",
+		"sync"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/ecdsa",
+	"Name": "ecdsa",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/bigmod",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/drbg",
+		"crypto/internal/fips140/hmac",
+		"crypto/internal/fips140/nistec",
+		"crypto/internal/fips140/sha512",
+		"errors",
+		"hash",
+		"io",
+		"math/bits",
+		"sync"
+	]
+}
+{
+	"ImportPath": "internal/saferio",
+	"Name": "saferio",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"io",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "unicode/utf16",
+	"Name": "utf16",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "encoding/asn1",
+	"Name": "asn1",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"errors",
+		"fmt",
+		"internal/saferio",
+		"math",
+		"math/big",
+		"reflect",
+		"runtime",
+		"slices",
+		"strconv",
+		"strings",
+		"time",
+		"unicode/utf16",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "vendor/golang.org/x/crypto/cryptobyte/asn1",
+	"Name": "asn1",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "vendor/golang.org/x/crypto/cryptobyte",
+	"Name": "cryptobyte",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"encoding/asn1",
+		"errors",
+		"fmt",
+		"vendor/golang.org/x/crypto/cryptobyte/asn1",
+		"math/big",
+		"reflect",
+		"time"
+	],
+	"ImportMap": {
+		"golang.org/x/crypto/cryptobyte/asn1": "vendor/golang.org/x/crypto/cryptobyte/asn1"
+	}
+}
+{
+	"ImportPath": "crypto/ecdsa",
+	"Name": "ecdsa",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/ecdh",
+		"crypto/elliptic",
+		"crypto/internal/boring",
+		"crypto/internal/boring/bbig",
+		"crypto/internal/fips140/ecdsa",
+		"crypto/internal/fips140/nistec",
+		"crypto/internal/fips140cache",
+		"crypto/internal/fips140hash",
+		"crypto/internal/fips140only",
+		"crypto/internal/rand",
+		"crypto/sha512",
+		"crypto/subtle",
+		"errors",
+		"vendor/golang.org/x/crypto/cryptobyte",
+		"vendor/golang.org/x/crypto/cryptobyte/asn1",
+		"io",
+		"math/big",
+		"math/rand/v2"
+	],
+	"ImportMap": {
+		"golang.org/x/crypto/cryptobyte": "vendor/golang.org/x/crypto/cryptobyte",
+		"golang.org/x/crypto/cryptobyte/asn1": "vendor/golang.org/x/crypto/cryptobyte/asn1"
+	}
+}
+{
+	"ImportPath": "crypto/md5",
+	"Name": "md5",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/internal/fips140only",
+		"errors",
+		"hash",
+		"internal/byteorder",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "crypto/internal/fips140/mldsa",
+	"Name": "mldsa",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto/internal/constanttime",
+		"crypto/internal/fips140",
+		"crypto/internal/fips140/check",
+		"crypto/internal/fips140/drbg",
+		"crypto/internal/fips140/sha256",
+		"crypto/internal/fips140/sha3",
+		"crypto/internal/fips140/subtle",
+		"crypto/internal/fips140deps/byteorder",
+		"errors",
+		"math/bits",
+		"sync"
+	]
+}
+{
+	"ImportPath": "crypto/mldsa",
+	"Name": "mldsa",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/internal/fips140/mldsa",
+		"errors",
+		"io"
+	]
+}
+{
+	"ImportPath": "crypto/rc4",
+	"Name": "rc4",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto/internal/fips140/alias",
+		"crypto/internal/fips140only",
+		"errors",
+		"strconv"
+	]
+}
+{
+	"ImportPath": "crypto/sha1",
+	"Name": "sha1",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"crypto",
+		"crypto/internal/boring",
+		"crypto/internal/fips140only",
+		"crypto/internal/impl",
+		"errors",
+		"hash",
+		"internal/byteorder",
+		"internal/cpu",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "crypto/x509/pkix",
+	"Name": "pkix",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"encoding/asn1",
+		"encoding/hex",
+		"fmt",
+		"math/big",
+		"strings",
+		"time"
+	]
+}
+{
+	"ImportPath": "encoding/pem",
+	"Name": "pem",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"encoding/base64",
+		"errors",
+		"io",
+		"slices",
+		"strings"
+	]
+}
+{
+	"ImportPath": "maps",
+	"Name": "maps",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"iter",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "vendor/golang.org/x/net/dns/dnsmessage",
+	"Name": "dnsmessage",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"slices"
+	]
+}
+{
+	"ImportPath": "internal/nettrace",
+	"Name": "nettrace",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "internal/singleflight",
+	"Name": "singleflight",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"sync"
+	]
+}
+{
+	"ImportPath": "unique",
+	"Name": "unique",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"internal/abi",
+		"internal/goarch",
+		"internal/stringslite",
+		"internal/sync",
+		"runtime",
+		"sync",
+		"sync/atomic",
+		"unsafe",
+		"weak"
+	]
+}
+{
+	"ImportPath": "net/netip",
+	"Name": "netip",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"cmp",
+		"errors",
+		"internal/bytealg",
+		"internal/byteorder",
+		"math",
+		"math/bits",
+		"strconv",
+		"unique"
+	]
+}
+{
+	"ImportPath": "net",
+	"Name": "net",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"cmp",
+		"context",
+		"errors",
+		"vendor/golang.org/x/net/dns/dnsmessage",
+		"internal/bytealg",
+		"internal/godebug",
+		"internal/nettrace",
+		"internal/poll",
+		"internal/singleflight",
+		"internal/strconv",
+		"internal/stringslite",
+		"internal/syscall/unix",
+		"io",
+		"io/fs",
+		"net/netip",
+		"os",
+		"runtime",
+		"slices",
+		"sync",
+		"sync/atomic",
+		"syscall",
+		"time",
+		"unsafe"
+	],
+	"ImportMap": {
+		"golang.org/x/net/dns/dnsmessage": "vendor/golang.org/x/net/dns/dnsmessage"
+	}
+}
+{
+	"ImportPath": "net/url",
+	"Name": "url",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"errors",
+		"fmt",
+		"internal/godebug",
+		"net/netip",
+		"path",
+		"slices",
+		"strconv",
+		"strings",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "path/filepath",
+	"Name": "filepath",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"internal/bytealg",
+		"internal/filepathlite",
+		"io/fs",
+		"os",
+		"runtime",
+		"slices",
+		"strings",
+		"syscall",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "crypto/x509",
+	"Name": "x509",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"crypto",
+		"crypto/aes",
+		"crypto/cipher",
+		"crypto/des",
+		"crypto/dsa",
+		"crypto/ecdh",
+		"crypto/ecdsa",
+		"crypto/ed25519",
+		"crypto/elliptic",
+		"crypto/fips140",
+		"crypto/md5",
+		"crypto/mldsa",
+		"crypto/rsa",
+		"crypto/sha1",
+		"crypto/sha256",
+		"crypto/sha512",
+		"crypto/x509/pkix",
+		"encoding/asn1",
+		"encoding/hex",
+		"encoding/pem",
+		"errors",
+		"fmt",
+		"vendor/golang.org/x/crypto/cryptobyte",
+		"vendor/golang.org/x/crypto/cryptobyte/asn1",
+		"internal/godebug",
+		"internal/goos",
+		"io",
+		"io/fs",
+		"iter",
+		"maps",
+		"math",
+		"math/big",
+		"math/bits",
+		"net",
+		"net/netip",
+		"net/url",
+		"os",
+		"path/filepath",
+		"runtime",
+		"slices",
+		"strconv",
+		"strings",
+		"sync",
+		"time",
+		"unicode",
+		"unicode/utf16",
+		"unicode/utf8",
+		"unsafe"
+	],
+	"ImportMap": {
+		"golang.org/x/crypto/cryptobyte": "vendor/golang.org/x/crypto/cryptobyte",
+		"golang.org/x/crypto/cryptobyte/asn1": "vendor/golang.org/x/crypto/cryptobyte/asn1"
+	}
+}
+{
+	"ImportPath": "golang.org/x/crypto/cryptobyte/asn1",
+	"Name": "asn1",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true
+}
+{
+	"ImportPath": "golang.org/x/crypto/cryptobyte",
+	"Name": "cryptobyte",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"encoding/asn1",
+		"errors",
+		"fmt",
+		"golang.org/x/crypto/cryptobyte/asn1",
+		"math/big",
+		"reflect",
+		"time"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/blowfish",
+	"Name": "blowfish",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"strconv"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/ssh/internal/bcrypt_pbkdf",
+	"Name": "bcrypt_pbkdf",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/sha512",
+		"errors",
+		"golang.org/x/crypto/blowfish"
+	]
+}
+{
+	"ImportPath": "log/internal",
+	"Name": "internal",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "log",
+	"Name": "log",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"fmt",
+		"io",
+		"log/internal",
+		"os",
+		"runtime",
+		"sync",
+		"sync/atomic",
+		"time"
+	]
+}
+{
+	"ImportPath": "golang.org/x/crypto/ssh",
+	"Name": "ssh",
+	"Module": {
+		"Path": "golang.org/x/crypto",
+		"Version": "v0.58.0",
+		"Time": "2026-10-09T16:24:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/crypto@v0.58.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/crypto/@v/v0.58.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:COkYLr4k7nDI4r6QtMML2AfzeIswWHAJthLS6K/M/54=",
+		"GoModSum": "h1:Xh+kl5A+M0gMiWDytH2Hhr5Z7WbNCpv/eB/EFgfSk+w="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"bufio",
+		"bytes",
+		"context",
+		"crypto",
+		"crypto/aes",
+		"crypto/cipher",
+		"crypto/des",
+		"crypto/dsa",
+		"crypto/ecdsa",
+		"crypto/ed25519",
+		"crypto/elliptic",
+		"crypto/fips140",
+		"crypto/hmac",
+		"crypto/md5",
+		"crypto/mldsa",
+		"crypto/mlkem",
+		"crypto/rand",
+		"crypto/rc4",
+		"crypto/rsa",
+		"crypto/sha1",
+		"crypto/sha256",
+		"crypto/sha512",
+		"crypto/subtle",
+		"crypto/x509",
+		"encoding/asn1",
+		"encoding/base64",
+		"encoding/binary",
+		"encoding/hex",
+		"encoding/pem",
+		"errors",
+		"fmt",
+		"golang.org/x/crypto/chacha20",
+		"golang.org/x/crypto/cryptobyte",
+		"golang.org/x/crypto/curve25519",
+		"golang.org/x/crypto/internal/poly1305",
+		"golang.org/x/crypto/ssh/internal/bcrypt_pbkdf",
+		"hash",
+		"io",
+		"log",
+		"math",
+		"math/big",
+		"math/rand",
+		"net",
+		"net/netip",
+		"os",
+		"reflect",
+		"slices",
+		"sort",
+		"strconv",
+		"strings",
+		"sync",
+		"sync/atomic",
+		"time"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/agessh",
+	"Name": "agessh",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"crypto",
+		"crypto/ed25519",
+		"crypto/rand",
+		"crypto/rsa",
+		"crypto/sha256",
+		"crypto/sha512",
+		"errors",
+		"filippo.io/age",
+		"filippo.io/age/internal/format",
+		"filippo.io/edwards25519",
+		"fmt",
+		"golang.org/x/crypto/chacha20poly1305",
+		"golang.org/x/crypto/curve25519",
+		"golang.org/x/crypto/hkdf",
+		"golang.org/x/crypto/ssh",
+		"io"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/armor",
+	"Name": "armor",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"bufio",
+		"bytes",
+		"encoding/base64",
+		"errors",
+		"filippo.io/age/internal/format",
+		"fmt",
+		"io"
+	]
+}
+{
+	"ImportPath": "golang.org/x/sys/unix",
+	"Name": "unix",
+	"Module": {
+		"Path": "golang.org/x/sys",
+		"Version": "v0.49.0",
+		"Time": "2026-10-06T18:35:47Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/sys@v0.49.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/sys/@v/v0.49.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=",
+		"GoModSum": "h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"encoding/binary",
+		"math/bits",
+		"runtime",
+		"slices",
+		"sort",
+		"strconv",
+		"strings",
+		"sync",
+		"syscall",
+		"time",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "golang.org/x/term",
+	"Name": "term",
+	"Module": {
+		"Path": "golang.org/x/term",
+		"Version": "v0.47.0",
+		"Time": "2026-10-09T15:22:17Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/term@v0.47.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/term/@v/v0.47.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:cpyOwQkr2Nzxe2p6KnrTG7Ei2wtzjsuSjhpXXepZ/BM=",
+		"GoModSum": "h1:efAfAuG6RKABvg1ArGebRkvX6LXul14SM67o2e4mUCY="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"fmt",
+		"golang.org/x/sys/unix",
+		"io",
+		"runtime",
+		"strconv",
+		"sync",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/internal/term",
+	"Name": "term",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"fmt",
+		"golang.org/x/term",
+		"os",
+		"runtime",
+		"strings",
+		"unicode"
+	]
+}
+{
+	"ImportPath": "encoding",
+	"Name": "encoding",
+	"Standard": true,
+	"DepOnly": true
+}
+{
+	"ImportPath": "flag",
+	"Name": "flag",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"encoding",
+		"errors",
+		"fmt",
+		"io",
+		"os",
+		"reflect",
+		"runtime",
+		"slices",
+		"strconv",
+		"strings",
+		"time"
+	]
+}
+{
+	"ImportPath": "os/exec",
+	"Name": "exec",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"context",
+		"errors",
+		"internal/godebug",
+		"internal/syscall/execenv",
+		"internal/syscall/unix",
+		"io",
+		"io/fs",
+		"os",
+		"path/filepath",
+		"runtime",
+		"strconv",
+		"strings",
+		"sync/atomic",
+		"syscall",
+		"time"
+	]
+}
+{
+	"ImportPath": "golang.org/x/sys/execabs",
+	"Name": "execabs",
+	"Module": {
+		"Path": "golang.org/x/sys",
+		"Version": "v0.49.0",
+		"Time": "2026-10-06T18:35:47Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/golang.org/x/sys@v0.49.0",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/golang.org/x/sys/@v/v0.49.0.mod",
+		"GoVersion": "1.26.0",
+		"Sum": "h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=",
+		"GoModSum": "h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"context",
+		"errors",
+		"fmt",
+		"os/exec",
+		"path/filepath",
+		"reflect",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/plugin",
+	"Name": "plugin",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"bufio",
+		"crypto/ecdh",
+		"crypto/mlkem",
+		"crypto/rand",
+		"errors",
+		"filippo.io/age",
+		"filippo.io/age/internal/bech32",
+		"filippo.io/age/internal/format",
+		"filippo.io/age/internal/term",
+		"filippo.io/hpke",
+		"flag",
+		"fmt",
+		"golang.org/x/sys/execabs",
+		"io",
+		"math/rand/v2",
+		"os",
+		"path/filepath",
+		"slices",
+		"strconv",
+		"strings",
+		"time"
+	]
+}
+{
+	"ImportPath": "filippo.io/nistec/internal/byteorder",
+	"Name": "byteorder",
+	"Module": {
+		"Path": "filippo.io/nistec",
+		"Version": "v0.0.4",
+		"Time": "2025-09-29T10:22:37Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/filippo.io/nistec@v0.0.4",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/filippo.io/nistec/@v/v0.0.4.mod",
+		"GoVersion": "1.24.0",
+		"Sum": "h1:F14ZHT5htWlMnQVPndX9ro9arf56cBhQxq4LnDI491s=",
+		"GoModSum": "h1:PK/lw8I1gQT4hUML4QGaqljwdDaFcMyFKSXN7kjrtKI="
+	},
+	"DepOnly": true
+}
+{
+	"ImportPath": "filippo.io/nistec/internal/subtle",
+	"Name": "subtle",
+	"Module": {
+		"Path": "filippo.io/nistec",
+		"Version": "v0.0.4",
+		"Time": "2025-09-29T10:22:37Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/filippo.io/nistec@v0.0.4",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/filippo.io/nistec/@v/v0.0.4.mod",
+		"GoVersion": "1.24.0",
+		"Sum": "h1:F14ZHT5htWlMnQVPndX9ro9arf56cBhQxq4LnDI491s=",
+		"GoModSum": "h1:PK/lw8I1gQT4hUML4QGaqljwdDaFcMyFKSXN7kjrtKI="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/subtle",
+		"filippo.io/nistec/internal/byteorder",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "filippo.io/nistec/internal/fiat",
+	"Name": "fiat",
+	"Module": {
+		"Path": "filippo.io/nistec",
+		"Version": "v0.0.4",
+		"Time": "2025-09-29T10:22:37Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/filippo.io/nistec@v0.0.4",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/filippo.io/nistec/@v/v0.0.4.mod",
+		"GoVersion": "1.24.0",
+		"Sum": "h1:F14ZHT5htWlMnQVPndX9ro9arf56cBhQxq4LnDI491s=",
+		"GoModSum": "h1:PK/lw8I1gQT4hUML4QGaqljwdDaFcMyFKSXN7kjrtKI="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"errors",
+		"filippo.io/nistec/internal/subtle",
+		"math/bits"
+	]
+}
+{
+	"ImportPath": "filippo.io/nistec",
+	"Name": "nistec",
+	"Module": {
+		"Path": "filippo.io/nistec",
+		"Version": "v0.0.4",
+		"Time": "2025-09-29T10:22:37Z",
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/filippo.io/nistec@v0.0.4",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/modcache/cache/download/filippo.io/nistec/@v/v0.0.4.mod",
+		"GoVersion": "1.24.0",
+		"Sum": "h1:F14ZHT5htWlMnQVPndX9ro9arf56cBhQxq4LnDI491s=",
+		"GoModSum": "h1:PK/lw8I1gQT4hUML4QGaqljwdDaFcMyFKSXN7kjrtKI="
+	},
+	"DepOnly": true,
+	"Imports": [
+		"crypto/subtle",
+		"errors",
+		"filippo.io/nistec/internal/byteorder",
+		"filippo.io/nistec/internal/fiat",
+		"math/bits",
+		"runtime",
+		"sync",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/tag",
+	"Name": "tag",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"crypto/ecdh",
+		"crypto/hkdf",
+		"crypto/mlkem",
+		"crypto/sha256",
+		"filippo.io/age",
+		"filippo.io/age/internal/format",
+		"filippo.io/age/plugin",
+		"filippo.io/hpke",
+		"filippo.io/nistec",
+		"fmt",
+		"slices"
+	]
+}
+{
+	"ImportPath": "runtime/debug",
+	"Name": "debug",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"fmt",
+		"internal/poll",
+		"os",
+		"runtime",
+		"slices",
+		"strconv",
+		"strings",
+		"time",
+		"unsafe"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/cmd/age",
+	"Name": "main",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"bufio",
+		"bytes",
+		"crypto/rand",
+		"crypto/rsa",
+		"encoding/base64",
+		"encoding/binary",
+		"errors",
+		"filippo.io/age",
+		"filippo.io/age/agessh",
+		"filippo.io/age/armor",
+		"filippo.io/age/internal/term",
+		"filippo.io/age/plugin",
+		"filippo.io/age/tag",
+		"flag",
+		"fmt",
+		"golang.org/x/crypto/cryptobyte",
+		"golang.org/x/crypto/ssh",
+		"io",
+		"iter",
+		"log",
+		"os",
+		"path/filepath",
+		"regexp",
+		"runtime/debug",
+		"slices",
+		"strings",
+		"unicode",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "encoding/json/internal",
+	"Name": "internal",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"errors"
+	]
+}
+{
+	"ImportPath": "encoding/json/internal/jsonflags",
+	"Name": "jsonflags",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"encoding/json/internal"
+	]
+}
+{
+	"ImportPath": "encoding/json/internal/jsonopts",
+	"Name": "jsonopts",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"encoding/json/internal",
+		"encoding/json/internal/jsonflags"
+	]
+}
+{
+	"ImportPath": "encoding/json/internal/jsonwire",
+	"Name": "jsonwire",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"cmp",
+		"encoding/json/internal/jsonflags",
+		"errors",
+		"io",
+		"math",
+		"slices",
+		"strconv",
+		"strings",
+		"unicode",
+		"unicode/utf16",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "encoding/json/jsontext",
+	"Name": "jsontext",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"encoding/json/internal",
+		"encoding/json/internal/jsonflags",
+		"encoding/json/internal/jsonopts",
+		"encoding/json/internal/jsonwire",
+		"errors",
+		"io",
+		"iter",
+		"math",
+		"math/bits",
+		"slices",
+		"strconv",
+		"strings",
+		"sync",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "encoding/base32",
+	"Name": "base32",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"io",
+		"slices",
+		"strconv"
+	]
+}
+{
+	"ImportPath": "encoding/json/v2",
+	"Name": "json",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"cmp",
+		"encoding",
+		"encoding/base32",
+		"encoding/base64",
+		"encoding/binary",
+		"encoding/hex",
+		"encoding/json/internal",
+		"encoding/json/internal/jsonflags",
+		"encoding/json/internal/jsonopts",
+		"encoding/json/internal/jsonwire",
+		"encoding/json/jsontext",
+		"errors",
+		"fmt",
+		"io",
+		"math",
+		"math/bits",
+		"reflect",
+		"slices",
+		"strconv",
+		"strings",
+		"sync",
+		"time",
+		"unicode",
+		"unicode/utf8"
+	]
+}
+{
+	"ImportPath": "encoding/json",
+	"Name": "json",
+	"Standard": true,
+	"DepOnly": true,
+	"Imports": [
+		"bytes",
+		"cmp",
+		"encoding",
+		"encoding/json/internal",
+		"encoding/json/internal/jsonflags",
+		"encoding/json/internal/jsonopts",
+		"encoding/json/internal/jsonwire",
+		"encoding/json/jsontext",
+		"encoding/json/v2",
+		"errors",
+		"fmt",
+		"io",
+		"reflect",
+		"strconv",
+		"strings"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/internal/inspect",
+	"Name": "inspect",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"bufio",
+		"bytes",
+		"filippo.io/age/armor",
+		"filippo.io/age/internal/format",
+		"filippo.io/age/internal/stream",
+		"fmt",
+		"io",
+		"strings"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/cmd/age-inspect",
+	"Name": "main",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"encoding/json",
+		"filippo.io/age/internal/inspect",
+		"flag",
+		"fmt",
+		"log",
+		"os",
+		"runtime/debug"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/cmd/age-keygen",
+	"Name": "main",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"filippo.io/age",
+		"flag",
+		"fmt",
+		"golang.org/x/term",
+		"io",
+		"log",
+		"os",
+		"runtime/debug",
+		"time"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/cmd/age-plugin-batchpass",
+	"Name": "main",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"errors",
+		"filippo.io/age",
+		"filippo.io/age/plugin",
+		"flag",
+		"fmt",
+		"io",
+		"log",
+		"os",
+		"runtime/debug",
+		"strconv",
+		"strings"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/extra/age-plugin-pq",
+	"Name": "main",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"filippo.io/age",
+		"filippo.io/age/internal/bech32",
+		"filippo.io/age/plugin",
+		"flag",
+		"fmt",
+		"io",
+		"log",
+		"os",
+		"runtime/debug"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/extra/age-plugin-tag",
+	"Name": "main",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"filippo.io/age",
+		"filippo.io/age/plugin",
+		"filippo.io/age/tag",
+		"flag",
+		"fmt",
+		"log",
+		"os",
+		"runtime/debug"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/extra/age-plugin-tagpq",
+	"Name": "main",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"filippo.io/age",
+		"filippo.io/age/plugin",
+		"filippo.io/age/tag",
+		"flag",
+		"fmt",
+		"log",
+		"os",
+		"runtime/debug"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/tag/internal/tagtest",
+	"Name": "tagtest",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"crypto/ecdh",
+		"crypto/subtle",
+		"filippo.io/age",
+		"filippo.io/age/internal/format",
+		"filippo.io/age/tag",
+		"filippo.io/hpke",
+		"filippo.io/nistec",
+		"fmt"
+	]
+}
+{
+	"ImportPath": "filippo.io/age/tag/internal/age-plugin-tagtest",
+	"Name": "main",
+	"Module": {
+		"Path": "filippo.io/age",
+		"Main": true,
+		"Dir": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source",
+		"GoMod": "/home/runner/work/_temp/age132-build-f1688f9b85b6420e8ec43860d3b33fd2/age-source/go.mod",
+		"GoVersion": "1.26.0"
+	},
+	"Match": [
+		"./..."
+	],
+	"Imports": [
+		"errors",
+		"filippo.io/age",
+		"filippo.io/age/plugin",
+		"filippo.io/age/tag/internal/tagtest",
+		"fmt",
+		"log",
+		"os"
+	]
+}

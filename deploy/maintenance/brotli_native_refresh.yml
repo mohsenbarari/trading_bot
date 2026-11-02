@@ -1,0 +1,34 @@
+---
+- name: Refresh only the two existing Native Brotli consumers in an explicit new window
+  hosts: boot_mount_bot
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    brotli_refresh_action: check
+    brotli_refresh_window_start: ''
+    brotli_refresh_window_end: ''
+  tasks:
+    - name: Require the exact existing Native lane and bounded action
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | length == 1
+          - ansible_connection == 'local'
+          - ansible_host == '65.109.216.187'
+          - ansible_user == 'root'
+          - brotli_refresh_action in ['check', 'refresh']
+    - name: Run the reviewed refresh with explicit UTC bounds
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - '{{ playbook_dir }}/brotli_native_refresh.py'
+          - '{{ playbook_dir }}/brotli_native_install.py'
+          - '{{ "check" if ansible_check_mode else brotli_refresh_action }}'
+          - --window-start
+          - '{{ brotli_refresh_window_start }}'
+          - --window-end
+          - '{{ brotli_refresh_window_end }}'
+      check_mode: false
+      changed_when: not ansible_check_mode and brotli_refresh_action == 'refresh'
+      timeout: 720

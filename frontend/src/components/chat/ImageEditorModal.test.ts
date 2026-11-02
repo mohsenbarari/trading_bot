@@ -27,13 +27,15 @@ const fabricState = vi.hoisted(() => ({
   imageCalls: [] as Array<{ url: string; options: any }>,
 }))
 
-const CropperCtorMock = vi.fn().mockImplementation(() => ({
-  destroy: cropperDestroyMock,
-  setAspectRatio: cropperSetAspectRatioMock,
-  rotate: cropperRotateMock,
-  reset: cropperResetMock,
-  getCroppedCanvas: cropperGetCroppedCanvasMock,
-}))
+const CropperCtorMock = vi.fn().mockImplementation(function CropperMock() {
+  return {
+    destroy: cropperDestroyMock,
+    setAspectRatio: cropperSetAspectRatioMock,
+    rotate: cropperRotateMock,
+    reset: cropperResetMock,
+    getCroppedCanvas: cropperGetCroppedCanvasMock,
+  }
+})
 
 vi.mock('cropperjs', () => ({
   default: CropperCtorMock,
@@ -197,19 +199,21 @@ describe('ImageEditorModal.vue', () => {
     cropperSetAspectRatioMock.mockClear()
     cropperRotateMock.mockClear()
     cropperResetMock.mockClear()
-    cropperGetCroppedCanvasMock.mockImplementation(() => {
+    cropperGetCroppedCanvasMock.mockReset().mockImplementation(() => {
       const canvas = document.createElement('canvas')
       canvas.width = 400
       canvas.height = 300
       return canvas
     })
-    CropperCtorMock.mockImplementation(() => ({
-      destroy: cropperDestroyMock,
-      setAspectRatio: cropperSetAspectRatioMock,
-      rotate: cropperRotateMock,
-      reset: cropperResetMock,
-      getCroppedCanvas: cropperGetCroppedCanvasMock,
-    }))
+    CropperCtorMock.mockImplementation(function CropperMock() {
+      return {
+        destroy: cropperDestroyMock,
+        setAspectRatio: cropperSetAspectRatioMock,
+        rotate: cropperRotateMock,
+        reset: cropperResetMock,
+        getCroppedCanvas: cropperGetCroppedCanvasMock,
+      }
+    })
     CropperCtorMock.mockClear()
     fabricState.instances.length = 0
     fabricState.imageCalls.length = 0
@@ -604,17 +608,21 @@ describe('ImageEditorModal.vue', () => {
     const modeWrapper = mount(ImageEditorModal, {
       props: { file },
     })
+    await vi.dynamicImportSettled()
+    await flushPromises()
     const modeVm = modeWrapper.vm as any
     modeVm.mode = 'draw'
     modeVm.pendingTextCreation = true
     await modeVm.switchMode('crop')
     expect(modeVm.mode).toBe('crop')
     expect(modeVm.pendingTextCreation).toBe(false)
+    modeWrapper.unmount()
 
     const annotateFallbackWrapper = mount(ImageEditorModal, {
       props: { file },
     })
     const annotateFallbackVm = annotateFallbackWrapper.vm as any
+    await vi.dynamicImportSettled()
     await flushPromises()
     await annotateFallbackWrapper.find('img').trigger('load')
     await flushPromises()
@@ -623,11 +631,13 @@ describe('ImageEditorModal.vue', () => {
     })
     await expect(annotateFallbackVm.beginAnnotate()).resolves.toBe(false)
     expect(annotateFallbackVm.annotateStarted).toBe(false)
+    annotateFallbackWrapper.unmount()
 
     const wrapper = mount(ImageEditorModal, {
       props: { file },
     })
     const vm = wrapper.vm as any
+    await vi.dynamicImportSettled()
     await flushPromises()
     await wrapper.find('img').trigger('load')
     await flushPromises()

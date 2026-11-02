@@ -1,0 +1,114 @@
+{
+  "fixtures": {
+    "postgres": {
+      "descriptor": {
+        "archive": {
+          "format": "docker-archive+gzip",
+          "name": "candidate-image.tar.gz",
+          "sha256": "58f0c4a91df37da30bc6752875313a3a66c33c3e9c6446ede488d213eec2efdb",
+          "size_bytes": 115439775,
+          "uncompressed_bytes": 303892480
+        },
+        "image_config_id": "sha256:49a811b28ed9289d4e981c8f6cd36e1cf05259653a858e40df0cb6d6413c9aa1",
+        "original_artifact_recreated": false,
+        "original_evidence": {
+          "artifact_id": 12579072479,
+          "bytes": 529854,
+          "sha256": "5a56ff8c901fb7553b596cbab6d706360163e1de07b895a61a5baa4b964b361d"
+        },
+        "original_image_artifact_id": 12578982553,
+        "original_image_zip": {
+          "bytes": 114543515,
+          "sha256": "7d22f13f6cb225efe325c297e777536973f7de1082da12629ca2df44a1f601da"
+        },
+        "original_run_id": 40142076769,
+        "production_data_used": false,
+        "profile": "postgres",
+        "rootfs_layers": [
+          "sha256:34884abbe92863fce933ed7c39c0e045631af0ed86d5cc0dfbdf9fdca426ce3c",
+          "sha256:66b9f7f9f6d3928185e0c7cad648b4b841fdc2bc80eb2cb0029a9bc4bfe6a4de",
+          "sha256:a7e41a59116f2957c93dc08ecef69269070b27f237bd63fc0c0a6db072716237",
+          "sha256:9b19de80e7618a2353a2498eacd0c3aa775b8656d947745a8752ec1c03bd7739",
+          "sha256:9658b7b1393f1afecbea689d5c12ed9701dbbbcfe74c7bb10152e40cd3bd9aa1",
+          "sha256:0cde6740c33cf0ccc77b12e6961dc3c4a4d001117a1db9a96723bfb2895465ec",
+          "sha256:b1cd71796a42a83279af8905bd54a8733f05508355ddd81ad04e2a4e5b59b90f",
+          "sha256:daaf5f9bd329b43986a264faefa8563443b4810d9380ccbcff3f41cce961d683",
+          "sha256:ff7b413583a0d05e5dec20adf8e38685da7c0337fa8bc5fb8af4333323f5df43",
+          "sha256:ea2d2c2012fff2d0532da738c475ee0e9d335d135531275b8e3844ea5f15d385",
+          "sha256:363da9133d416185d21029bc178708bdf472186a612acab540f800233cd01cdb",
+          "sha256:e350ec1404ae4e743ceca8e08674a0cb15a6d798387ca50fe8e85dfea99cdc2f"
+        ],
+        "schema": "app32_exact_fixture_new_transport/1",
+        "security_accepted": false
+      },
+      "evidence": {
+        "asset_id": 702264063,
+        "bytes": 529854,
+        "name": "postgres-evidence.zip",
+        "sha256": "5a56ff8c901fb7553b596cbab6d706360163e1de07b895a61a5baa4b964b361d"
+      },
+      "image": {
+        "asset_id": 702264059,
+        "bytes": 115441712,
+        "name": "postgres-image.zip",
+        "sha256": "b2988ae1c25669b6a7b3e58e161691b6cd8b9a77cca23c6764725a2f8557aea3"
+      }
+    },
+    "redis": {
+      "descriptor": {
+        "archive": {
+          "format": "docker-archive+gzip",
+          "name": "candidate-image.tar.gz",
+          "sha256": "9b97154cde2d9feaea8830ebfb5c0a655ce6a149683067fecc6c73d0c726645f",
+          "size_bytes": 18533242,
+          "uncompressed_bytes": 46376960
+        },
+        "image_config_id": "sha256:98c4c0abd245b4b65178494e4727c69c63a28ed604cfb7dbf74205203a987015",
+        "original_artifact_recreated": false,
+        "original_evidence": {
+          "artifact_id": 12579152538,
+          "bytes": 29295,
+          "sha256": "8d0624e966874d9da5c99a34eea50e061e2a68352263a9ef217e7efff46dfbc7"
+        },
+        "original_image_artifact_id": 12578882888,
+        "original_image_zip": {
+          "bytes": 18444160,
+          "sha256": "2faa867c2f3863740e823f0e20f8dc867d9ce04f33367083580fdbfd4392b97d"
+        },
+        "original_run_id": 40142214416,
+        "production_data_used": false,
+        "profile": "redis",
+        "rootfs_layers": [
+          "sha256:7211d01aba8fa2e9eb71ad34395cd313df5fc51a6b69b92d2dfad32cc37759cb",
+          "sha256:a0caa8bc04fc2a6bc37012dfcb190e6e1711e18bb1bfdf3768bafe736da6001b",
+          "sha256:2898dc82d6a9e325f70948c4da63e430a8a57b5b556024653d4291db83077b58",
+          "sha256:a6f8bf15c6b1bd407aaaeb094b75e619c8a91905c6f4d7f2f6a07cabaf542875",
+          "sha256:fd2bae83d0a7a6d58ed98af0be51b6468c5a989bf457c4bc289bf64a72acfda5",
+          "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "sha256:96bf91f53b18ebaf5f197fb649a488a4fc428521cbe86e6e73fe7eefda68a15d",
+          "sha256:eb6c47e3ebae287f79aeb070e14e61d5696acf049b9a71080a9f376ddb7c7b74"
+        ],
+        "schema": "app32_exact_fixture_new_transport/1",
+        "security_accepted": false
+      },
+      "evidence": {
+        "asset_id": 702264067,
+        "bytes": 29295,
+        "name": "redis-evidence.zip",
+        "sha256": "8d0624e966874d9da5c99a34eea50e061e2a68352263a9ef217e7efff46dfbc7"
+      },
+      "image": {
+        "asset_id": 702264060,
+        "bytes": 18534876,
+        "name": "redis-image.zip",
+        "sha256": "67980be8593fbbe9119376dbf9416d9b7d9e8bdba09f6b5800f00bdab6334030"
+      }
+    }
+  },
+  "release": {
+    "id": 431648697,
+    "tag": "security-app32-fixtures-20261102",
+    "target": "88830c49f508df9969f20ee53f03a24a1f1ea8ea"
+  },
+  "schema": "app32_closed_public_dependencies/1"
+}

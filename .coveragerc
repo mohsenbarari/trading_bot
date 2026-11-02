@@ -5,6 +5,8 @@ relative_files = true
 source =
     .
     /app
+    /reviewed
+    /work/source
 
 [report]
 exclude_lines =

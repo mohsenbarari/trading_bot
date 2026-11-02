@@ -1,0 +1,11 @@
+--- a/debian/rules
++++ b/debian/rules
+@@ -46,7 +46,7 @@
+ 	make distclean || true
+ 
+ override_dh_auto_test:
+-	# tests fail a lot on the buildds
++	/usr/local/bin/python3 -I -S -B /build/coreutils-acl/public-inputs/sourcebuild.py --vendor-tests
+ 
+ override_dh_auto_install:
+ 	dh_auto_install --destdir=$(d)

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
-from jose import jwt, JWTError
+from core.jwt_codec import jwt, JWTError
 import logging
 import re
 

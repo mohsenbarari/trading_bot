@@ -191,7 +191,7 @@ class AccountStatusLifecycleSmokeTests(unittest.IsolatedAsyncioTestCase):
         lock_telegram.assert_not_awaited()
         self.assertEqual(self.enqueue_account_notice.await_count, 2)
 
-        with patch('jose.jwt.decode', return_value={'type': 'refresh', 'sub': user.id}):
+        with patch('core.jwt_codec.jwt.decode', return_value={'type': 'refresh', 'sub': user.id}):
             with self.assertRaises(HTTPException) as exc_info:
                 await refresh_access_token(RefreshTokenRequest(refresh_token='refresh-token'), db=FakeAuthDB(user))
         self.assertEqual(exc_info.exception.status_code, 403)

@@ -34,13 +34,13 @@ interface OwnerCustomerRelationPayload {
   max_daily_trades?: number | null
   max_daily_commodity_volume?: number | null
   status: 'pending' | 'active' | 'expired' | 'revoked' | 'deleted'
-  invitation_token?: string | null
+  short_code?: string | null
   registration_link?: string | null
 }
 
 type PendingOwnerCustomerRelation = OwnerCustomerRelationPayload & {
   status: 'pending'
-  invitation_token: string
+  short_code: string
   registration_link: string
 }
 
@@ -747,10 +747,12 @@ function toRelativeRegistrationPath(registrationLink: string): string {
   }
 }
 
-function seedRegistrationVerified(token: string) {
+function seedRegistrationOtpDelivery(token: string) {
+  // The isolated fixture supplies only the SMS challenge, never verified/context proof.
+  // Real context request/verify endpoints must consume this challenge themselves.
   runRedisCli(
-    ['SETEX', `reg_verified:${token}`, '600', '1'],
-    'customer registration Redis verification helper',
+    ['SETEX', `reg_otp:${token}`, '600', '12345'],
+    'customer registration isolated OTP delivery fixture',
   )
 }
 
@@ -770,16 +772,13 @@ async function waitForBackendReady(request: APIRequestContext) {
     .toBe(true)
 }
 
-async function completeRegistrationViaApi(
-  request: APIRequestContext,
-  token: string,
-  address: string,
-) {
-  const response = await request.post(`${BACKEND_BASE_URL}/api/auth/register-complete`, {
-    data: {
-      token,
-      address,
-    },
+async function completeRegistrationViaApi(page: Page, address: string) {
+  const origin = new URL(page.url()).origin
+  // This context shares the genuine browser HttpOnly registration cookie.
+  // Same-origin proxy and Origin checks remain active; no raw bearer is submitted.
+  const response = await page.context().request.post(`${origin}/api/auth/registration-context/complete`, {
+    headers: { Origin: origin },
+    data: { address },
   })
 
   expect(response.ok()).toBeTruthy()
@@ -828,16 +827,27 @@ async function findOwnerCustomerRelation(
   return (await fetchOwnerCustomerRelations(request, accessToken)).find(predicate)
 }
 
+function isCanonicalPendingRegistrationLink(link: string, shortCode: string): boolean {
+  try {
+    const url = new URL(link)
+    return /^https?:$/.test(url.protocol)
+      && url.pathname === `/i/${shortCode}`
+      && !url.search && !url.hash && !url.username && !url.password
+  } catch {
+    return false
+  }
+}
+
 function isPendingOwnerCustomerRelation(
   relation: OwnerCustomerRelationPayload | null | undefined,
 ): relation is PendingOwnerCustomerRelation {
   return Boolean(
     relation &&
       relation.status === 'pending' &&
-      typeof relation.invitation_token === 'string' &&
-      relation.invitation_token.length > 0 &&
+      typeof relation.short_code === 'string' &&
+      /^[A-Za-z0-9]{8}$/.test(relation.short_code) &&
       typeof relation.registration_link === 'string' &&
-      relation.registration_link.length > 0,
+      isCanonicalPendingRegistrationLink(relation.registration_link, relation.short_code),
   )
 }
 
@@ -903,6 +913,21 @@ async function waitForActiveOwnerCustomerRelation(
   return relation
 }
 
+// Customer public visibility deliberately has no unrelated super-admin exception.
+async function openDeniedCustomerPublicProfile(page: Page, customerUserId: number) {
+  const response = page.waitForResponse((item) =>
+    new URL(item.url()).pathname === `/api/users-public/${customerUserId}`
+    && item.request().method() === 'GET',
+  )
+  await page.goto(`/users/${customerUserId}`)
+  expect((await response).status()).toBe(404)
+  await expectIdOnlyPublicProfileUrl(page, customerUserId)
+  const profile = page.locator('.public-profile-view:visible').last()
+  await expect(profile.locator('.error-state')).toBeVisible({ timeout: 30000 })
+  await expect(profile.locator('.profile-content')).toHaveCount(0)
+  return profile
+}
+
 test.describe('customer owner lifecycle', () => {
   test('owner can create update and delete an active customer account, and super-admin can follow the customer handoff', async ({
     page,
@@ -956,7 +981,8 @@ test.describe('customer owner lifecycle', () => {
       .locator('.customer-pending-card')
       .filter({ hasText: cancelledManagementName })
     await expect(cancelledPendingCard).toContainText('دعوت', { timeout: 30000 })
-    await cancelledPendingCard.getByRole('button', { name: 'لغو دعوت', exact: true }).click()
+    await cancelledPendingCard.getByRole('button', { name: 'اقدام‌های دعوت', exact: true }).click()
+    await cancelledPendingCard.getByRole('menuitem', { name: 'لغو دعوت', exact: true }).click()
 
     const cancellationDialog = page.getByRole('dialog', {
       name: 'لغو رابطه در انتظار و دعوت مشتری',
@@ -1000,26 +1026,33 @@ test.describe('customer owner lifecycle', () => {
       (relation) => relation.management_name === managementName,
     )
     const pendingRelationId = confirmedPendingRelation.id
-    const registrationToken = confirmedPendingRelation.invitation_token
     const registrationLink = confirmedPendingRelation.registration_link
-
-    expect(registrationLink).toContain('/register')
+    const invitationShortCode = confirmedPendingRelation.short_code
+    expect(isCanonicalPendingRegistrationLink(registrationLink, invitationShortCode)).toBe(true)
     await expect(
       workspace.locator('.customer-pending-card').filter({ hasText: managementName }),
     ).toContainText('دعوت')
 
-    seedRegistrationVerified(registrationToken)
-
-    await page.goto(toRelativeRegistrationPath(registrationLink))
-    await expect(page).toHaveURL(new RegExp(`/register\\?token=${registrationToken}$`))
-    await expect(page.getByText(customerAccountName)).toBeVisible()
-    await expect(page.getByText(mobileNumber).first()).toBeVisible()
-
-    await completeRegistrationViaApi(
-      request,
-      registrationToken,
-      'تهران، خیابان مشتری تست، پلاک ۱۲، واحد ۴',
+    const lookup = await request.get(
+      `${BACKEND_BASE_URL}/api/invitations/lookup/${encodeURIComponent(invitationShortCode)}`,
     )
+    expect(lookup.ok()).toBeTruthy()
+    const invitation = await lookup.json() as { token?: string }
+    expect(typeof invitation.token).toBe('string')
+    expect(invitation.token?.length).toBeGreaterThan(0)
+    await page.goto(toRelativeRegistrationPath(registrationLink))
+    await page.getByRole('button', { name: /^(ثبت‌نام از طریق وب|ادامه ثبت‌نام در وب‌اپ)$/ }).click()
+    await expect(page).toHaveURL((url) => url.pathname === '/register' && !url.search && !url.hash)
+    await expect(page.getByText(customerAccountName)).toBeVisible()
+    await expect(page.getByText(`${mobileNumber.slice(0, 4)}****${mobileNumber.slice(-3)}`).first()).toBeVisible()
+
+    // Seed only after initial context loading, so it remains at context_ready.
+    seedRegistrationOtpDelivery(requireValue(invitation.token, 'Pending invitation lookup has no token'))
+    await page.getByRole('button', { name: 'دریافت کد تأیید', exact: true }).click()
+    await page.getByLabel('کد تأیید پنج‌رقمی').fill('12345')
+    await page.getByRole('button', { name: 'تأیید و ادامه', exact: true }).click()
+    await expect(page.getByLabel('نشانی دقیق پستی')).toBeVisible()
+    await completeRegistrationViaApi(page, 'تهران، خیابان مشتری تست، پلاک ۱۲، واحد ۴')
 
     await setAuthTokens(page, owner)
     await page.goto('/operations/customers')
@@ -1100,7 +1133,7 @@ test.describe('customer owner lifecycle', () => {
       page
         .locator('.public-profile-view:visible')
         .last()
-        .getByRole('heading', { name: new RegExp(managementName) }),
+        .getByRole('heading', { name: customerAccountName, exact: true }),
     ).toBeVisible({ timeout: 30000 })
 
     await setAuthTokens(page, superAdmin)
@@ -1114,24 +1147,21 @@ test.describe('customer owner lifecycle', () => {
     await expect(superAdminOwnerProfileView.locator('.history-section-card')).toHaveCount(0)
     await expect(superAdminOwnerProfileView).not.toContainText(managementName)
 
-    await page.goto(`/users/${activatedCustomerUserId}`)
-    await expectIdOnlyPublicProfileUrl(page, activatedCustomerUserId)
+    const superAdminCustomerProfileView = await openDeniedCustomerPublicProfile(page, activatedCustomerUserId)
+    // A super-admin has no blanket customer-public-profile visibility exception.
+    await expect(superAdminCustomerProfileView.locator('.error-state')).toBeVisible({ timeout: 30000 })
+    await expect(superAdminCustomerProfileView.locator('.profile-content')).toHaveCount(0)
+    await expect(superAdminCustomerProfileView).not.toContainText(managementName)
 
-    const superAdminCustomerProfileView = page.locator('.public-profile-view:visible').last()
-    await expect(superAdminCustomerProfileView.locator('.profile-content')).toBeVisible({
-      timeout: 30000,
-    })
-    await superAdminCustomerProfileView
-      .locator('.owner-profile-section .settings-btn:visible')
-      .filter({ hasText: 'تنظیمات کاربر' })
-      .click()
-    const adminModal = page.locator('.admin-user-modal:visible')
-    await expect(adminModal).toBeVisible({ timeout: 30000 })
-    await expect(adminModal.locator('.customer-context-box')).toContainText(managementName)
-    await expect(adminModal.locator('.customer-context-box')).toContainText(owner.accountName)
-    await expect(adminModal.locator('.customer-context-box')).toContainText('سطح 2')
-    await adminModal.getByRole('button', { name: 'بستن' }).click()
-    await expect(adminModal).toBeHidden({ timeout: 30000 })
+    // Management metadata remains positively verified on the authorized admin surface.
+    await page.goto(`/admin/users/${activatedCustomerUserId}`)
+    const adminProfile = page.locator('.admin-user-profile')
+    await expect(adminProfile).toBeVisible({ timeout: 30000 })
+    await expect(adminProfile.locator('.profile-details')).toContainText(managementName)
+    await expect(adminProfile.locator('.profile-details')).toContainText(owner.accountName)
+    await expect(adminProfile.locator('.profile-details')).toContainText('سطح 2')
+    await adminProfile.getByRole('button', { name: 'بازگشت به لیست کاربران', exact: true }).click()
+    await expect(adminProfile).toBeHidden({ timeout: 30000 })
 
     await setAuthTokens(page, owner)
     await page.goto(`/operations/customers/${pendingRelationId}?tab=danger`)
@@ -1230,13 +1260,10 @@ test.describe('customer owner lifecycle', () => {
     await expect(ownerProfileView.locator('.history-section-card')).toHaveCount(0)
     await expect(ownerProfileView).not.toContainText(fixture.customerManagementName)
 
-    await page.goto(`/users/${fixture.customerUserId}`)
-    await expectIdOnlyPublicProfileUrl(page, fixture.customerUserId)
-    const customerProfileView = page.locator('.public-profile-view:visible').last()
-    await expect(customerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
-    await expect(
-      customerProfileView.getByRole('heading', { name: fixture.customerAccountName }),
-    ).toBeVisible({ timeout: 30000 })
+    const customerProfileView = await openDeniedCustomerPublicProfile(page, fixture.customerUserId)
+    await expect(customerProfileView.locator('.error-state')).toBeVisible({ timeout: 30000 })
+    await expect(customerProfileView.locator('.profile-content')).toHaveCount(0)
+    await expect(customerProfileView.getByRole('heading', { name: fixture.customerAccountName })).toHaveCount(0)
     await expect(customerProfileView.locator('.customer-relations-section')).toHaveCount(0)
     await expect(customerProfileView.locator('.customer-context-banner')).toHaveCount(0)
     await expect(customerProfileView.locator('.history-section-card')).toHaveCount(0)

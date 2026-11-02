@@ -1,0 +1,8 @@
+all:
+  hosts:
+    web_engine:
+      ansible_host: 65.109.220.59
+      ansible_port: 37067
+      ansible_user: root
+      ansible_python_interpreter: /usr/bin/python3
+      ansible_ssh_common_args: -o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none

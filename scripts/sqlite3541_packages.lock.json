@@ -1,0 +1,111 @@
+{
+  "armed": true,
+  "profiles": {
+    "noble": {
+      "artifact": {
+        "bytes": 972850,
+        "head_sha": "caf4ec17f4d8b69c084c3436857fe896237900da",
+        "id": 13137866890,
+        "job_id": 125251338081,
+        "members": 34,
+        "name": "sqlite3541-library-noble-41437637885-1",
+        "run_attempt": 1,
+        "run_id": 41437637885,
+        "sha256": "feca33964d00dd81b73021f89fda23d069fd9a3b845cfc75813ef562753537dc",
+        "workflow_id": 404280924
+      },
+      "installed_library": {
+        "bytes": 1599752,
+        "path": "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6",
+        "sha256": "2eec48b8c41ab066099c83d8c85e303853fe1b6fbc0f7a7d11b6c05d408d552c"
+      },
+      "package": {
+        "bytes": 755166,
+        "path": "libsqlite3-0_3.54.1-0+trading1~noble1_amd64.deb",
+        "sha256": "68400fc5b7b479b566cca273293a88515e21923b858d73ae7d78db8386d4fb0f"
+      },
+      "provenance": {
+        "bytes": 92294,
+        "sha256": "48ecca66b2e80c9c7d3e34deb5d40f3009bf9a2c77cd607a0ef8b3c9e26a12bb"
+      },
+      "root_qualification": {
+        "bytes": 1751,
+        "sha256": "db3f078288bd86b3eff0b54d17b05f810b7bb59060b4db8994d870d7878eeee5"
+      },
+      "version": "3.54.1-0+trading1~noble1"
+    },
+    "resolute": {
+      "artifact": {
+        "bytes": 955641,
+        "head_sha": "caf4ec17f4d8b69c084c3436857fe896237900da",
+        "id": 13138730403,
+        "job_id": 125251337436,
+        "members": 34,
+        "name": "sqlite3541-library-resolute-41437637885-1",
+        "run_attempt": 1,
+        "run_id": 41437637885,
+        "sha256": "459b9614b12feda5678275b544661e70f029718e207363e8a80d488399be4156",
+        "workflow_id": 404280924
+      },
+      "installed_library": {
+        "bytes": 1657312,
+        "path": "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6",
+        "sha256": "9b7aa36702e50e04642aa4d1e65910165a8820fd317f2025d753875b86e14377"
+      },
+      "package": {
+        "bytes": 779420,
+        "path": "libsqlite3-0_3.54.1-0+trading1~resolute1_amd64.deb",
+        "sha256": "8c9a88d19d1b977a5e89d1634ed40182ba1c29f798af73a32b20e7c3c1ee5c7d"
+      },
+      "provenance": {
+        "bytes": 92534,
+        "sha256": "0ad2c92b9979ed3bb286078a94a208c205d6be20adbaa6a54546d1bb4fabaf09"
+      },
+      "root_qualification": {
+        "bytes": 1760,
+        "sha256": "8ca42d53e1b482b16d95a405bac2a3a4cbe491a5093dac754092a793411e7413"
+      },
+      "version": "3.54.1-0+trading1~resolute1"
+    },
+    "trixie": {
+      "artifact": {
+        "bytes": 837759,
+        "head_sha": "caf4ec17f4d8b69c084c3436857fe896237900da",
+        "id": 13138410737,
+        "job_id": 125251337840,
+        "members": 32,
+        "name": "sqlite3541-library-trixie-41437637885-1",
+        "run_attempt": 1,
+        "run_id": 41437637885,
+        "sha256": "69ec0eb7b85a640ec9b9f265e3a63ba867cfd459d25c67e7221d3674b07e8518",
+        "workflow_id": 404280924
+      },
+      "installed_library": {
+        "bytes": 1640768,
+        "path": "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6",
+        "sha256": "daf0fa411c67f005ec3ba164a41bd233b85a27fe37131f4fe0bfa7b2a1fb4fd2"
+      },
+      "package": {
+        "bytes": 728604,
+        "path": "libsqlite3-0_3.54.1-0+trading1~trixie1_amd64.deb",
+        "sha256": "0a125ed2577726f8ba218db1b9a6561abebe0d486b6d0839268cd7a2b94f5d8b"
+      },
+      "provenance": {
+        "bytes": 92572,
+        "sha256": "8119d3bdf40ae3e343861bda42e5a6d6d51228c8739463f6015e36f1412e2050"
+      },
+      "root_qualification": {
+        "bytes": 1754,
+        "sha256": "238a86c849173c8c8b6a8560eca9b0c29863837da6e2826be3fc674d2aa246c5"
+      },
+      "version": "3.54.1-0+trading1~trixie1"
+    }
+  },
+  "schema": "sqlite3541_qualified_packages/1",
+  "source": {
+    "bytes": 14899528,
+    "sha3_256": "877c6f4996ce7adb368686bce21638de9e3d91534832ad3d9d119037d1bc22ad",
+    "source_id": "555e07ef33f69a0957d24d8e555b702464a131d6f1607f4c3c1e4551e8e6ca76",
+    "url": "https://www.sqlite.org/2026/sqlite-src-3540100.zip"
+  }
+}

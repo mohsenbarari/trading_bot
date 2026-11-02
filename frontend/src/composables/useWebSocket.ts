@@ -27,7 +27,7 @@ export function useWebSocket() {
 
         const wsUrl = `${protocol}//${window.location.host}/api/realtime/ws?token=${encodeURIComponent(authToken)}`;
 
-        console.log('Connecting to WebSocket:', wsUrl);
+        console.log('Connecting to WebSocket');
         socket = new WebSocket(wsUrl);
 
         socket.onopen = () => {
@@ -72,8 +72,9 @@ export function useWebSocket() {
                 } else if (eventListeners['*']) {
                     eventListeners['*'].forEach((callback) => callback(message));
                 }
-            } catch (e) {
-                console.error('Error parsing WS message:', e);
+            } catch {
+                // Parser errors can embed message bytes; never log payloads.
+                console.error('Error parsing WS message');
             }
         };
 
@@ -86,8 +87,9 @@ export function useWebSocket() {
             }
         };
 
-        socket.onerror = (err) => {
-            console.error('WebSocket Error:', err);
+        socket.onerror = () => {
+            // Browser events expose target.url, including the auth query token.
+            console.error('WebSocket Error');
             socket?.close();
         };
     };

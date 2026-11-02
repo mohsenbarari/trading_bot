@@ -146,6 +146,9 @@ EXPECTED_RUNTIME_INVENTORY_COUNTS = {
     "queue_execution": 6,
 }
 EXPECTED_RUNTIME_INVENTORY_SHA256 = (
+    "09a64e940759e006735d6b3bcfa5af847eb7863bb586522e58541f03a517d3e8"
+)
+PRE_CHANNEL_POST_PRESERVATION_RUNTIME_INVENTORY_SHA256 = (
     "4c85ff2f8b07fcba013f580e318d394609d4d80433f6c562f063c070d6e00223"
 )
 PRE_PANEL_RESPONSE_HARDENING_RUNTIME_INVENTORY_SHA256 = (
@@ -220,6 +223,13 @@ PRE_STAGE8_EDGE_CALLBACK_WITNESS_RUNTIME_INVENTORY_SHA256 = (
 REVIEWED_RUNTIME_INVENTORY_SHA256 = frozenset(
     {
         EXPECTED_RUNTIME_INVENTORY_SHA256,
+        # Existing main change 80d70670 preserves untraded expired channel
+        # posts. Comparing against reviewed e7ee4894 reproduces this old hash
+        # and proves all 109 callsites/classifications remain unchanged. Only
+        # four existing legacy-mode boundaries move: offer_expiry 94->95 and
+        # channel-state edit_text 502->560, 529->580, edit_markup 543->594.
+        # Their call ASTs and dominating Queue-v1 exits remain unchanged.
+        PRE_CHANNEL_POST_PRESERVATION_RUNTIME_INVENTORY_SHA256,
         # Deterministic panel-response hardening and offer confirmation
         # recovery moved eight already reviewed guarded boundaries without
         # adding, removing, or reclassifying any Telegram execution callsite.

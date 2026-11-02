@@ -252,7 +252,9 @@ printf '%s\n' "$PRODUCTION_MARKET_PIPELINE_CONTROL_PAYLOAD_MANIFEST_SHA256"
             self.assertIn("deploy/market-data/compose.bot.yml", names)
             self.assertFalse(any(".env" in name or "session" in name for name in names))
             target = payload / "deploy/market-data/compose.yml"
+            target.chmod(0o600)  # Model owner tampering on a non-root CI runner.
             target.write_text(target.read_text(encoding="utf-8") + "# drift\n", encoding="utf-8")
+            target.chmod(0o444)
             tampered = run_sourced(
                 """
 PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED=1

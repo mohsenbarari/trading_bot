@@ -1,0 +1,20 @@
+---
+# Run on the native Bot host. The Web connection must already have a trusted pin.
+all:
+  hosts:
+    controller_bot:
+      ansible_connection: local
+      ansible_host: 65.109.216.187
+      ansible_port: 22
+      ansible_user: root
+      ansible_python_interpreter: /usr/bin/python3
+    controller_web:
+      ansible_connection: ssh
+      ansible_host: 65.109.220.59
+      ansible_port: 37067
+      ansible_user: root
+      ansible_python_interpreter: /usr/bin/python3
+      # Existing persistent identity; its historical name is not a host role.
+      # Required when the durable controller deliberately ignores SSH config.
+      ansible_ssh_private_key_file: /root/.ssh/id_ed25519_iran
+      ansible_ssh_common_args: -o BatchMode=yes -o ForwardAgent=no -o StrictHostKeyChecking=yes

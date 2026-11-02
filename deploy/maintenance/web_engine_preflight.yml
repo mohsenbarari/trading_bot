@@ -1,0 +1,26 @@
+---
+# This is intentionally preparation ONLY. It cannot install/restart/apply.
+- name: Read-only actual Web Docker CE transition preflight
+  hosts: web_engine
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Require an independently staged public guard and private bound baseline
+      ansible.builtin.assert:
+        that:
+          - web_engine_guard_path is defined
+          - web_engine_manifest is defined
+          - web_engine_manifest_sha256 is defined
+          - not (maintenance_apply | default(false) | bool)
+
+    - name: Validate actual same-OS store and complete public runtime baseline only
+      ansible.builtin.command:
+        argv: "{{ ['/usr/bin/python3', '-I', '-B', web_engine_guard_path, '--manifest', web_engine_manifest, '--manifest-sha256', web_engine_manifest_sha256] + (['--verify-offline-packages'] if web_engine_verify_offline_packages | default(false) | bool else []) }}"
+      changed_when: false
+      check_mode: false
+      no_log: true
+
+    - name: Report preparation scope without disclosing the private manifest
+      ansible.builtin.debug:
+        msg: Preparation only; no backup, quiescence, package installation, daemon restart, or remediation claim.

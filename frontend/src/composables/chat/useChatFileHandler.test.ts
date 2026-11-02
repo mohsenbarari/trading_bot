@@ -63,6 +63,7 @@ describe('useChatFileHandler.ts', () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     if (originalCreateObjectURL) {
       Object.defineProperty(URL, 'createObjectURL', {
         configurable: true,

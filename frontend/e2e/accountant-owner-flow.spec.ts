@@ -23,6 +23,7 @@ interface OwnerRelationPayload {
   duty_description?: string | null
   mobile_number: string
   status: 'pending' | 'active' | 'expired' | 'revoked' | 'deleted'
+  short_code?: string | null
   registration_link?: string | null
   accountant_user_id?: number | null
   accountant_account_name?: string | null
@@ -551,7 +552,8 @@ test.describe('accountant owner lifecycle', () => {
       .locator('.accountant-pending-card')
       .filter({ hasText: cancelledRelationDisplayName })
     await expect(cancelledPendingCard).toContainText('دعوت', { timeout: 30000 })
-    await cancelledPendingCard.getByRole('button', { name: 'لغو دعوت', exact: true }).click()
+    await cancelledPendingCard.getByRole('button', { name: 'اقدام‌های دعوت', exact: true }).click()
+    await cancelledPendingCard.getByRole('menuitem', { name: 'لغو دعوت', exact: true }).click()
 
     const cancellationDialog = page.getByRole('dialog', {
       name: 'لغو رابطه و دعوت حسابدار',
@@ -602,7 +604,21 @@ test.describe('accountant owner lifecycle', () => {
       )
       .toBe('pending')
 
-    expect(pendingRelation?.registration_link).toContain('/register')
+    expect(pendingRelation?.short_code).toMatch(/^[A-Za-z0-9]{8}$/)
+    const pendingRegistrationUrl = new URL(pendingRelation?.registration_link ?? '')
+    expect({
+      pathname: pendingRegistrationUrl.pathname,
+      search: pendingRegistrationUrl.search,
+      hash: pendingRegistrationUrl.hash,
+      username: pendingRegistrationUrl.username,
+      password: pendingRegistrationUrl.password,
+    }).toEqual({
+      pathname: `/i/${pendingRelation?.short_code}`,
+      search: '',
+      hash: '',
+      username: '',
+      password: '',
+    })
     await expect(workspace).toContainText(relationDisplayName, { timeout: 30000 })
     await expect(workspace).toContainText('دعوت', { timeout: 30000 })
 
@@ -628,8 +644,18 @@ test.describe('accountant owner lifecycle', () => {
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({
       timeout: 30000,
     })
-    await expect(page.locator('.accountant-relations-section')).toContainText(relationDisplayName)
-    await expect(page.locator('.accountant-relations-section')).toContainText(dutyDescription)
+    // The public contact projection excludes relations even on a self URL.
+    // Keep the positive business proof on the authorized owner endpoint/workspace.
+    const activeOwnerRelation = (await fetchOwnerRelations(request, owner.accessToken))
+      .find((relation) => relation.id === pendingRelation?.id)
+    expect(activeOwnerRelation).toMatchObject({
+      relation_display_name: relationDisplayName,
+      duty_description: dutyDescription,
+      status: 'active',
+    })
+    await expect(page.locator('.accountant-relations-section')).toHaveCount(0)
+    await expect(page.locator('.public-profile-view')).not.toContainText(relationDisplayName)
+    await expect(page.locator('.public-profile-view')).not.toContainText(dutyDescription)
 
     await page
       .locator('.owner-profile-section .settings-btn')

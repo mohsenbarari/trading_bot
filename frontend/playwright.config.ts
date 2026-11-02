@@ -3,7 +3,9 @@ import { defineConfig, devices } from '@playwright/test'
 
 const shouldRunHeadless = !!process.env.CI || !process.env.DISPLAY
 const usePreview = !!process.env.CI || process.env.NATIVE_APP_V2_PREVIEW === '1'
-const ciBaseUrl = 'http://127.0.0.1:4173'
+const isolatedNpmBrowserFixture = process.env.CI === 'true'
+  && process.env.NPM_SECURITY_ISOLATED_BROWSER_FIXTURE === '1'
+const ciBaseUrl = `${isolatedNpmBrowserFixture ? 'https' : 'http'}://127.0.0.1:4173`
 const ciPreviewCommand = 'npm run preview -- --host 127.0.0.1 --strictPort --port 4173'
 const localBaseUrl = 'http://127.0.0.1:5173'
 const localDevCommand = 'npm run dev -- --host 127.0.0.1 --strictPort --port 5173'
@@ -42,6 +44,7 @@ export default defineConfig({
     actionTimeout: 0,
     /* Base URL to use in actions like `await page.goto('/')`. */
     baseURL: usePreview ? ciBaseUrl : localBaseUrl,
+    ...(isolatedNpmBrowserFixture ? { ignoreHTTPSErrors: true } : {}),
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
@@ -111,7 +114,9 @@ export default defineConfig({
      * Playwright will re-use the local server if there is already a dev-server running.
      */
     command: usePreview ? ciPreviewCommand : localDevCommand,
-    port: usePreview ? 4173 : 5173,
+    ...(isolatedNpmBrowserFixture
+      ? { url: ciBaseUrl, ignoreHTTPSErrors: true }
+      : { port: usePreview ? 4173 : 5173 }),
     reuseExistingServer: !usePreview,
   },
 })

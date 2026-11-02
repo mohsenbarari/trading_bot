@@ -65,6 +65,11 @@ import {
   MARKET_HISTORY_UNIFORM_LIVE_ALLOWED_PATHS,
   MARKET_HISTORY_UNIFORM_LIVE_EVIDENCE,
   MARKET_HISTORY_UNIFORM_LIVE_KIND,
+  MARKET_SECURITY_TYPE_ONLY_KIND,
+  MARKET_SECURITY_TYPE_ONLY_ALLOWED_PATHS,
+  MARKET_SECURITY_TYPE_ONLY_ALLOWED_FILE_SHA256,
+  MARKET_SECURITY_TYPE_ONLY_EVIDENCE,
+  assertMarketSecurityTypeOnlyDisposition,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_FILE_SHA256,
   MARKET_OVERTIME_REQUESTER_ACK_ALLOWED_PATHS,
   MARKET_OVERTIME_REQUESTER_ACK_EVIDENCE,
@@ -90,6 +95,7 @@ import {
   STAGE8_MESSENGER_UNNAMED_CONTROL_LOCKED_STAGE8_PATHS,
   NATIVE_APP_MESSENGER_VISUAL_KIND,
   NATIVE_APP_MESSENGER_VISUAL_EVIDENCE,
+  NATIVE_APP_MESSENGER_CONTEXT_MENU_GEOMETRY_EVIDENCE,
   assertNativeAppMessengerVisualDisposition,
   assertStage8CreateChannelHelpPopoverPlacementDisposition,
   assertStage8MessengerUnnamedControlDisposition,
@@ -170,6 +176,35 @@ function readRepoFile(repoPath, encoding = null) {
 
 function currentEvidence(paths, contract) {
   return protectedFileSetEvidence(readFileEntries(repoRoot, paths), contract)
+}
+
+// Test-only inverse of the exact reviewed three type edits. Production
+// admission never rewrites/normalizes source. These pins prove the historical
+// uniform-live snapshot still passes and all its negative tests stay intact.
+function historicalMarketTypeFixture(entries) {
+  return entries.map((entry) => {
+    if (!MARKET_SECURITY_TYPE_ONLY_ALLOWED_PATHS.includes(entry.path)) return entry
+    expect(fileSha256(entry.content)).toBe(
+      MARKET_SECURITY_TYPE_ONLY_ALLOWED_FILE_SHA256[entry.path],
+    )
+    let source = entry.content.toString('utf8')
+    let expected
+    if (entry.path === 'frontend/src/views/MarketView.vue') {
+      source = source
+        .replace(
+          "candidate: Pick<CoinInferenceShadowCandidate, 'commodity_id' | 'commodity_name'>,",
+          "candidate: Pick<CoinInferenceShadowCandidate, 'commodity_id' | 'commodity_code' | 'commodity_name'>,",
+        )
+        .replace('const suggested = inference.candidates[0]!', 'const suggested = inference.candidates[0]')
+      expected = '6eea08979c7a91ae4ea5f96939165c28459f2729fb6a4c4c75f15f169c80e608'
+    } else {
+      source = source.replace('commodity_name: string | null', 'commodity_name: string')
+      expected = '9f2e8ab3da38e7dbdea13d16e18d3cecf610bc6e928d3e2c27d3bf103e8b6a18'
+    }
+    const content = Buffer.from(source)
+    expect(fileSha256(content)).toBe(expected)
+    return { ...entry, content }
+  })
 }
 
 function currentSharedDependencySources() {
@@ -355,7 +390,12 @@ describe('Stage 4 protected surface baseline', () => {
   it('keeps every prior Market disposition immutable while admitting uniform live history', () => {
     expect(ownedPaths.market).toContain('frontend/src/utils/settlementType.ts')
     expect(ownedPaths.market).toContain('frontend/src/components/CommodityInferenceSelectionModal.vue')
-    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const currentEntries = readFileEntries(repoRoot, ownedPaths.market)
+    const entries = historicalMarketTypeFixture(currentEntries)
+    expect(resolveMarketRuntimeDisposition(currentEntries)).toMatchObject({
+      kind: MARKET_SECURITY_TYPE_ONLY_KIND,
+      evidence: MARKET_SECURITY_TYPE_ONLY_EVIDENCE,
+    })
     expect(resolveMarketRuntimeDisposition(entries)).toMatchObject({
       kind: MARKET_HISTORY_UNIFORM_LIVE_KIND,
       evidence: MARKET_HISTORY_UNIFORM_LIVE_EVIDENCE,
@@ -618,6 +658,60 @@ describe('Stage 4 protected surface baseline', () => {
     expect(() => assertMarketHistoryUniformLiveDisposition(entries)).not.toThrow()
   })
 
+  it('admits only the exact two reviewed type-only Market source identities', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    expect(MARKET_SECURITY_TYPE_ONLY_ALLOWED_PATHS).toEqual([
+      'frontend/src/utils/offerDraftText.ts',
+      'frontend/src/views/MarketView.vue',
+    ])
+    expect(MARKET_SECURITY_TYPE_ONLY_ALLOWED_FILE_SHA256).toEqual({
+      'frontend/src/utils/offerDraftText.ts':
+        '6bd9b51a73e1d4b72b9baf1ef45358e6dccbf2728ace33ff1ce5221f56d6c17e',
+      'frontend/src/views/MarketView.vue':
+        '63ab5c11a3e43c64e20a2a5d432e47cb0f4034aa8a1b93f66f6dfa5fe4e3ee8a',
+    })
+    expect(MARKET_SECURITY_TYPE_ONLY_EVIDENCE).toEqual({
+      count: 20,
+      contentBytes: 180196,
+      pathSetSha256: '6035c31eab716d0061c81427da214fbe9765571ba0d370e218b11edab27678f2',
+      sha256: 'ac0797b344c3d740ef6f101f7b01106f440aba6c1f6d7baded54ea55fce6110c',
+    })
+    expect(Object.isFrozen(MARKET_SECURITY_TYPE_ONLY_ALLOWED_PATHS)).toBe(true)
+    expect(Object.isFrozen(MARKET_SECURITY_TYPE_ONLY_ALLOWED_FILE_SHA256)).toBe(true)
+    expect(Object.isFrozen(MARKET_SECURITY_TYPE_ONLY_EVIDENCE)).toBe(true)
+    expect(assertMarketSecurityTypeOnlyDisposition(entries)).toEqual({
+      contract: MARKET_RUNTIME_CONTRACT,
+      ...MARKET_SECURITY_TYPE_ONLY_EVIDENCE,
+    })
+    expect(() => assertMarketHistoryUniformLiveDisposition(entries)).toThrow(/allowed file drift/)
+  })
+
+  it('rejects unknown type-only edits, cross-mixed revisions and every other Market mutation', () => {
+    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const historical = historicalMarketTypeFixture(entries)
+    for (const allowed of MARKET_SECURITY_TYPE_ONLY_ALLOWED_PATHS) {
+      const unknown = entries.map((entry) => entry.path === allowed
+        ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n// unreviewed type-only edit\n')]) }
+        : entry)
+      expect(() => assertMarketSecurityTypeOnlyDisposition(unknown)).toThrow(/allowed file drift/)
+      expect(() => resolveMarketRuntimeDisposition(unknown)).toThrow(/security type-only disposition rejected/)
+      const mixed = entries.map((entry) => entry.path === allowed
+        ? historical.find((old) => old.path === entry.path)
+        : entry)
+      expect(() => resolveMarketRuntimeDisposition(mixed)).toThrow(/security type-only disposition rejected/)
+    }
+    const unlisted = entries.find((entry) => !MARKET_SECURITY_TYPE_ONLY_ALLOWED_PATHS.includes(entry.path)).path
+    const changed = entries.map((entry) => entry.path === unlisted
+      ? { ...entry, content: Buffer.concat([entry.content, Buffer.from('\n/* unknown drift */')]) }
+      : entry)
+    expect(() => assertMarketSecurityTypeOnlyDisposition(changed)).toThrow(/contentBytes drift/)
+    expect(() => resolveMarketRuntimeDisposition(changed)).toThrow(/security type-only disposition rejected/)
+    for (const changedSet of [entries.slice(1), [...entries, entries[0]]]) {
+      expect(() => assertMarketSecurityTypeOnlyDisposition(changedSet)).toThrow()
+      expect(() => resolveMarketRuntimeDisposition(changedSet)).toThrow()
+    }
+  })
+
   it('fails closed if compact terminal history escapes its read-only responsive grid', () => {
     const entries = readFileEntries(repoRoot, ownedPaths.market)
     const mutateOffers = (fragment) => entries.map((entry) => (
@@ -794,7 +888,7 @@ describe('Stage 4 protected surface baseline', () => {
   })
 
   it('fails closed for any further Market drift inside or outside the inference UX allowlist', () => {
-    const entries = readFileEntries(repoRoot, ownedPaths.market)
+    const entries = historicalMarketTypeFixture(readFileEntries(repoRoot, ownedPaths.market))
     const allowedPath = MARKET_INFERENCE_CONFIRMATION_UX_ALLOWED_PATHS[0]
     const changedAllowed = entries.map((entry) =>
       entry.path === allowedPath
@@ -1154,8 +1248,41 @@ describe('Stage 4 protected surface baseline', () => {
     expect(assertNativeAppMessengerVisualDisposition(entries)).toMatchObject({
       sha256: actual.sha256,
     })
-    expect(actual).toMatchObject(NATIVE_APP_MESSENGER_VISUAL_EVIDENCE)
+    expect(actual).toMatchObject(NATIVE_APP_MESSENGER_CONTEXT_MENU_GEOMETRY_EVIDENCE)
     expect(Object.isFrozen(NATIVE_APP_MESSENGER_VISUAL_EVIDENCE)).toBe(true)
+  })
+
+  it('retains the earlier native visual snapshot beside the exact menu-geometry evidence', () => {
+    expect(NATIVE_APP_MESSENGER_VISUAL_EVIDENCE).toEqual({
+      count: 85,
+      contentBytes: 1292059,
+      pathSetSha256: 'f6af1f961e45d785ba9c752ee670643571086c6a946843807fe6f581d11aea58',
+      sha256: '466798f7bd57a3b0874fc559677af7d21685981e5e08c2fd518e3aff5d298b1f',
+    })
+    expect(Object.isFrozen(NATIVE_APP_MESSENGER_CONTEXT_MENU_GEOMETRY_EVIDENCE)).toBe(true)
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const menu = entries.find(({ path: repoPath }) => repoPath === 'frontend/src/components/chat/ChatContextMenu.vue')
+    expect(fileSha256(menu.content)).toBe('52c3da85ec910ae62a1ae3c64fd673472b64cf2822b1ba503c4bdcdefb213fa4')
+  })
+
+  it.each([
+    'frontend/src/components/chat/ChatContextMenu.vue',
+    'frontend/src/components/ChatView.vue',
+    'frontend/src/components/chat/ChatHeader.vue',
+  ])('rejects same-length drift after exact menu geometry: %s', (repoPath) => {
+    const entries = readFileEntries(repoRoot, ownedPaths.messenger)
+    const changed = entries.map((entry) => {
+      if (entry.path !== repoPath) return entry
+      const content = Buffer.from(entry.content)
+      content[0] ^= 1
+      return { ...entry, content }
+    })
+    const actual = protectedFileSetEvidence(entries, MESSENGER_RUNTIME_CONTRACT)
+    const mutated = protectedFileSetEvidence(changed, MESSENGER_RUNTIME_CONTRACT)
+    expect(mutated.contentBytes).toBe(actual.contentBytes)
+    expect(mutated.pathSetSha256).toBe(actual.pathSetSha256)
+    expect(mutated.sha256).not.toBe(actual.sha256)
+    expect(() => resolveMessengerRuntimeDisposition(changed)).toThrow(/native-app-messenger-visual-v1 rejected/)
   })
 
   it('fails closed for protected runtime content and path-set drift', () => {

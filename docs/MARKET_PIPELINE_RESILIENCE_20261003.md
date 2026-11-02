@@ -1,5 +1,8 @@
 # Market pipeline receiver stall — 2026-10-03
 
+Subsequent distinct processor/input incident and bounded startup-grace fix:
+[October 18 numeric-isolation recovery](MARKET_PROCESSOR_NUMERIC_ISOLATION_20261018.md).
+
 ## Confirmed causes
 
 Capture and parsing continued while the sender accumulated 142,762 deliveries,

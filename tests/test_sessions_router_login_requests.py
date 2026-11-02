@@ -110,7 +110,7 @@ class SessionsRouterLoginRequestTests(unittest.IsolatedAsyncioTestCase):
         request = make_request(token="jwt-token")
 
         pending = make_login_request(request_id=uuid.uuid4())
-        with patch("jose.jwt.decode", return_value={"sid": str(caller_id)}):
+        with patch("core.jwt_codec.jwt.decode", return_value={"sid": str(caller_id)}):
             result = await get_pending_requests(
                 request=request,
                 db=FakeDB([
@@ -120,7 +120,7 @@ class SessionsRouterLoginRequestTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(result, [])
 
-        with patch("jose.jwt.decode", return_value={"sid": str(caller_id)}):
+        with patch("core.jwt_codec.jwt.decode", return_value={"sid": str(caller_id)}):
             result = await get_pending_requests(
                 request=request,
                 db=FakeDB([

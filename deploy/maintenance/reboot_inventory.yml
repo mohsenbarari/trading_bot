@@ -1,0 +1,12 @@
+---
+# This inventory is used ONLY by the durable runner on Web, not native Bot.
+all:
+  hosts:
+    reboot_bot:
+      ansible_connection: ssh
+      ansible_host: 65.109.216.187
+      ansible_port: 22
+      ansible_user: root
+      ansible_python_interpreter: /usr/bin/python3
+      ansible_ssh_private_key_file: /root/.ssh/security-controller-20261023-host-patch-02/id_ed25519
+      ansible_ssh_common_args: -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o ForwardAgent=no -o RequestTTY=no -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=/root/.ssh/security-controller-20261023-host-patch-02/known_hosts -o HostKeyAlgorithms=ssh-ed25519

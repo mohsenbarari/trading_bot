@@ -82,7 +82,7 @@ class SessionsRouterRuntimeTests(unittest.IsolatedAsyncioTestCase):
         request = make_request(token="jwt-token")
         current_user = SimpleNamespace(id=5)
 
-        with patch("jose.jwt.decode", return_value={"sid": str(current_session_id)}), patch(
+        with patch("core.jwt_codec.jwt.decode", return_value={"sid": str(current_session_id)}), patch(
             "api.routers.sessions.get_active_sessions",
             new=AsyncMock(return_value=sessions),
         ):
@@ -122,14 +122,14 @@ class SessionsRouterRuntimeTests(unittest.IsolatedAsyncioTestCase):
             await terminate_session("bad-id", request=request, db=FakeDB(), current_user=current_user)
         self.assertEqual(exc_info.exception.status_code, 400)
 
-        with patch("jose.jwt.decode", return_value={"sid": str(caller_id)}):
+        with patch("core.jwt_codec.jwt.decode", return_value={"sid": str(caller_id)}):
             with self.assertRaises(HTTPException) as exc_info:
                 await terminate_session(str(target_id), request=request, db=FakeDB([FakeExecuteResult(None)]), current_user=current_user)
         self.assertEqual(exc_info.exception.status_code, 404)
 
         target_session = make_session(target_id)
         caller_session = make_session(caller_id, is_primary=False)
-        with patch("jose.jwt.decode", return_value={"sid": str(caller_id)}):
+        with patch("core.jwt_codec.jwt.decode", return_value={"sid": str(caller_id)}):
             with self.assertRaises(HTTPException) as exc_info:
                 await terminate_session(
                     str(target_id),
@@ -141,7 +141,7 @@ class SessionsRouterRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "شما دسترسی برای حذف نشست دستگاه‌های دیگر را ندارید")
 
         primary_target = make_session(target_id, is_primary=True)
-        with patch("jose.jwt.decode", return_value={"sid": str(target_id)}), patch(
+        with patch("core.jwt_codec.jwt.decode", return_value={"sid": str(target_id)}), patch(
             "api.routers.sessions.get_active_sessions",
             new=AsyncMock(return_value=[primary_target, make_session(uuid.uuid4())]),
         ):
@@ -156,7 +156,7 @@ class SessionsRouterRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.detail, "نشست اصلی را نمی‌توان حذف کرد. ابتدا نشست‌های دیگر را حذف کنید.")
 
         target_session = make_session(target_id)
-        with patch("jose.jwt.decode", return_value={"sid": str(target_id)}), patch(
+        with patch("core.jwt_codec.jwt.decode", return_value={"sid": str(target_id)}), patch(
             "api.routers.sessions.logout_session",
             new=AsyncMock(),
         ) as logout_mock:
@@ -174,13 +174,13 @@ class SessionsRouterRuntimeTests(unittest.IsolatedAsyncioTestCase):
         caller_id = uuid.uuid4()
         request = make_request(token="jwt-token")
 
-        with patch("jose.jwt.decode", return_value={}):
+        with patch("core.jwt_codec.jwt.decode", return_value={}):
             with self.assertRaises(HTTPException) as exc_info:
                 await logout_all_sessions(request=request, db=FakeDB(), current_user=current_user)
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "شناسه نشست شما مشخص نیست")
 
-        with patch("jose.jwt.decode", return_value={"sid": str(caller_id)}):
+        with patch("core.jwt_codec.jwt.decode", return_value={"sid": str(caller_id)}):
             with self.assertRaises(HTTPException) as exc_info:
                 await logout_all_sessions(
                     request=request,
@@ -190,7 +190,7 @@ class SessionsRouterRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
 
         primary = make_session(caller_id, is_primary=True)
-        with patch("jose.jwt.decode", return_value={"sid": str(caller_id)}), patch(
+        with patch("core.jwt_codec.jwt.decode", return_value={"sid": str(caller_id)}), patch(
             "api.routers.sessions.force_clear_sessions",
             new=AsyncMock(return_value=3),
         ) as clear_mock:
@@ -208,7 +208,7 @@ class SessionsRouterRuntimeTests(unittest.IsolatedAsyncioTestCase):
         target_id = uuid.uuid4()
         sessions = [make_session(target_id)]
 
-        with patch("jose.jwt.decode", side_effect=RuntimeError("bad token")), patch(
+        with patch("core.jwt_codec.jwt.decode", side_effect=RuntimeError("bad token")), patch(
             "api.routers.sessions.get_active_sessions",
             new=AsyncMock(return_value=sessions),
         ):
@@ -229,7 +229,7 @@ class SessionsRouterRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exc_info.exception.status_code, 403)
         self.assertEqual(exc_info.exception.detail, "شناسه نشست شما مشخص نیست")
 
-        with patch("jose.jwt.decode", side_effect=RuntimeError("bad token")):
+        with patch("core.jwt_codec.jwt.decode", side_effect=RuntimeError("bad token")):
             with self.assertRaises(HTTPException) as exc_info:
                 await logout_all_sessions(
                     request=make_request(token="jwt-token"),

@@ -12,7 +12,7 @@ import logging
 import uuid
 from typing import Any, List, Optional
 
-from jose import jwt, JWTError
+from core.jwt_codec import jwt, JWTError
 
 from core.redis import pool
 from core.config import settings

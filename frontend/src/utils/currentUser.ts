@@ -177,6 +177,13 @@ export function cacheCurrentUserSummary(raw: unknown): CurrentUserSummary | null
 }
 
 export function clearCurrentUserSummary() {
+  // Logout/cache invalidation must also fence responses already in flight,
+  // even when storage still contains the same token until logout finishes.
+  currentUserAuthorityRequestRevision += 1
+  currentUserLoadRequest = null
+  currentUserLoadRequestAuthToken = null
+  currentUserRequest = null
+  currentUserRequestAuthToken = null
   currentUserSummary.value = null
   currentUserSummaryAuthToken = undefined
   if (hasStorage()) {
@@ -204,6 +211,9 @@ function currentUserLoadError(error: unknown, errorCode = 'CURRENT_USER_LOAD_ERR
 }
 
 let currentUserAuthorityRequestRevision = 0
+let currentUserLoadRequest: Promise<CurrentUserLoadResult> | null = null
+let currentUserLoadRequestAuthToken: string | null = null
+let currentUserLoadRequestCoalescible = false
 
 function supersededCurrentUserResult(): CurrentUserLoadResult {
   const user = currentUserSummary.value
@@ -223,8 +233,35 @@ function supersededCurrentUserResult(): CurrentUserLoadResult {
  * The legacy prime helper intentionally keeps its cache-first, fail-soft
  * return semantics; this loader adds explicit error/stale/authorization truth.
  */
-export async function loadCurrentUserSummary(
+export function loadCurrentUserSummary(
   options: CurrentUserLoadOptions = {},
+): Promise<CurrentUserLoadResult> {
+  const token = currentAuthToken()
+  if (
+    !options.force && !options.signal && options.timeoutMs === undefined &&
+    currentUserLoadRequestCoalescible && currentUserLoadRequest &&
+    currentUserLoadRequestAuthToken === token
+  ) {
+    return currentUserLoadRequest
+  }
+
+  const request = loadCurrentUserSummaryOnce(options)
+  currentUserLoadRequest = request
+  currentUserLoadRequestAuthToken = token
+  currentUserLoadRequestCoalescible = !options.signal && options.timeoutMs === undefined
+  const release = () => {
+    if (currentUserLoadRequest === request) {
+      currentUserLoadRequest = null
+      currentUserLoadRequestAuthToken = null
+      currentUserLoadRequestCoalescible = false
+    }
+  }
+  void request.then(release, release)
+  return request
+}
+
+async function loadCurrentUserSummaryOnce(
+  options: CurrentUserLoadOptions,
 ): Promise<CurrentUserLoadResult> {
   const { force = false, signal, timeoutMs } = options
   const cachedUser = currentUserSummary.value
@@ -322,6 +359,12 @@ export async function primeCurrentUserSummary(force = false): Promise<CurrentUse
 
   const requestAuthToken = currentAuthToken()
 
+  // Shell priming must not supersede an already fresh page identity load:
+  // both consume the same token-bound authority instead of racing revisions.
+  if (currentUserLoadRequest && currentUserLoadRequestAuthToken === requestAuthToken) {
+    return (await currentUserLoadRequest).user
+  }
+
   if (currentUserRequest && currentUserRequestAuthToken === requestAuthToken) {
     return currentUserRequest
   }
@@ -345,7 +388,11 @@ export async function primeCurrentUserSummary(force = false): Promise<CurrentUse
         return currentUserSummary.value
       }
 
-      return cacheCurrentUserSummary(await response.json())
+      const payload = await response.json()
+      if (requestRevision !== currentUserAuthorityRequestRevision || currentAuthToken() !== requestAuthToken) {
+        return currentUserSummary.value
+      }
+      return cacheCurrentUserSummary(payload)
     } catch {
       if (requestRevision !== currentUserAuthorityRequestRevision) {
         return currentUserSummary.value

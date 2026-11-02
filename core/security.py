@@ -2,7 +2,7 @@ from datetime import timedelta
 import hmac
 from typing import Optional, Union, Any
 import bcrypt
-from jose import jwt
+from core.jwt_codec import jwt
 from core.config import settings
 from core.utils import utc_now_naive
 

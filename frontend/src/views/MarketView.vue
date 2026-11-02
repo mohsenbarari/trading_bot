@@ -829,7 +829,7 @@ function editPendingOfferPreview() {
 }
 
 function selectInferredCommodity(
-  candidate: Pick<CoinInferenceShadowCandidate, 'commodity_id' | 'commodity_code' | 'commodity_name'>,
+  candidate: Pick<CoinInferenceShadowCandidate, 'commodity_id' | 'commodity_name'>,
   explicitCorrection = false,
 ) {
   const parsed = pendingCommodityInference.value
@@ -955,7 +955,7 @@ function parseAndSubmitTextOffer() {
             && inference.candidates.length > 0
           ) {
             if (inference.candidates.length === 1) {
-              const suggested = inference.candidates[0]
+              const suggested = inference.candidates[0]!
               pendingOfferPreview.value = {
                 ...parsed,
                 commodity_id: suggested.commodity_id,

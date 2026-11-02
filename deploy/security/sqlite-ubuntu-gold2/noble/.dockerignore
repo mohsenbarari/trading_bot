@@ -1,0 +1,17 @@
+**
+!.dockerignore
+!context-manifest.json
+!sourcebuild.py
+!Dockerfile
+!0001-wal-reset-production-only.patch
+!0002-fts5-detail-none-merge-bound.patch
+!0003-fts5-detail-none-upstream-regression.patch
+!0004-rowid-in-view-nested-join-core.patch
+!verify_positive.py
+!source-signer.asc
+!consumer-profile.json
+!inputs/
+!inputs/sqlite3_3.45.1-1ubuntu2.8.debian.tar.xz
+!inputs/sqlite3_3.45.1-1ubuntu2.8.dsc
+!inputs/sqlite3_3.45.1.orig-www.tar.xz
+!inputs/sqlite3_3.45.1.orig.tar.xz

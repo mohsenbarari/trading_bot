@@ -1,0 +1,89 @@
+---
+# Harmless, finite proof only: no application paths, keys, engines or packages.
+- name: Verify Web scope inherited descriptors and setsid descendant containment
+  hosts: web_engine
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Admit only the existing pinned native Web lane
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['web_engine']
+          - ansible_host == '65.109.220.59'
+          - ansible_port | int == 37067
+          - ansible_user == 'root'
+    - name: Default and check mode never create a transient scope
+      ansible.builtin.meta: end_play
+      when: not (web_scope_probe_apply | default(false) | bool) or ansible_check_mode
+    - name: Exercise only an exclusive synthetic scope with three anonymous locks
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import fcntl,json,os,pathlib,selectors,signal,subprocess,tempfile,time
+            assert os.geteuid()==0 and pathlib.Path('/proc/1/exe').readlink().name=='systemd'
+            assert not pathlib.Path('/.dockerenv').exists()
+            unit='security-web-engine-liveness-probe-20261024.scope'
+            relative='/system.slice/'+unit
+            group=pathlib.Path('/sys/fs/cgroup'+relative)
+            description='security-web-engine-finite-synthetic-liveness-20261024'
+            def command(args):
+                return subprocess.check_output(args,stderr=subprocess.DEVNULL,timeout=15,text=True).strip()
+            def owned(allow_empty=False):
+                fields=dict(line.split('=',1) for line in command(['/usr/bin/systemctl','show',unit,'--property=Description,Transient,Slice,KillMode,ControlGroup,ActiveState']).splitlines())
+                state=fields.pop('ActiveState'); control=fields.pop('ControlGroup')
+                assert fields=={'Description':description,'Transient':'yes','Slice':'system.slice','KillMode':'control-group'}
+                assert control==relative or (allow_empty and control=='' and state in {'inactive','failed'} and not os.path.lexists(group))
+            assert command(['/usr/bin/systemctl','show',unit,'-p','LoadState','--value'])=='not-found'
+            assert not os.path.lexists(group)
+            descriptors=[os.memfd_create('web-scope-synthetic-lock-'+str(i),os.MFD_CLOEXEC) for i in range(3)]
+            process=None
+            try:
+                for fd in descriptors: fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                expected=[[os.fstat(fd).st_dev,os.fstat(fd).st_ino] for fd in descriptors]
+                code='''import json,os,sys,time
+            fds=list(map(int,sys.argv[1:]))
+            identity=[[os.fstat(fd).st_dev,os.fstat(fd).st_ino] for fd in fds]
+            r,w=os.pipe()
+            pid=os.fork()
+            if pid==0:
+                os.close(r);os.setsid();os.write(w,b"1");os.close(w)
+                time.sleep(25);os._exit(0)
+            os.close(w);assert os.read(r,1)==b"1";os.close(r)
+            print(json.dumps({"identity":identity,"descendant":pid}),flush=True)
+            time.sleep(25)
+            '''
+                args=['/usr/bin/systemd-run','--scope','--system','--quiet','--no-ask-password','--expand-environment=no','--slice=system.slice','--unit='+unit,'--description='+description,'--property=KillMode=control-group','--property=SendSIGKILL=yes','--property=TimeoutStopSec=10s','--property=RuntimeMaxSec=25','--','/usr/bin/python3','-I','-B','-c',code,*map(str,descriptors)]
+                with tempfile.TemporaryFile() as errors:
+                    process=subprocess.Popen(args,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=errors,pass_fds=descriptors,start_new_session=True)
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(process.stdout,selectors.EVENT_READ)
+                        assert selector.select(10),'scope child did not start'
+                        raw=process.stdout.readline(4097)
+                    assert len(raw)<=4096 and raw.endswith(b'\n')
+                    result=json.loads(raw);assert result['identity']==expected
+                    owned()
+                    descendant=result['descendant'];assert isinstance(descendant,int) and descendant>1
+                    assert pathlib.Path('/proc/'+str(descendant)+'/cgroup').read_text().strip()=='0::'+relative
+                    os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=5)
+                    os.kill(descendant,0)  # setsid child survived leader process-group death
+                    owned()
+                    command(['/usr/bin/systemctl','stop',unit])
+                    assert not os.path.lexists(group) or dict(line.split() for line in (group/'cgroup.events').read_text().splitlines())['populated']=='0'
+                    print(json.dumps({'status':'PASS','inherited_locked_descriptors':3,'setsid_survived_group_kill':True,'owned_scope_empty_after_stop':True}))
+            finally:
+                if command(['/usr/bin/systemctl','show',unit,'-p','LoadState','--value'])!='not-found':
+                    owned(allow_empty=True);command(['/usr/bin/systemctl','stop',unit])
+                if process is not None and process.poll() is None:
+                    os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=5)
+                if process is not None: process.stdout.close()
+                for fd in descriptors: os.close(fd)
+      timeout: 60
+      changed_when: false
+      register: web_scope_probe
+    - name: Show only the synthetic containment result
+      ansible.builtin.debug:
+        var: web_scope_probe.stdout

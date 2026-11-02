@@ -4,7 +4,7 @@ import { useChatScroll } from './useChatScroll'
 
 describe('useChatScroll', () => {
   let container: HTMLDivElement
-  let markAsReadMock: ReturnType<typeof vi.fn>
+  let markAsReadMock: ReturnType<typeof vi.fn<() => void>>
   let originalRaf: typeof window.requestAnimationFrame
 
   beforeEach(() => {

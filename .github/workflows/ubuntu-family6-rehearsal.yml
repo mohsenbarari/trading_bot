@@ -1,0 +1,101 @@
+name: Root-derived Ubuntu exact-six disposable ordinary rehearsal
+on:
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: Rehearse exact-six forward and rollback only on two disposable hosted runners
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: ubuntu-family6-disposable-rehearsal-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  ordinary:
+    if: inputs.execute == true && github.ref == 'refs/heads/main' && github.repository == 'mohsenbarari/trading_bot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [ubuntu239, ubuntu243]
+    steps:
+      - name: Check out the exact dispatched Main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Require hosted ownership and clean exact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(id -u)" = 1001
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          test "$GITHUB_REPOSITORY_ID" = 1065680631
+          test "$GITHUB_REPOSITORY" = mohsenbarari/trading_bot
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+          cd "$GITHUB_WORKSPACE"
+          test "$(/usr/bin/git rev-parse --verify HEAD)" = "$GITHUB_SHA"
+          /usr/bin/git diff --quiet
+          /usr/bin/git diff --cached --quiet
+          test "$(/usr/bin/git ls-files --others --exclude-standard -z | wc -c)" -eq 0
+          printf '%s  %s\n' b5435d2d88f1f4243bb12c4ab94bd447eeb073f0158abc616c025130ad364b01 scripts/ubuntu_family6_rehearsal/rehearse_family6.py | sha256sum -c -
+          printf '%s  %s\n' 784961753e73e06acee2a64f196d1610befa935fe9e6cf31bab2d184b27e7094 scripts/ubuntu_family6_rehearsal/collect_public_evidence.py | sha256sum -c -
+      - name: Run one ordinary exact-six forward and rollback
+        id: rehearsal
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          umask 077
+          /usr/bin/python3 -I -S -B scripts/ubuntu_family6_rehearsal/rehearse_family6.py \
+            --execute-family6-rehearsal "$PROFILE" --source-sha256 b5435d2d88f1f4243bb12c4ab94bd447eeb073f0158abc616c025130ad364b01 \
+            > "$RUNNER_TEMP/family6-result-$PROFILE.json"
+      - name: Collect only bounded public receipts and original failed producer proofs
+        if: always()
+        id: evidence
+        shell: bash
+        env:
+          PROFILE: ${{ matrix.profile }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s  %s\n' 784961753e73e06acee2a64f196d1610befa935fe9e6cf31bab2d184b27e7094 scripts/ubuntu_family6_rehearsal/collect_public_evidence.py | sha256sum -c -
+          /usr/bin/python3 -I -S -B scripts/ubuntu_family6_rehearsal/collect_public_evidence.py \
+            --collect-public-evidence --profile "$PROFILE"
+      - name: Retain quarantined public evidence without granting Host authority
+        if: always() && steps.evidence.outcome == 'success'
+        timeout-minutes: 10
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ubuntu-family6-ordinary-evidence-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: error
+          path: ${{ runner.temp }}/family6-public-evidence/*
+      - name: Retain small failure diagnostic separately from original producer ZIP
+        if: failure() && steps.evidence.outcome == 'success'
+        timeout-minutes: 3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: ubuntu-family6-ordinary-failure-diagnostic-${{ matrix.profile }}-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/family6-public-evidence/failed-public-phase-output.bin
+            ${{ runner.temp }}/family6-public-evidence/family6-result-${{ matrix.profile }}.json
+            ${{ runner.temp }}/family6-public-evidence/COLLECTION.json

@@ -92,7 +92,14 @@ jobs:
       - name: Run real multi-worker Redis proof
         shell: bash
         env:
+          APP_ENV_FILE: config/unit-test.env.example
+          ENVIRONMENT: test
+          SERVER_MODE: foreign
           MARKET_STAGE14_TEST_REDIS_URL: redis://127.0.0.1:6379/14
+          REDIS_URL: redis://127.0.0.1:6379/14
+          POSTGRES_DB: postgres
+          POSTGRES_USER: market_ci
+          POSTGRES_PASSWORD: market_ci
           DATABASE_URL: postgresql+asyncpg://market_ci:market_ci@127.0.0.1:5432/postgres
           SYNC_DATABASE_URL: postgresql+psycopg2://market_ci:market_ci@127.0.0.1:5432/postgres
           FRONTEND_URL: http://127.0.0.1:4173
@@ -184,8 +191,12 @@ jobs:
           else
             make observability-gate
           fi
+          python3 -m unittest -v tests.test_browser_ci_bootstrap_contract
 
   frontend-browser-matrix:
+    permissions:
+      contents: read
+      actions: read
     name: frontend-browser-matrix (${{ matrix.browser }} shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     needs:
@@ -195,6 +206,8 @@ jobs:
     timeout-minutes: 75
     env:
       CERTS_HOST_PATH: /tmp/trading-bot-ci-certs
+      PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR: /tmp/trading-bot-ci-coin-inference
+      PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR: /tmp/trading-bot-ci-product-estimator
 
     strategy:
       fail-fast: false
@@ -216,7 +229,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24.22.1'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -234,6 +247,8 @@ jobs:
           SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
           REDIS_URL=redis://redis:6379/0
           FRONTEND_URL=http://127.0.0.1:4173
+          PUBLIC_WEBAPP_URL=https://ci-iran.invalid
+          IRAN_SERVER_DOMAIN=ci-iran.invalid
           DEV_API_KEY=REDACTED_DEV_API_KEY
           JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
           EOF
@@ -243,7 +258,10 @@ jobs:
           EOF
 
       - name: Prepare CI host paths
-        run: mkdir -p /tmp/trading-bot-ci-certs
+        run: |
+          mkdir -p -- "$CERTS_HOST_PATH" \
+            "$PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR" \
+            "$PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR"
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -258,6 +276,8 @@ jobs:
         run: npm run build
 
       - name: Bootstrap backend stack
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bash ./scripts/bootstrap_ci_backend.sh
 
       - name: Verify browser CI backend surface
@@ -265,13 +285,22 @@ jobs:
         run: |
           docker compose exec -T app python - <<'PY'
           from core.config import settings
+          from core.public_webapp_url import public_webapp_url_for_links
+
+          EXPECTED_CI_PUBLIC_WEBAPP_ORIGIN = "https://ci-iran.invalid"
 
           environment = (settings.environment or "").strip().lower()
           server_mode = (settings.server_mode or "").strip().lower()
           if environment != "staging":
-              raise SystemExit(f"unexpected environment={environment!r}")
+              raise SystemExit("unexpected_ci_environment")
           if server_mode != "iran":
-              raise SystemExit(f"unexpected server_mode={server_mode!r}")
+              raise SystemExit("unexpected_ci_server_mode")
+          try:
+              public_origin = public_webapp_url_for_links(settings_obj=settings)
+          except Exception:
+              raise SystemExit("invalid_ci_public_webapp_origin") from None
+          if public_origin != EXPECTED_CI_PUBLIC_WEBAPP_ORIGIN:
+              raise SystemExit("unexpected_ci_public_webapp_origin")
           PY
           curl -fsS -o /dev/null -X POST http://127.0.0.1:8000/api/auth/dev-login \
             -H 'Content-Type: application/json'
@@ -286,6 +315,12 @@ jobs:
         env:
           CI: 'true'
           PLAYWRIGHT_HTML_OPEN: never
+          # Explicitly authorize only this hosted runner's disposable stack.
+          E2E_TARGET_ENV: local
+          E2E_ALLOW_LOCAL_MUTATION: local-dev-only
+          E2E_BACKEND_BASE_URL: http://127.0.0.1:8000
+          E2E_APP_CONTAINER_NAME: trading_bot_app
+          E2E_REDIS_CONTAINER_NAME: trading_bot_redis
         shell: bash
         run: |
           case "${{ matrix.browser }}" in

@@ -1,0 +1,76 @@
+---
+# Exact superseded validation image only; never an active/previous release.
+- name: Remove one unused superseded security trial image without forcing references
+  hosts: boot_mount_bot
+  gather_facts: false
+  any_errors_fatal: true
+  environment:
+    DOCKER_HOST: unix:///var/run/docker.sock
+  vars:
+    security_trial_image_cleanup_apply: false
+    trial_image: sha256:61e83a73ebd37b8582140a4c0cc9abcd8895a8b0b4f5289dc1fd07d2bae78f34
+  tasks:
+    - name: Admit only the existing exact native local lane and fixed trial identity
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['boot_mount_bot']
+          - ansible_connection == 'local' and ansible_host == '65.109.216.187' and ansible_user == 'root'
+          - trial_image == 'sha256:61e83a73ebd37b8582140a4c0cc9abcd8895a8b0b4f5289dc1fd07d2bae78f34'
+    - name: Require native namespace before contacting its Docker daemon
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import os,pathlib
+            assert os.geteuid()==0 and pathlib.Path('/proc/1/exe').readlink().name=='systemd'
+            assert not any(pathlib.Path(p).exists() for p in ('/.dockerenv','/run/.containerenv'))
+            for ns in ('pid','mnt','user'):assert os.readlink('/proc/self/ns/'+ns)==os.readlink('/proc/1/ns/'+ns)
+      changed_when: false
+      check_mode: false
+    - name: Capture all container identities and referenced image names without environments
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, '--host=unix:///var/run/docker.sock', ps, --all, --no-trunc, --format, '{% raw %}{{.ID}} {{.Image}}{% endraw %}']
+      register: trial_runtime_before
+      changed_when: false
+      check_mode: false
+    - name: Require exactly the fifteen restored containers before cleanup
+      ansible.builtin.assert:
+        that: trial_runtime_before.stdout_lines | length == 15
+    - name: Verify the exact trial tag still has only the known unused image identity
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, '--host=unix:///var/run/docker.sock', image, inspect, --format, '{% raw %}{{.Id}} {{json .RepoTags}}{% endraw %}', trading-bot-security-app:20261023]
+      register: trial_metadata
+      changed_when: false
+      check_mode: false
+      failed_when: trial_metadata.stdout != trial_image ~ ' ["trading-bot-security-app:20261023"]'
+    - name: Refuse any immutable container image reference to the obsolete trial
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, '--host=unix:///var/run/docker.sock', container, inspect, --format, '{% raw %}{{.Id}} {{.Image}}{% endraw %}', '{{ item.split()[0] }}']
+      loop: '{{ trial_runtime_before.stdout_lines }}'
+      register: trial_references_before
+      changed_when: false
+      check_mode: false
+      failed_when: trial_image in trial_references_before.stdout
+    - name: Default and check mode do not remove any image
+      ansible.builtin.meta: end_play
+      when: not (security_trial_image_cleanup_apply | bool) or ansible_check_mode
+    - name: Remove only the fixed obsolete trial image without force or prune
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, '--host=unix:///var/run/docker.sock', image, rm, '{{ trial_image }}']
+      timeout: 60
+    - name: Require all original container identities and image references unchanged
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, '--host=unix:///var/run/docker.sock', ps, --all, --no-trunc, --format, '{% raw %}{{.ID}} {{.Image}}{% endraw %}']
+      changed_when: false
+      register: trial_runtime_after
+      failed_when: trial_runtime_after.stdout_lines | sort != trial_runtime_before.stdout_lines | sort
+    - name: Require the original immutable image reference for every original container
+      ansible.builtin.command:
+        argv: [/usr/bin/docker, '--host=unix:///var/run/docker.sock', container, inspect, --format, '{% raw %}{{.Id}} {{.Image}}{% endraw %}', '{{ item.item.split()[0] }}']
+      loop: '{{ trial_references_before.results }}'
+      register: trial_reference_after
+      changed_when: false
+      failed_when: trial_reference_after.stdout != item.stdout

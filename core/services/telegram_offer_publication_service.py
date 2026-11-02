@@ -350,13 +350,13 @@ async def publish_offer_to_telegram_channel_once(
     ``Offer.channel_message_id``. The legacy field is still backfilled locally
     because older code paths use it to edit the channel post.
     """
-    _assert_legacy_direct_delivery_owner()
     if current_server() != SERVER_FOREIGN:
         return TelegramOfferPublicationResult(
             message_id=None,
             status=None,
             skipped_reason="telegram_publication_foreign_only",
         )
+    _assert_legacy_direct_delivery_owner()
 
     in_memory_message_id = _coerce_int(getattr(offer, "channel_message_id", None))
     state = await get_or_create_telegram_publication_state(db, offer)

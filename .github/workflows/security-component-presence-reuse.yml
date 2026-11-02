@@ -1,0 +1,161 @@
+name: Existing 19d image component evidence only
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: security-component-presence-reuse-19d
+  cancel-in-progress: false
+
+jobs:
+  component-evidence:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Seal the two current published public helper buffers
+        id: seal
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,re,stat,subprocess,tempfile
+          assert os.geteuid()==1001 and os.environ['GITHUB_ACTIONS']=='true' and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          os.umask(0o077)
+          parent=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          assert parent.is_dir() and parent.stat().st_uid==1001 and not parent.stat().st_mode&0o022
+          free=os.statvfs(parent);assert free.f_bavail*free.f_frsize>=8*1024**3
+          root=pathlib.Path(tempfile.mkdtemp(prefix='component-reuse-19d-',dir=parent))
+          (root/'source').mkdir(mode=0o700);(root/'evidence').mkdir(mode=0o700)
+          commit=os.environ['GITHUB_SHA'];assert re.fullmatch('[a-f0-9]{40}',commit)
+          records={}
+          for name in ('admit_security_component_image_reuse.py','verify_image_component_presence.py'):
+              gitpath='scripts/'+name
+              size=subprocess.run(['git','--no-optional-locks','cat-file','-s',commit+':'+gitpath],check=True,capture_output=True,timeout=10).stdout
+              assert re.fullmatch(rb'[1-9][0-9]{0,5}\n',size) and int(size)<=65536
+              raw=subprocess.run(['git','--no-optional-locks','cat-file','blob',commit+':'+gitpath],check=True,capture_output=True,timeout=10).stdout
+              assert len(raw)==int(size)
+              if name=='verify_image_component_presence.py':assert sha256(raw).hexdigest()=='36e92fdfd3105a9db6bc20fd75aade1238a5e0b053a581bfb24c7b5e1bf6a6d3'
+              fd=os.open(root/'source'/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+              with os.fdopen(fd,'wb') as out:out.write(raw);out.flush();os.fsync(out.fileno())
+              records[name]={'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
+          with (root/'source/identity.json').open('x') as out:json.dump({'recipe_commit':commit,'files':records},out,sort_keys=True)
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as out:out.write('root='+str(root)+'\n')
+          PY
+
+      - name: Download only the fixed authenticated public archive without logging redirects
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import os,pathlib,resource,signal,stat,subprocess
+          root=pathlib.Path(os.environ['CAPSULE_ROOT']);assert root.resolve(strict=True)==root and root.stat().st_uid==1001 and stat.S_IMODE(root.stat().st_mode)==0o700
+          path=root/'artifact.zip';limit=180449870
+          def limits():resource.setrlimit(resource.RLIMIT_FSIZE,(limit+1,)*2);resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+          fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+          with os.fdopen(fd,'wb') as out:
+              child=subprocess.Popen(['gh','api','--method','GET','repos/mohsenbarari/trading_bot/actions/artifacts/12552928309/zip'],
+                  stdin=subprocess.DEVNULL,stdout=out,stderr=subprocess.DEVNULL,start_new_session=True,preexec_fn=limits)
+              try:assert child.wait(timeout=300)==0
+              finally:
+                  try:os.killpg(child.pid,signal.SIGKILL)
+                  except ProcessLookupError:pass
+                  child.wait(timeout=10)
+              out.flush();os.fsync(out.fileno())
+          assert path.stat().st_size==limit
+          value=sha256();total=0
+          with path.open('rb') as source:
+              while block:=source.read(min(1048576,limit+1-total)):
+                  total+=len(block);assert total<=limit;value.update(block)
+          assert total==limit and value.hexdigest()=='a737731a99ddf2d8cb43bcfaeb0e8490c56cdb7ac751c4ea5fbdf1cde327959b'
+          PY
+
+      - name: Admit the exact exported image then run only the sealed isolated component probe
+        id: probe
+        env:
+          CAPSULE_ROOT: ${{ steps.seal.outputs.root }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,selectors,signal,stat,subprocess,time,types
+          assert os.geteuid()==1001 and os.environ['GITHUB_ACTIONS']=='true' and os.environ['RUNNER_ENVIRONMENT']=='github-hosted'
+          root=pathlib.Path(os.environ['CAPSULE_ROOT']);assert root.resolve(strict=True)==root and root.stat().st_uid==1001 and stat.S_IMODE(root.stat().st_mode)==0o700
+          def read(path,maximum):
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1 and stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=maximum
+                  raw=os.read(fd,maximum+1)
+                  ident=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                  assert len(raw)==before.st_size and ident(before)==ident(os.fstat(fd))==ident(path.lstat())
+                  return raw
+              finally:os.close(fd)
+          source=json.loads(read(root/'source/identity.json',65536));buffers={}
+          assert source['recipe_commit']==os.environ['GITHUB_SHA'] and set(source['files'])=={'admit_security_component_image_reuse.py','verify_image_component_presence.py'}
+          for name,row in source['files'].items():
+              raw=read(root/'source'/name,65536);assert len(raw)==row['bytes'] and sha256(raw).hexdigest()==row['sha256'];buffers[name]=raw
+          helper=types.ModuleType('sealed_component_reuse');exec(compile(buffers['admit_security_component_image_reuse.py'],'<sealed-component-reuse>','exec'),helper.__dict__)
+          probe=types.ModuleType('sealed_component_probe');exec(compile(buffers['verify_image_component_presence.py'],'<sealed-component-probe>','exec'),probe.__dict__)
+          def write(name,raw):
+              assert len(raw)<=131072
+              fd=os.open(root/'evidence'/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+              with os.fdopen(fd,'wb') as out:out.write(raw);out.flush();os.fsync(out.fileno())
+          admitted=helper.admit_image(root/'artifact.zip',root/'admitted')
+          write('image-admission.json',(json.dumps(admitted,sort_keys=True)+'\n').encode())
+          docker=['/usr/bin/docker','--host=unix:///var/run/docker.sock']
+          def load_archive(stream):
+              child=subprocess.Popen([*docker,'image','load'],stdin=stream,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+                  env={'PATH':'/usr/bin:/bin','LC_ALL':'C.UTF-8'},start_new_session=True)
+              deadline=time.monotonic()+180;output=bytearray();complete=False
+              try:
+                  with selectors.DefaultSelector() as selector:
+                      selector.register(child.stdout,selectors.EVENT_READ)
+                      while selector.get_map():
+                          assert time.monotonic()<deadline
+                          for key,_ in selector.select(0.1):
+                              block=os.read(key.fileobj.fileno(),min(4096,65537-len(output)))
+                              if not block:selector.unregister(key.fileobj)
+                              else:output.extend(block);assert len(output)<=65536
+                  assert child.wait(timeout=max(0.1,deadline-time.monotonic()))==0;complete=True
+              finally:
+                  if not complete or child.poll() is None:
+                      try:os.killpg(child.pid,signal.SIGKILL)
+                      except ProcessLookupError:pass
+                  child.wait(timeout=10);child.stdout.close()
+          with helper.pinned(root/'admitted/candidate-image.tar',helper.MAX_TAR) as (stream,size):
+              assert size==admitted['docker_archive_bytes'] and helper.digest(stream,size)==admitted['docker_archive_sha256']
+              stream.seek(0);load_archive(stream)
+          actual=probe.bounded_command([*docker,'image','inspect','--format','{{.Id}}',helper.IMAGE],maximum=256,timeout=10)
+          assert actual.decode().strip()==helper.IMAGE
+          raw=buffers['verify_image_component_presence.py'];assert sha256(raw).hexdigest()==helper.PROBE_SHA256
+          receipt=probe.in_container(helper.IMAGE,helper.SOURCE,raw,helper.PROBE_SHA256)
+          record=json.loads(receipt)
+          assert record['scope']=='known_vendor_component_paths_and_names_plus_actual_perl_inc'
+          assert all(record[key] is False for key in ('security_accepted','scanner_findings_modified','production_mounts_or_data_used','dynamic_runtime_code_downloads_analyzed','renamed_or_obfuscated_embedded_code_analyzed','directory_symlinks_followed'))
+          write('component-presence.json',receipt)
+          write('execution.json',(json.dumps({'schema':'security_component_image_reuse_execution/1','image_id':helper.IMAGE,
+              'original_source_commit':helper.SOURCE,'recipe':source,'admission_sha256':sha256(read(root/'evidence/image-admission.json',131072)).hexdigest(),
+              'component_receipt_sha256':sha256(receipt).hexdigest(),'image_rebuilt':False,'production_mounts_or_data_used':False,
+              'scanner_findings_modified':False,'security_accepted':False,'deployment_performed':False},sort_keys=True)+'\n').encode())
+          PY
+
+      - name: Retain only the bounded public admission and component receipts
+        if: always() && steps.seal.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-component-presence-19d-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: warn
+          path: |
+            ${{ steps.seal.outputs.root }}/evidence/image-admission.json
+            ${{ steps.seal.outputs.root }}/evidence/component-presence.json
+            ${{ steps.seal.outputs.root }}/evidence/execution.json

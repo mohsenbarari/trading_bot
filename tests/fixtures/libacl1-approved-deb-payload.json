@@ -1,0 +1,58 @@
+{
+  "DEB": {
+    "bytes": 37076,
+    "sha256": "bbb12e190bfe19b876f73a669848ebd8d04293d95000babf51058c88879966b1"
+  },
+  "payload": {
+    "deb_sha256": "bbb12e190bfe19b876f73a669848ebd8d04293d95000babf51058c88879966b1",
+    "installed_version": "2.4.0-1~trixie+gold1",
+    "package": "libacl1",
+    "regular_and_link_inventory_complete": true,
+    "regular_files": [
+      {
+        "bytes": 42928,
+        "canonical_path": "/usr/lib/x86_64-linux-gnu/libacl.so.1.2.2400",
+        "gid": 0,
+        "mode": 33188,
+        "path": "/usr/lib/x86_64-linux-gnu/libacl.so.1.2.2400",
+        "sha256": "32d112de5fb4ec3124c7a4b859b738b45e4c4a9db3b3115f167625f082909dd1",
+        "uid": 0
+      },
+      {
+        "bytes": 2048,
+        "canonical_path": "/usr/share/doc/libacl1/copyright",
+        "gid": 0,
+        "mode": 33188,
+        "path": "/usr/share/doc/libacl1/copyright",
+        "sha256": "9a2dfb4a5abc7e84be2cc41f1089be665519c9409549296f6c19de57ab1d37c2",
+        "uid": 0
+      },
+      {
+        "bytes": 9449,
+        "canonical_path": "/usr/share/doc/libacl1/changelog.gz",
+        "gid": 0,
+        "mode": 33188,
+        "path": "/usr/share/doc/libacl1/changelog.gz",
+        "sha256": "c0910a998c929d9e2c955a9120e5288577bd9cabd7173950a1f615657de23cfa",
+        "uid": 0
+      },
+      {
+        "bytes": 8497,
+        "canonical_path": "/usr/share/doc/libacl1/changelog.Debian.gz",
+        "gid": 0,
+        "mode": 33188,
+        "path": "/usr/share/doc/libacl1/changelog.Debian.gz",
+        "sha256": "d7993ff9df347bb1032191ed0b32d0ea7f003f93ca618b13a9439721b10d0c3d",
+        "uid": 0
+      }
+    ],
+    "symlinks": [
+      {
+        "path": "/usr/lib/x86_64-linux-gnu/libacl.so.1",
+        "target": "libacl.so.1.2.2400"
+      }
+    ]
+  },
+  "schema": "actual_pinned_libacl1_DEB_regular_payload/1",
+  "source_only_fixture_not_actual_pilot_image_inventory": true
+}

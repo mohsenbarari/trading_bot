@@ -63,7 +63,9 @@ def _json(path: Path, document: dict[str, object]) -> Path:
 
 class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.workspace = Path(tempfile.mkdtemp(prefix="pp-prep-", dir="/root"))
+        # Private inputs must be outside the checkout and /tmp, but a hosted
+        # runner does not own /root. Its actual home is an owned fixture base.
+        self.workspace = Path(tempfile.mkdtemp(prefix="pp-prep-", dir=Path.home()))
         os.chmod(self.workspace, 0o700)
         self.payload = self.workspace / "payload"
         self.payload.mkdir(mode=0o700)
@@ -346,7 +348,10 @@ class PreparePrivatePrimaryControlReleaseTests(unittest.TestCase):
 
     def test_existing_divergent_release_is_fail_closed(self) -> None:
         self.install()
-        (self.base / SHA / "control.txt").write_text("tampered\n", encoding="utf-8")
+        target = self.base / SHA / "control.txt"
+        target.chmod(0o600)  # Explicit owner tampering, not root DAC bypass.
+        target.write_text("tampered\n", encoding="utf-8")
+        target.chmod(0o444)
         with self.assertRaisesRegex(preparer.PrepareError, "existing_release_digest_mismatch"):
             self.install(receipt=self.workspace / "receipts" / "mismatch.json")
         self.assertEqual((self.base / SHA / "control.txt").read_text(encoding="utf-8"), "tampered\n")

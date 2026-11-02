@@ -33,6 +33,7 @@ from .xau_model_input import (
 PROJECTION_VERSION = "market-fact-projection-v2-xau-model-input"
 MAX_EXPORT_PER_CYCLE = 5_000
 XAU_MODEL_INPUT_REFRESH_PER_CYCLE = 50_000
+HISTORY_DISCOVERY_WINDOW = 500
 RESEARCH_CONTEXT_SOURCES = frozenset(
     {
         "GROUP_1",
@@ -109,6 +110,10 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS market_fact_export_history_event_idx
         ON market_fact_export_history(event_key,fact_revision);
+        CREATE TABLE IF NOT EXISTS market_fact_export_discovery_cursor (
+            partition_name TEXT PRIMARY KEY,
+            last_order_key INTEGER NOT NULL CHECK(last_order_key>=0)
+        );
         CREATE INDEX IF NOT EXISTS idx_market_observations_export_event_time
         ON market_observations(event_time_utc DESC,id DESC);
         CREATE INDEX IF NOT EXISTS idx_market_observations_export_non_xau_id
@@ -119,6 +124,9 @@ def initialize_export_ledger(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_market_observations_export_xau_state
         ON market_observations(event_key,inserted_at_utc,id,source_code)
         WHERE source_code='XAUUSD';
+        CREATE INDEX IF NOT EXISTS idx_market_observations_export_source_latest
+        ON market_observations(source_code,event_time_utc DESC,id DESC)
+        WHERE source_code<>'XAUUSD';
         CREATE INDEX IF NOT EXISTS market_fact_export_ledger_state_idx
         ON market_fact_export_ledger(
             event_key,observation_inserted_at_utc,status,reason_code
@@ -301,6 +309,63 @@ def _refresh_xau_model_input_buckets(
     return len(rows)
 
 
+def _bounded_export_history(market, *, pending, excluded, limit):
+    """Discover old work in bounded cyclic windows, retaining unselected work.
+
+    No permanent ledger/ACK reset. The cursor belongs only to discovery, and is
+    committed with the normal export transaction. A full sweep wraps so edits
+    and retractions behind a prior window are eventually rediscovered as well.
+    """
+    windows = {}
+    pending_rows = {}
+    for partition in ("non_xau", "xau"):
+        row = market.execute("SELECT last_order_key FROM market_fact_export_discovery_cursor WHERE partition_name=?", (partition,)).fetchone()
+        previous = int(row[0]) if row else 0
+        if partition == "non_xau":
+            window = market.execute(
+                "SELECT id AS order_key,id FROM market_observations INDEXED BY idx_market_observations_export_non_xau_state "
+                "WHERE source_code<>'XAUUSD' AND id>? ORDER BY id LIMIT ?",
+                (previous, HISTORY_DISCOVERY_WINDOW),
+            ).fetchall()
+        else:
+            window = market.execute(
+                "SELECT bucket_number AS order_key,selected_observation_id AS id FROM market_xau_model_input_buckets "
+                "WHERE bucket_number>? AND CAST(strftime('%s','now') AS INTEGER) >= "
+                f"(bucket_number+1)*{XAU_MODEL_INPUT_BUCKET_SECONDS}+{XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS} "
+                "ORDER BY bucket_number LIMIT ?", (previous, HISTORY_DISCOVERY_WINDOW),
+            ).fetchall()
+        windows[partition] = (previous, window)
+        identities = tuple(int(item["id"]) for item in window)
+        if not identities:
+            continue
+        placeholders = ",".join("?" for _ in identities)
+        for item in market.execute(
+            "SELECT o.id,o.event_key FROM market_observations o "
+            "LEFT JOIN market_fact_export_ledger l INDEXED BY market_fact_export_ledger_state_idx ON l.event_key=o.event_key "
+            "LEFT JOIN market_fact_export_semantics s INDEXED BY market_fact_export_semantics_state_idx ON s.event_key=o.event_key "
+            f"WHERE o.id IN ({placeholders}) AND {pending}", identities,
+        ):
+            if bytes(item["event_key"]) not in excluded:
+                pending_rows[int(item["id"])] = item
+    selected = set(sorted(pending_rows)[:limit])
+    for partition, (previous, window) in windows.items():
+        safe_key = previous
+        for item in window:
+            identity = int(item["id"])
+            if identity in pending_rows and identity not in selected:
+                break  # Never advance past pending work left outside this batch.
+            safe_key = int(item["order_key"])
+        if not window:
+            safe_key = 0  # End of sweep, not a stream/checkpoint reset.
+        market.execute(
+            "INSERT INTO market_fact_export_discovery_cursor VALUES(?,?) ON CONFLICT(partition_name) DO UPDATE SET last_order_key=excluded.last_order_key",
+            (partition, safe_key),
+        )
+    if not selected:
+        return []
+    return market.execute("SELECT * FROM market_observations WHERE id IN (" + ",".join("?" for _ in selected) + ") ORDER BY id", tuple(sorted(selected))).fetchall()
+
+
 def _pending_export_rows(
     market: sqlite3.Connection,
     *,
@@ -384,15 +449,67 @@ def _pending_export_rows(
     # Coin-group facts are the primary estimator input and must not be starved
     # by the continuous public-reference stream. Offers sort ahead of trades,
     # so dependent trades follow their offer roots in this or an earlier batch.
-    rows = select(
-        "AND o.source_code IN ('GROUP_1','GROUP_2') "
-        "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
-        "o.event_time_utc DESC,o.id DESC",
-        (),
-        max_rows,
-    )
+    references = [code for code, source in load_source_registry().by_code().items()
+                  if source.transfer_to_bot and code not in {"GROUP_1", "GROUP_2"}]
+    fair_batch = max_rows >= max(10, len(references) + 3)
+    if fair_batch:
+        # A day of coin replay must not hide fresh gold/Herat references from
+        # the model. Bound every source's live share, and reserve history work.
+        # Source-time indexes restrict empty/acknowledged searches to ten
+        # minutes instead of sorting the entire permanent group history.
+        rows = []
+        history_reserve = min(max(1, max_rows // 5), max_rows - len(references) - 2)
+        group_budget = min(max_rows // 2, max_rows - len(references) - history_reserve)
+        group_share = max(1, group_budget // 2)
+        for source in ("GROUP_1", "GROUP_2"):
+            rows.extend(select(
+                "AND o.source_code=? AND o.event_time_utc >= "
+                "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
+                "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
+                "o.event_time_utc DESC,o.id DESC", (source,), group_share,
+                from_sql="market_observations o INDEXED BY idx_market_observations_export_source_latest",
+                eligibility="o.source_code<>'XAUUSD'",
+            ))
+        reference_share = max(1, (max_rows - 2 * group_share - history_reserve) // max(1, len(references)))
+        for source in references:
+            remaining = max_rows - len(rows)
+            if remaining <= 0:
+                break
+            if source == "XAUUSD":
+                rows.extend(select(
+                    "ORDER BY b.bucket_number DESC", (), min(reference_share, remaining),
+                    from_sql="market_xau_model_input_buckets b CROSS JOIN market_observations o INDEXED BY idx_market_observations_export_xau_state",
+                    eligibility=(
+                        "o.event_key=b.selected_event_key AND o.source_code='XAUUSD' "
+                        "AND b.bucket_number >= CAST(strftime('%s','now') AS INTEGER) / "
+                        f"{XAU_MODEL_INPUT_BUCKET_SECONDS} - {600 // XAU_MODEL_INPUT_BUCKET_SECONDS} "
+                        "AND CAST(strftime('%s','now') AS INTEGER) >= "
+                        f"(b.bucket_number + 1) * {XAU_MODEL_INPUT_BUCKET_SECONDS} "
+                        f"+ {XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS}"
+                    ),
+                ))
+            else:
+                rows.extend(select(
+                    "AND o.source_code=? AND o.event_time_utc >= "
+                    "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
+                    "ORDER BY o.event_time_utc DESC,o.id DESC", (source,), min(reference_share, remaining),
+                    from_sql="market_observations o INDEXED BY idx_market_observations_export_source_latest",
+                    eligibility="o.source_code<>'XAUUSD'",
+                ))
+    else:
+        rows = select(
+            "AND o.source_code IN ('GROUP_1','GROUP_2') "
+            "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
+            "o.event_time_utc DESC,o.id DESC", (), max_rows,
+        )
     remaining = max_rows - len(rows)
     if remaining:
+        if fair_batch:
+            rows.extend(_bounded_export_history(
+                market, pending=pending,
+                excluded={bytes(row["event_key"]) for row in rows}, limit=remaining,
+            ))
+            return rows
         selected = tuple(bytes(row["event_key"]) for row in rows)
         exclusion = (
             "AND o.event_key NOT IN ("
@@ -407,7 +524,7 @@ def _pending_export_rows(
             + "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
             + "ORDER BY o.event_time_utc DESC,o.id DESC",
             selected,
-            remaining,
+            max(0, remaining - min(remaining, history_reserve)) if fair_batch else remaining,
         )
         fresh.sort(
             key=lambda row: (

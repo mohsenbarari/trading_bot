@@ -1,0 +1,5 @@
+--- a/tests/test_market_pipeline_stage3_foundation.py
++++ b/tests/test_market_pipeline_stage3_foundation.py
+@@ -225 +225 @@
+-        self.assertIn("python:3.11-slim-bookworm@sha256:", dockerfile)
++        self.assertIn("python:3.11.17-slim-trixie@sha256:b95327ce1439e687237841b0210677aeadd62d55a060a5f6bcb9c15bf6251dd3", dockerfile)

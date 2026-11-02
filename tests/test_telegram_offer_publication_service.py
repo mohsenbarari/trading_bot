@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.exc import IntegrityError
 
+from core import telegram_delivery_runtime_policy as delivery_policy
 from core.services import telegram_offer_publication_service as publication_service
 from core.services.offer_publication_state_service import (
     CanonicalPublicationIdentityError,
@@ -114,9 +115,102 @@ class TelegramOfferPublicationServiceTests(unittest.IsolatedAsyncioTestCase):
                     send_offer_to_channel=send_mock,
                 )
 
-        server_mock.assert_not_called()
+        # Reading the site is harmless; Foreign ownership still precedes all effects.
+        server_mock.assert_called_once_with()
         send_mock.assert_not_awaited()
         self.assertEqual(db.execute_calls, [])
+
+    async def test_iran_documented_skip_never_reaches_authority_database_or_provider(self):
+        send_mock = AsyncMock()
+        with patch.object(publication_service, "current_server", return_value="iran"), patch.object(
+            publication_service,
+            "assert_telegram_provider_execution_authority",
+            side_effect=AssertionError("Iran no-op must not request provider authority"),
+        ) as authority, patch.object(
+            publication_service, "get_or_create_telegram_publication_state", new=AsyncMock()
+        ) as state:
+            result = await publication_service.publish_offer_to_telegram_channel_once(
+                object(), object(), object(), send_offer_to_channel=send_mock
+            )
+        self.assertEqual(result.skipped_reason, "telegram_publication_foreign_only")
+        self.assertIsNone(result.message_id)
+        self.assertIsNone(result.status)
+        self.assertFalse(result.send_attempted)
+        authority.assert_not_called()
+        state.assert_not_awaited()
+        send_mock.assert_not_awaited()
+
+    async def test_foreign_producer_only_actual_authority_still_denies_before_any_effect(self):
+        configured = SimpleNamespace(
+            telegram_provider_test_authority=False,
+            trading_bot_service="api",
+            telegram_delivery_producer_mode="queue-v1",
+            telegram_delivery_execution_owner="producer-only",
+            telegram_delivery_queue_worker_enabled=False,
+            telegram_delivery_queue_cutover_ready=False,
+        )
+        db = FakeDB()
+        send_mock = AsyncMock()
+        with patch.object(publication_service, "current_server", return_value="foreign"), patch.object(
+            delivery_policy, "current_server", return_value="foreign"
+        ), patch.object(delivery_policy, "settings", configured), patch.object(
+            publication_service, "get_or_create_telegram_publication_state", new=AsyncMock()
+        ) as state:
+            with self.assertRaisesRegex(
+                delivery_policy.TelegramProviderAuthorityError,
+                "producer_only_forbidden_provider_execution",
+            ):
+                await publication_service.publish_offer_to_telegram_channel_once(
+                    db, make_offer(), SimpleNamespace(id=1), send_offer_to_channel=send_mock
+                )
+        state.assert_not_awaited()
+        send_mock.assert_not_awaited()
+        self.assertEqual(db.execute_calls, [])
+        self.assertEqual(db.added, [])
+        db.flush.assert_not_awaited()
+        db.refresh.assert_not_awaited()
+
+    async def test_foreign_authorized_actual_guards_precede_fake_database_and_send(self):
+        configured = SimpleNamespace(
+            telegram_provider_test_authority=False,
+            trading_bot_service="bot",
+            telegram_delivery_producer_mode="legacy",
+            telegram_delivery_execution_owner="legacy",
+            telegram_delivery_queue_worker_enabled=False,
+            telegram_delivery_queue_cutover_ready=False,
+        )
+        db = FakeDB()
+        offer = make_offer()
+        user = SimpleNamespace(id=1)
+        events = []
+        actual_authority = publication_service.assert_telegram_provider_execution_authority
+        actual_execute = db.execute
+        def authority():
+            events.append("authority")
+            actual_authority()
+        async def execute(stmt):
+            events.append("database")
+            return await actual_execute(stmt)
+        async def fake_send(_offer, _user):
+            events.append("fake_provider")
+            return 777
+        db.execute = execute
+        send_mock = AsyncMock(side_effect=fake_send)
+        with patch.object(publication_service, "current_server", return_value="foreign"), patch.object(
+            delivery_policy, "current_server", return_value="foreign"
+        ), patch.object(delivery_policy, "settings", configured), patch.object(
+            publication_service, "assert_telegram_provider_execution_authority", side_effect=authority
+        ), patch.object(publication_service.settings, "channel_id", -100):
+            result = await publication_service.publish_offer_to_telegram_channel_once(
+                db, offer, user, send_offer_to_channel=send_mock
+            )
+        self.assertEqual(events[0], "authority")
+        self.assertIn("database", events)
+        self.assertEqual(events[-1], "fake_provider")
+        send_mock.assert_awaited_once_with(offer, user)
+        self.assertTrue(result.sent_new_message)
+        self.assertEqual(result.message_id, 777)
+        self.assertEqual(db.state.status, OfferPublicationStatus.SENT)
 
     async def test_get_or_create_recovers_from_duplicate_insert_race(self):
         offer = make_offer()

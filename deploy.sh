@@ -401,6 +401,7 @@ run_with_local_resource_guard() {
         echo "setsid is required for guarded process-group containment." >&2
         return 1
     }
+    local started_seconds=$SECONDS
     setsid --wait "$@" &
     local cmd_pid=$!
     # A non-interactive background job is not a process-group leader, so
@@ -408,20 +409,40 @@ run_with_local_resource_guard() {
     # that identity even when a short leader exits before the first `ps`.
     local process_group="$cmd_pid"
     local observed_process_group
-    observed_process_group="$(ps -o pgid= -p "$cmd_pid" | tr -d '[:space:]')"
-    [[ -z "$observed_process_group" || "$observed_process_group" == "$process_group" ]] || {
+    local isolation_seconds=2
+    if [ "$maximum_seconds" -lt "$isolation_seconds" ]; then
+        isolation_seconds="$maximum_seconds"
+    fi
+    # The forked launcher initially inherits our PGID until setsid executes.
+    # User code cannot execute before setsid creates the isolated session.
+    # Wait only for that known-PID transition (or a finished leader), never
+    # interpret one pre-exec ps snapshot as a permanent isolation failure.
+    while :; do
+        observed_process_group="$(ps -o pgid= -p "$cmd_pid" 2>/dev/null | tr -d '[:space:]' || true)"
+        if [[ "$observed_process_group" == "$process_group" ]] || ! kill -0 "$cmd_pid" 2>/dev/null; then
+            break
+        fi
+        if (( SECONDS - started_seconds >= isolation_seconds )); then
+            break
+        fi
+        sleep 0.01
+    done
+    if [[ "$observed_process_group" != "$process_group" ]] && kill -0 "$cmd_pid" 2>/dev/null; then
         echo "Could not isolate the guarded command in its own process group." >&2
         kill -TERM "$cmd_pid" 2>/dev/null || true
-        sleep 0.1
-        kill -KILL "$cmd_pid" 2>/dev/null || true
-        if ! wait_for_guarded_process_stop "$cmd_pid" "$cmd_pid" 5; then
+        if ! terminate_guarded_process "$cmd_pid" "$process_group"; then
             echo "Could not stop the non-isolated guarded command within the safety bound." >&2
             return 1
         fi
-        wait "$cmd_pid" 2>/dev/null || true
         return 1
-    }
-    local started_seconds=$SECONDS
+    fi
+    if (( SECONDS - started_seconds >= maximum_seconds )); then
+        echo "❌ Wall-clock deadline reached for '$label' after ${maximum_seconds}s. Stopping the entire process group."
+        if ! terminate_guarded_process "$cmd_pid" "$process_group"; then
+            return 125
+        fi
+        return 124
+    fi
     if [ "$monitor_resources" = "1" ]; then
         read -r prev_total prev_idle <<EOF
 $(sample_cpu_usage)
@@ -536,6 +557,10 @@ hash_file_or_dir() {
 }
 
 frontend_build_signature() {
+    node "$FRONTEND_DIR/scripts/check-node-security-baseline.mjs" >/dev/null 2>&1 || {
+        echo "Frontend security baseline rejected the Node runtime before cache lookup." >&2
+        return 1
+    }
     {
         printf 'node=%s\n' "$(node -p 'process.versions.node' 2>/dev/null || true)"
         printf 'npm=%s\n' "$(npm --version 2>/dev/null || true)"
@@ -544,6 +569,7 @@ frontend_build_signature() {
         for rel in \
             frontend/package.json \
             frontend/package-lock.json \
+            frontend/scripts/check-node-security-baseline.mjs \
             frontend/vite.config.ts \
             frontend/tsconfig.json \
             frontend/tsconfig.app.json \
@@ -567,6 +593,7 @@ foreign_image_signature() {
             Dockerfile \
             .dockerignore \
             requirements.txt \
+            deploy/production/pip-bootstrap-requirements.txt \
             pip_packages \
             api \
             bot \
@@ -643,7 +670,9 @@ build_frontend() {
         cd "$PROJECT_DIR"
         return 0
     fi
-    run_with_local_resource_guard "Frontend build" bash -lc "cd \"$FRONTEND_DIR\" && if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent; fi && NODE_OPTIONS=\"--max-old-space-size=1024\" npm run build"
+    # Do not start a login shell: its profile can replace the scoped, verified
+    # Node PATH inherited from the official release controller.
+    run_with_local_resource_guard "Frontend build" bash -c 'cd -- "$1" && if [ -f package-lock.json ]; then npm ci --silent; else npm install --silent; fi && NODE_OPTIONS="--max-old-space-size=1024" npm run build' frontend-build "$FRONTEND_DIR"
 
     if [ ! -d "$DIST_DIR" ]; then
         echo "❌ Build directory ($DIST_DIR) not found!"
@@ -659,6 +688,22 @@ build_frontend() {
 # ==========================================
 # 1.5. Prepare Pip Packages (Germany only)
 # ==========================================
+prepare_app_security_os_cache() {
+    local target="${1:?App image target is required}"
+    local -a mode=()
+    if [ "$target" = "foreign" ] && [ "$PRODUCTION_REQUIRE_PREBUILT_FOREIGN_IMAGE" = "1" ]; then
+        mode+=(--check)
+    else
+        mkdir -p -- "$PROJECT_DIR/pip_packages"
+    fi
+    python3 -I -B "$PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --cache-dir "$PROJECT_DIR/pip_packages/security-os-capsule" "${mode[@]}"
+    python3 -I -B "$PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
+        --cache-dir "$PROJECT_DIR/pip_packages/sqlite-wal-capsule" "${mode[@]}"
+    python3 -I -B "$PROJECT_DIR/scripts/prepare_tar_acl_os_cache.py" \
+        --cache-dir "$PROJECT_DIR/pip_packages/tar-acl-capsule" "${mode[@]}"
+}
+
 prepare_pip_packages() {
     print_header "📦 Checking pip dependencies"
     
@@ -667,16 +712,18 @@ prepare_pip_packages() {
     CURRENT_HASH="$(
         {
             md5sum "$PROJECT_DIR/requirements.txt"
+            md5sum "$PROJECT_DIR/scripts/prepare_psycopg2_source.py"
             if [ -f "$PIP_BOOTSTRAP_REQUIREMENTS" ]; then
                 md5sum "$PIP_BOOTSTRAP_REQUIREMENTS"
             fi
         } | md5sum | cut -d' ' -f1
     )-$LOCAL_ARCH"
     
-    if [ "$DEPLOY_FORCE_REBUILD" = "1" ] || [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$CURRENT_HASH" ] || [ ! -d "$PROJECT_DIR/pip_packages" ]; then
+    if [ "$DEPLOY_FORCE_REBUILD" = "1" ] || [ ! -f "$HASH_FILE" ] || [ "$(cat "$HASH_FILE")" != "$CURRENT_HASH" ] || [ ! -d "$PROJECT_DIR/pip_packages" ] || ! python3 -I -B "$PROJECT_DIR/scripts/prepare_psycopg2_source.py" check --cache-dir "$PROJECT_DIR/pip_packages" --requirements "$PROJECT_DIR/requirements.txt"; then
         echo "🔄 requirements.txt changed or packages missing. Downloading..."
         mkdir -p "$PROJECT_DIR/pip_packages"
         rm -f "$PROJECT_DIR"/pip_packages/*.whl "$PROJECT_DIR"/pip_packages/*.tar.gz "$PROJECT_DIR"/pip_packages/*.zip "$PROJECT_DIR/pip_packages/.requirements_hash" 2>/dev/null || true
+        python3 -I -B "$PROJECT_DIR/scripts/prepare_psycopg2_source.py" prepare --cache-dir "$PROJECT_DIR/pip_packages" --requirements "$PROJECT_DIR/requirements.txt"
         mapfile -t PIP_PLATFORM_ARGS < <(append_pip_platform_args "$LOCAL_ARCH")
 
         if [ -f "$PIP_BOOTSTRAP_REQUIREMENTS" ]; then
@@ -696,7 +743,7 @@ prepare_pip_packages() {
             -w "$PROJECT_DIR/pip_packages/"
         
         # Download for Python 3.11 (Docker image version)
-        python3 -m pip download -r "$PROJECT_DIR/requirements.txt" \
+        python3 -m pip download -r "$PROJECT_DIR/pip_packages/.requirements-without-psycopg2.txt" \
             -d "$PROJECT_DIR/pip_packages/" \
             --find-links "$PROJECT_DIR/pip_packages/" \
             --python-version 311 \
@@ -719,6 +766,7 @@ deploy_iran() {
     print_header "🇮🇷 Deploying to Iran Server ($IRAN_HOST)"
 
     cd "$PROJECT_DIR"
+    prepare_app_security_os_cache iran
     ensure_iran_host_timezone
 
     # 2a. Check for uncommitted changes & push to GitHub
@@ -802,6 +850,7 @@ deploy_foreign() {
 
     cd "$PROJECT_DIR"
     verify_official_source_still_frozen
+    prepare_app_security_os_cache foreign
     ensure_local_host_timezone
     resolve_local_compose_cmd
 

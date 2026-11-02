@@ -1,0 +1,165 @@
+---
+- name: Stage or execute one finite retained legacy-container parking step
+  hosts: security_web:security_bot
+  serial: 1
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    legacy_workspace: "{{ ('/root/trading-bot/trading_bot/.local/' if security_site == 'bot' else '/srv/trading-bot/') + 'security-legacy-parking-20261025-01-' + legacy_nonce }}"
+  tasks:
+    - name: Bind only the existing exact Native and Web access lanes
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | sort == ['security_bot', 'security_web']
+          - legacy_nonce is match('^[a-f0-9]{32}$')
+          - legacy_window_sha256 is match('^[a-f0-9]{64}$')
+          - legacy_profile_sha256 is match('^[a-f0-9]{64}$')
+          - legacy_app_sha256 is match('^[a-f0-9]{64}$')
+          - legacy_action in ['stage', 'check', 'target']
+          - ansible_user == 'root'
+          - (security_site == 'web' and ansible_host == '65.109.220.59' and ansible_port | int == 37067) or (security_site == 'bot' and ansible_connection == 'local' and ansible_host == '65.109.216.187' and ansible_port | int == 22)
+      no_log: true
+    - name: Exclusively create only a requested new public-control directory
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import os,pathlib,stat,sys
+            p=pathlib.Path(sys.argv[1]);stage=sys.argv[2]=='stage'
+            assert p.is_absolute() and p.resolve(strict=False)==p
+            for parent in p.parents:
+                s=parent.lstat();assert stat.S_ISDIR(s.st_mode) and s.st_uid==s.st_gid==0 and not s.st_mode&0o022
+            if stage:
+                os.umask(0o077);os.mkdir(p,0o700);os.mkdir(p/'results',0o700)
+                fd=os.open(p.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);os.fsync(fd);os.close(fd)
+            for child in (p,p/'results'):
+                s=child.lstat();assert stat.S_ISDIR(s.st_mode) and s.st_uid==s.st_gid==0 and stat.S_IMODE(s.st_mode)==0o700 and child.resolve(strict=True)==child
+          - '{{ legacy_workspace }}'
+          - '{{ legacy_action }}'
+      changed_when: legacy_action == 'stage'
+      no_log: true
+    - name: Stage only pinned public code and new public controls
+      when: legacy_action == 'stage'
+      ansible.builtin.copy:
+        src: '{{ item.path }}'
+        dest: '{{ legacy_workspace }}/{{ item.name }}'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      loop: '{{ legacy_assets }}'
+      no_log: true
+    - name: Seal only a complete new public source stage without adopting partial files
+      when: legacy_action == 'stage'
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            from hashlib import sha256
+            import json,os,pathlib,stat,sys
+            p=pathlib.Path(sys.argv[1]);assets=json.loads(sys.argv[2]);assert len(assets) in (5,6)
+            held=[]
+            try:
+                identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                for asset in assets:
+                    path=p/asset['name'];assert path.resolve(strict=True)==path
+                    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK);s=os.fstat(fd);held.append((fd,path,identity(s)))
+                    assert stat.S_ISREG(s.st_mode) and s.st_uid==s.st_gid==0 and s.st_nlink==1 and stat.S_IMODE(s.st_mode)==0o600 and 0<s.st_size<=2097152
+                    raw=os.pread(fd,s.st_size+1,0);assert len(raw)==s.st_size and sha256(raw).hexdigest()==asset['sha256'] and identity(s)==identity(os.fstat(fd))==identity(path.lstat())
+                value={'schema':'security_legacy_parking_stage/1','nonce':sys.argv[3],'source_sha256':next(a['sha256'] for a in assets if a['name']=='security_legacy_parking.py'),'window_sha256':sys.argv[4],'profile_sha256':sys.argv[5],'app_sha256':sys.argv[6]}
+                fd=os.open(p/'public-stage.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                with os.fdopen(fd,'wb') as f:f.write((json.dumps(value,sort_keys=True)+'\n').encode());f.flush();os.fsync(f.fileno())
+                for fd,path,before in held:assert before==identity(os.fstat(fd))==identity(path.lstat())
+                fd=os.open(p,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW);os.fsync(fd);os.close(fd)
+            finally:
+                for fd,_,_ in held:os.close(fd)
+          - '{{ legacy_workspace }}'
+          - '{{ legacy_assets | to_json }}'
+          - '{{ legacy_nonce }}'
+          - '{{ legacy_window_sha256 }}'
+          - '{{ legacy_profile_sha256 }}'
+          - '{{ legacy_app_sha256 }}'
+      changed_when: true
+      no_log: true
+    - name: Execute the first verified public worker buffer with its descriptor retained
+      when: legacy_action != 'stage'
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            from hashlib import sha256
+            import os,pathlib,stat,sys
+            path=pathlib.Path(sys.argv[1]);pin=sys.argv[2];arguments=sys.argv[3:]
+            assert path.is_absolute() and path.resolve(strict=True)==path
+            fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+            try:
+                ident=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+                before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==before.st_gid==0 and before.st_nlink==1 and stat.S_IMODE(before.st_mode)==0o600 and 0<before.st_size<=131072
+                raw=os.pread(fd,before.st_size+1,0)
+                def check():assert ident(before)==ident(os.fstat(fd))==ident(path.lstat()) and sha256(os.pread(fd,before.st_size+1,0)).hexdigest()==pin
+                assert len(raw)==before.st_size and sha256(raw).hexdigest()==pin
+                check();code=compile(raw,str(path),'exec');check();sys.argv=[str(path),*arguments]
+                try:exec(code,{'__name__':'__main__','__file__':str(path),'__package__':None})
+                finally:check()
+            finally:os.close(fd)
+          - '{{ legacy_workspace }}/security_legacy_parking.py'
+          - '{{ (legacy_assets | selectattr("name", "equalto", "security_legacy_parking.py") | first).sha256 }}'
+          - --role
+          - worker
+          - --mode
+          - '{{ legacy_action }}'
+          - --site
+          - '{{ security_site }}'
+          - --target
+          - '{{ legacy_target }}'
+          - --projection
+          - '{{ legacy_projection }}'
+          - --directory
+          - '{{ legacy_workspace }}'
+          - --window
+          - '{{ legacy_workspace }}/legacy-window.json'
+          - --window-sha256
+          - '{{ legacy_window_sha256 }}'
+          - --profile
+          - '{{ legacy_workspace }}/legacy-profile.json'
+          - --profile-sha256
+          - '{{ legacy_profile_sha256 }}'
+          - --app-result
+          - '{{ legacy_workspace }}/app-controller-result.json'
+          - --app-sha256
+          - '{{ legacy_app_sha256 }}'
+          - --primitives
+          - '{{ legacy_workspace }}/validate_docker_daemon_maintenance.py'
+          - --parent
+          - '{{ legacy_workspace }}/parent-parking.json'
+          - --parent-sha256
+          - '{{ legacy_parent_sha256 }}'
+          - --confirm
+          - PARK-ONLY-ELEVEN-RETAIN-CIDS-DATA-IMAGES-20261025-01
+      register: legacy_worker
+      failed_when: false
+      changed_when: legacy_action == 'target'
+      timeout: 900
+      no_log: true
+    - name: Fetch only the known public target result
+      when: legacy_action == 'target'
+      ansible.builtin.fetch:
+        src: '{{ legacy_workspace }}/result-{{ legacy_target }}.json'
+        dest: '{{ legacy_result_destination }}'
+        flat: true
+        validate_checksum: true
+      no_log: true
+    - name: Require the known worker exit without repeating its target request
+      when: legacy_action != 'stage'
+      ansible.builtin.assert:
+        that: legacy_worker.rc == 0
+      no_log: true

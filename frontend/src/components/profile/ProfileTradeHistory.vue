@@ -16,3 +16,10 @@ withDefaults(defineProps<{
     </AppInsetGroup>
   </section>
 </template>
+
+<style scoped>
+/* History date popovers extend beyond the inset group's rounded body. */
+:deep(.history-section-card > .ui-inset-group__body) {
+  overflow: visible;
+}
+</style>

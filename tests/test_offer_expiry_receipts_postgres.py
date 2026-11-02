@@ -16,6 +16,9 @@ from api.routers.offers import InternalOfferExpireRequest, _expire_offer_interna
 from core import offer_publication_worker as publication_worker
 from core.events import setup_event_listeners
 from core.offer_expiry_contracts import build_offer_expiry_command_identity
+from core.services.offer_publication_state_service import (
+    TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
+)
 from core.services.telegram_offer_channel_service import OfferChannelStateApplyResult
 from models.commodity import Commodity
 from models.offer import Offer, OfferStatus, OfferType
@@ -344,8 +347,10 @@ class OfferExpiryReceiptsPostgresTests(unittest.IsolatedAsyncioTestCase):
                     offer_home_server="iran",
                     surface=OfferPublicationSurface.TELEGRAM_CHANNEL,
                     publication_owner_server="foreign",
+                    publisher_bot_identity=TELEGRAM_PRIMARY_PUBLISHER_BOT_IDENTITY,
                     status=OfferPublicationStatus.SENT,
                     dedupe_key=f"offer-publication:telegram_channel:{public_id}",
+                    telegram_chat_id=-1001234567890,
                     telegram_message_id=offer.channel_message_id,
                     offer_version_id=offer.version_id,
                     last_known_offer_status=OfferStatus.ACTIVE.value,

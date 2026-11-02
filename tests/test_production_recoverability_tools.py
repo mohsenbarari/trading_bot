@@ -35,6 +35,7 @@ class ProductionRecoverabilityToolsTests(unittest.TestCase):
         self.assertIn("/app/audit_trail", shell)
         self.assertIn("trading_bot_restore_drill_iran_20260611T150000Z", shell)
         self.assertIn("postgres:15-alpine", shell)
+        self.assertIn("docker run -d --network none --pull never --memory 1g --cpus 1 --pids-limit 256", shell)
         self.assertIn("OWNER TO", shell)
         self.assertIn("CREATE ROLE", shell)
         self.assertIn("umask 077", shell)

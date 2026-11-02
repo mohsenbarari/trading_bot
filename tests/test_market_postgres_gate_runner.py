@@ -11,6 +11,36 @@ from scripts import run_market_postgres_gate as gate
 
 
 class MarketPostgresGateRunnerTests(unittest.TestCase):
+    def test_real_redis_workflow_steps_have_complete_isolated_settings(self):
+        expected = {
+            "APP_ENV_FILE": "config/unit-test.env.example",
+            "ENVIRONMENT": "test",
+            "SERVER_MODE": "foreign",
+            "MARKET_STAGE14_TEST_REDIS_URL": "redis://127.0.0.1:6379/14",
+            "REDIS_URL": "redis://127.0.0.1:6379/14",
+            "POSTGRES_DB": "postgres",
+            "POSTGRES_USER": "market_ci",
+            "POSTGRES_PASSWORD": "market_ci",
+            "DATABASE_URL": "postgresql+asyncpg://market_ci:market_ci@127.0.0.1:5432/postgres",
+            "SYNC_DATABASE_URL": "postgresql+psycopg2://market_ci:market_ci@127.0.0.1:5432/postgres",
+        }
+        for name in ("merge-gate.yml", "pre-release-gate.yml"):
+            with self.subTest(workflow=name):
+                workflow = (gate.REPO_ROOT / ".github/workflows" / name).read_text(
+                    encoding="utf-8"
+                )
+                step = workflow.split("      - name: Run real multi-worker Redis proof\n", 1)[1]
+                step = step.split("\n      - name:", 1)[0]
+                env_block = step.split("        env:\n", 1)[1].split("\n        run:", 1)[0]
+                environment = dict(
+                    line.strip().split(": ", 1) for line in env_block.splitlines()
+                )
+                self.assertEqual(
+                    {key: environment.get(key) for key in expected},
+                    expected,
+                )
+                self.assertIn("scripts/assert_no_unittest_skips.py", step)
+
     def test_admin_url_is_local_postgres_control_database_only(self):
         accepted = gate._validate_admin_url(
             "postgresql://market:secret@127.0.0.1:55432/postgres"

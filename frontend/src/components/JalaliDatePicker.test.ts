@@ -1,10 +1,26 @@
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { resolve } from 'node:path'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import moment from 'moment-jalaali'
+import { parse } from 'postcss'
 import JalaliDatePicker from './JalaliDatePicker.vue'
+
+const pickerSource = readFileSync(resolve(process.cwd(), 'src/components/JalaliDatePicker.vue'), 'utf8')
+const pickerStyles = parse(pickerSource.match(/<style scoped>([\s\S]*?)<\/style>/)![1]!)
+
+function calendarDeclaration(selector: string, property: string, narrow = false) {
+  let value = ''
+  pickerStyles.walkRules(selector, (rule) => {
+    if ((rule.parent?.type === 'atrule') !== narrow) return
+    rule.walkDecls(property, (declaration) => { value = declaration.value })
+  })
+  return value
+}
 
 const protectedTradingSettingsSource = readFileSync(
   resolve(process.cwd(), 'src/components/TradingSettings.vue'),
@@ -27,7 +43,157 @@ function findDay(wrapper: ReturnType<typeof mount>, label: string) {
   return day!
 }
 
+function classifySfc(source: string): number[] {
+  const checker = readFileSync(resolve(process.cwd(), '../scripts/check_stage9_diff_coverage.py'), 'utf8')
+  const program = checker.match(/VUE_NON_EXECUTABLE_PROGRAM = r"""([\s\S]*?)"""/)?.[1]
+  if (!program) throw new Error('missing exact SFC classifier program')
+  const directory = mkdtempSync(join(tmpdir(), 'stage9-sfc-fixture-'))
+  try {
+    const filename = join(directory, 'Fixture.vue')
+    writeFileSync(filename, source, { mode: 0o600, flag: 'wx' })
+    const output = execFileSync(process.execPath, ['-e', program, filename], {
+      cwd: process.cwd(), timeout: 10000, maxBuffer: 512 * 1024,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: { PATH: process.env.PATH ?? '', LC_ALL: 'C.UTF-8' },
+    })
+    return JSON.parse(output.toString()).non_executable as number[]
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+}
+
 describe('JalaliDatePicker.vue', () => {
+  it('keeps executable SFC blocks even when static CSS shares their physical line', () => {
+    expect(classifySfc('<script setup>const value=mustRemainExecutable()</script><template>{{value}}</template><style>.x{color:red}</style>')).not.toContain(1)
+    expect(classifySfc('<script>/* no statement */</script><script setup>mustRemainExecutable()</script><template>{{value}}</template>')).not.toContain(1)
+  })
+
+  it('classifies only static CSS and structural tokens, not template or string contents', () => {
+    const lines = classifySfc('<script setup lang="ts">\nconst value = `\n// not a JS comment\n}\n`\nfunction choose() {\n  return value\n}\n</script>\n<template>{{ value }}</template>\n<style scoped>\n.x { color: red; }\n</style>\n')
+    for (const line of [3, 4, 6, 7, 10]) expect(lines).not.toContain(line)
+    for (const line of [8, 11, 12, 13]) expect(lines).toContain(line)
+    const dynamic = classifySfc('<script setup>const color="red"</script>\n<template>{{color}}</template>\n<style>.x{color:v-bind(color)}</style>\n')
+    expect(dynamic).not.toContain(2)
+    expect(dynamic).not.toContain(3)
+  })
+
+  it.each([
+    '<script setup>const value = </script>',
+    '<script lang="coffee">value = yes</script><template><div /></template>',
+    '<script src="./external.js"></script><template><div /></template>',
+  ])('refuses unparsed or external script source instead of waiving coverage: %s', (source) => {
+    expect(() => classifySfc(source)).toThrow()
+  })
+
+  it.each([false, true])('does not measure an inline or closed calendar on resize (inline=%s)', (inline) => {
+    const wrapper = mount(JalaliDatePicker, { props: { modelValue: '1405/08/02', valueType: 'jalali', inline } })
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    try {
+      window.dispatchEvent(new Event('resize'))
+      expect(measure).not.toHaveBeenCalled()
+      expect(wrapper.find('.jalali-calendar-panel').exists()).toBe(inline)
+    } finally {
+      wrapper.unmount()
+      measure.mockRestore()
+    }
+  })
+
+  it('ignores resize when an open panel has been removed from its anchor', async () => {
+    const wrapper = mount(JalaliDatePicker, { props: { modelValue: '1405/08/02', valueType: 'jalali' } })
+    await wrapper.get('.jalali-date-trigger').trigger('click')
+    await nextTick()
+    wrapper.get('.jalali-calendar-panel').element.remove()
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    try {
+      window.dispatchEvent(new Event('resize'))
+      expect(measure).not.toHaveBeenCalled()
+      expect(wrapper.find('.jalali-calendar-panel').exists()).toBe(false)
+    } finally {
+      wrapper.unmount()
+      measure.mockRestore()
+    }
+  })
+
+  it('safely ignores an already queued resize callback after the root ref unmounts', async () => {
+    const registered = vi.spyOn(window as Window, 'addEventListener')
+    const wrapper = mount(JalaliDatePicker, { props: { modelValue: '1405/08/02', valueType: 'jalali' } })
+    await wrapper.get('.jalali-date-trigger').trigger('click')
+    await nextTick()
+    const resize = registered.mock.calls.find(([event]) => event === 'resize')?.[1]
+    wrapper.unmount()
+    await nextTick()
+    const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    try {
+      expect(typeof resize).toBe('function')
+      if (typeof resize !== 'function') throw new Error('missing actual resize listener')
+      resize.call(window, new Event('resize'))
+      expect(measure).not.toHaveBeenCalled()
+    } finally {
+      registered.mockRestore()
+      measure.mockRestore()
+    }
+  })
+
+  it('budgets seven 40px popover targets independently of a narrow trigger', () => {
+    const popover = '.jalali-calendar-panel.is-popover'
+    expect(calendarDeclaration(popover, 'width')).toBe('min(360px, calc(100vw - 16px))')
+    expect(calendarDeclaration(popover, 'box-sizing')).toBe('border-box')
+    expect(calendarDeclaration(popover, 'left')).toBe('50%')
+    expect(calendarDeclaration(popover, 'right')).toBe('auto')
+    expect(calendarDeclaration(popover, 'transform')).toBe('translateX(calc(-50% + var(--jalali-popover-shift, 0px)))')
+    expect(calendarDeclaration(`${popover} .jalali-calendar-day`, 'min-width')).toBe('40px')
+    expect(calendarDeclaration(`${popover} .jalali-calendar-day`, 'width')).toBe('100%')
+
+    // This is a production-CSS budget contract, not a jsdom layout assertion.
+    // The E2E picker helper checks actual browser rectangles and hit targets.
+    for (const viewport of [320, 360, 375, 414, 1280]) {
+      const panelWidth = Math.min(360, viewport - 16)
+      const padding = Number.parseFloat(calendarDeclaration(
+        viewport <= 360 ? popover : '.jalali-calendar-panel', 'padding', viewport <= 360,
+      ))
+      const gap = Number.parseFloat(calendarDeclaration(
+        viewport <= 360
+          ? `${popover} .jalali-calendar-weekdays,\n  ${popover} .jalali-calendar-grid`
+          : '.jalali-calendar-weekdays,\n.jalali-calendar-grid', 'gap', viewport <= 360,
+      ))
+      expect((panelWidth - 2 * padding - 2 - 6 * gap) / 7).toBeGreaterThanOrEqual(40)
+    }
+  })
+
+  it.each([
+    { viewport: 320, left: 8, width: 140, panelWidth: 304 },
+    { viewport: 414, left: 8, width: 170, panelWidth: 360 },
+    { viewport: 414, left: 236, width: 170, panelWidth: 360 },
+    { viewport: 1280, left: 430, width: 170, panelWidth: 360 },
+  ])('clamps a $viewport px popover using its actual anchor, including after resize', async (geometry) => {
+    vi.stubGlobal('innerWidth', geometry.viewport)
+    const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('jalali-date-picker')
+        ? { left: geometry.left, width: geometry.width } as DOMRect
+        : { width: geometry.panelWidth } as DOMRect
+    })
+    const wrapper = mount(JalaliDatePicker, { props: { modelValue: '1405/08/02', valueType: 'jalali' } })
+    try {
+      await wrapper.get('.jalali-date-trigger').trigger('click')
+      await nextTick()
+      const panel = wrapper.get('.jalali-calendar-panel').element as HTMLElement
+      const centeredLeft = geometry.left + (geometry.width - geometry.panelWidth) / 2
+      const actualLeft = () => centeredLeft + Number.parseFloat(panel.style.getPropertyValue('--jalali-popover-shift'))
+      expect(actualLeft()).toBeGreaterThanOrEqual(8)
+      expect(actualLeft() + geometry.panelWidth).toBeLessThanOrEqual(geometry.viewport - 8)
+
+      vi.stubGlobal('innerWidth', geometry.viewport + 100)
+      window.dispatchEvent(new Event('resize'))
+      await nextTick()
+      expect(actualLeft()).toBeGreaterThanOrEqual(8)
+      expect(actualLeft() + geometry.panelWidth).toBeLessThanOrEqual(geometry.viewport + 100 - 8)
+    } finally {
+      wrapper.unmount()
+      rect.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('renders a Gregorian model as Jalali text and emits Gregorian values', async () => {
     const wrapper = mount(JalaliDatePicker, {
       props: {

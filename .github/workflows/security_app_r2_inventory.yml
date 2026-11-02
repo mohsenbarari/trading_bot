@@ -1,0 +1,58 @@
+name: Fixed App R2 public ELF and documentation observation
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_collection:
+        description: Collect only fixed R2 public archive, whole ELF and target policy facts; no runtime or security acceptance
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: security-fixed-app-r2-public-inventory
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    if: github.repository == 'mohsenbarari/trading_bot' && github.ref == 'refs/heads/main' && inputs.run_collection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out this exact reviewed observation source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Verify bounded fixed public observation contracts
+        run: /usr/bin/python3 -I -S -B deploy/maintenance/app_r2_observe/test_collection_contract.py
+
+      - name: Seal exact Q Git source and collect fixed R2 facts
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          /usr/bin/python3 -I -S -B deploy/maintenance/app_r2_observe/seal_and_run.py \
+            --root "$RUNNER_TEMP/security-app-ci-smoke-r2-observe-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            --source-sha256 02530f334eb8e4db722d23462bbc80c5aa25781a8dcda21dfeda17283b98e57e \
+            --execute-fixed-R2-observation
+
+      - name: Preserve genuine public observations and cleanup without acceptance
+        if: always() && steps.run.outputs.root != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fixed-app-r2-public-observations-${{ github.run_id }}-${{ github.run_attempt }}
+          archive: true
+          overwrite: false
+          include-hidden-files: false
+          retention-days: 10
+          if-no-files-found: error
+          path: |
+            ${{ steps.run.outputs.root }}/reports/*.json
+            ${{ steps.run.outputs.root }}/evidence/public-evidence.zip

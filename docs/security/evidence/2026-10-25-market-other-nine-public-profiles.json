@@ -1,0 +1,212 @@
+{
+  "cache_scope": "normal CPython SourceFileLoader cache selection/header rejection only; no cached code deserialized or executed",
+  "candidate_full_role_matrix": "NOT_TESTED",
+  "historical_lock_identical_to_E46": true,
+  "installed_dependency_parity": "NOT_ASSESSED_HERE",
+  "new_candidate_built": false,
+  "profiles": [
+    {
+      "cache": {
+        "bytes": 26828,
+        "path": "docs/security/evidence/2026-10-25-market-2c3731f573e1-public-cache-classification.json",
+        "sha256": "5f0726ef62b2e8e2836fe2e2b863a3d3a1385f5cbe8d6042dbb11d1b8ab938d7"
+      },
+      "cache_count": 44,
+      "explicit_bytecode_loader_reachability_assessed": false,
+      "historical_dependency_lock_sha256": "37c5dd760d0816ad0b4546aca8bc5e18875478cdacfb1620bae3d9f5ff29ae29",
+      "image_id": "sha256:2c3731f573e152203c25548a944150f957714037d52b4a17aabd1f7908c3cbfb",
+      "label_commit": "7aa96bdd55d90113daf2712ec39185c2a02bd3af",
+      "label_tree": "546476f701566ee7880cef68b9e2f38cbb4b4241",
+      "new_image_built": false,
+      "non_pyc_file_count": 95,
+      "security_accepted": false,
+      "source": {
+        "bytes": 29676,
+        "path": "docs/security/evidence/2026-10-25-market-2c3731f573e1-public-source.json",
+        "sha256": "eb84451ef7f5f23d789bc55f7292df278d52050957bc7e7817191d83d7028419"
+      },
+      "source_override_record": null
+    },
+    {
+      "cache": {
+        "bytes": 62518,
+        "path": "docs/security/evidence/2026-10-25-market-a37ec78ec097-public-cache-classification.json",
+        "sha256": "9cd672ab23c9a077cf7703e8467bf080ceef6f4d9e0b77c8d1228bf81814f7c6"
+      },
+      "cache_count": 105,
+      "explicit_bytecode_loader_reachability_assessed": false,
+      "historical_dependency_lock_sha256": "37c5dd760d0816ad0b4546aca8bc5e18875478cdacfb1620bae3d9f5ff29ae29",
+      "image_id": "sha256:a37ec78ec0977479f534d73d7228b9619362ec36bdb18ce94bebbead8d414b9a",
+      "label_commit": "f5b98fee4b7916f0aba4f4676c78a2228714957f",
+      "label_tree": "0a45e3416a373fa7d14f99a1110db5bac71eadcf",
+      "new_image_built": false,
+      "non_pyc_file_count": 94,
+      "security_accepted": false,
+      "source": {
+        "bytes": 43297,
+        "path": "docs/security/evidence/2026-10-25-market-a37ec78ec097-public-source.json",
+        "sha256": "3c69f855c09e1c2ada8959265436de8d7a07d2e29e7c52d0d3ed1307d0d411af"
+      },
+      "source_override_record": null
+    },
+    {
+      "cache": {
+        "bytes": 8585,
+        "path": "docs/security/evidence/2026-10-25-market-e31aed440f25-public-cache-classification.json",
+        "sha256": "4f430a4f49a6676bb48989fdd060459e5844d2c72b2e8ab6ed9ea5a9c53bc937"
+      },
+      "cache_count": 13,
+      "explicit_bytecode_loader_reachability_assessed": false,
+      "historical_dependency_lock_sha256": "37c5dd760d0816ad0b4546aca8bc5e18875478cdacfb1620bae3d9f5ff29ae29",
+      "image_id": "sha256:e31aed440f259db5fc58bd05fdd41d37a5b21595671a5d9fb9310ae6856fc61b",
+      "label_commit": "59e2461d06ffaa81d874d81ca7a4a1a8dd00c751",
+      "label_tree": "6acebd9497736b2caf0c689aa2a7cdc35681728c",
+      "new_image_built": false,
+      "non_pyc_file_count": 95,
+      "security_accepted": false,
+      "source": {
+        "bytes": 22741,
+        "path": "docs/security/evidence/2026-10-25-market-e31aed440f25-public-source.json",
+        "sha256": "0df2ce4341cc84f500b80642da9c30aa65095a991a168d1f8dfbe31da37caf4e"
+      },
+      "source_override_record": null
+    },
+    {
+      "cache": {
+        "bytes": 96244,
+        "path": "docs/security/evidence/2026-10-25-market-f365061d2e76-public-cache-classification.json",
+        "sha256": "40de0535be95327b2b1136178f2b200d665434eb5abe9175c2a8779291253e2a"
+      },
+      "cache_count": 171,
+      "explicit_bytecode_loader_reachability_assessed": false,
+      "historical_dependency_lock_sha256": "37c5dd760d0816ad0b4546aca8bc5e18875478cdacfb1620bae3d9f5ff29ae29",
+      "image_id": "sha256:f365061d2e7650f623fc0394018b9ba36b336fafb3290b8de9e4f08f2dee2b29",
+      "label_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+      "label_tree": "ee7c053b0cc077c1b8a3f83ffb69e69251f0c2e8",
+      "new_image_built": false,
+      "non_pyc_file_count": 93,
+      "security_accepted": false,
+      "source": {
+        "bytes": 57572,
+        "path": "docs/security/evidence/2026-10-25-market-f365061d2e76-public-source.json",
+        "sha256": "d1e01548b623ea9e3f4481b33b0b1c3bfa1ce39325e677cbf23c74870c007fc6"
+      },
+      "source_override_record": null
+    },
+    {
+      "cache": {
+        "bytes": 96244,
+        "path": "docs/security/evidence/2026-10-25-market-2239469ab3dd-public-cache-classification.json",
+        "sha256": "066487d49bf5987c3cf18efb0c9bf985e99e63c355d61262445b2f9ae7682325"
+      },
+      "cache_count": 171,
+      "explicit_bytecode_loader_reachability_assessed": false,
+      "historical_dependency_lock_sha256": "37c5dd760d0816ad0b4546aca8bc5e18875478cdacfb1620bae3d9f5ff29ae29",
+      "image_id": "sha256:2239469ab3dd3e291e16b4571af84d446f776ade05d48552f150b7ec2670fcc6",
+      "label_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+      "label_tree": "ee7c053b0cc077c1b8a3f83ffb69e69251f0c2e8",
+      "new_image_built": false,
+      "non_pyc_file_count": 93,
+      "security_accepted": false,
+      "source": {
+        "bytes": 57572,
+        "path": "docs/security/evidence/2026-10-25-market-2239469ab3dd-public-source.json",
+        "sha256": "7d1c8f7e8ce4de72b13525497a74584e211e75fca8ccbc613d5d9f62a9e792e1"
+      },
+      "source_override_record": null
+    },
+    {
+      "cache": {
+        "bytes": 8585,
+        "path": "docs/security/evidence/2026-10-25-market-2e325778cb28-public-cache-classification.json",
+        "sha256": "17af9cde8a7a567abee8d92e7238c2f0c65a6e56d8a7a7b07b922a0668cc459b"
+      },
+      "cache_count": 13,
+      "explicit_bytecode_loader_reachability_assessed": false,
+      "historical_dependency_lock_sha256": "37c5dd760d0816ad0b4546aca8bc5e18875478cdacfb1620bae3d9f5ff29ae29",
+      "image_id": "sha256:2e325778cb281581b3f532ac27f0c3fc78902772fd39cec6d9755169b658d3c1",
+      "label_commit": "532a980404ed10f88e4c713abadb3554568a7419",
+      "label_tree": "989779aaa85b49a526aeaea2dfbb86d6e013e8ca",
+      "new_image_built": false,
+      "non_pyc_file_count": 95,
+      "security_accepted": false,
+      "source": {
+        "bytes": 22741,
+        "path": "docs/security/evidence/2026-10-25-market-2e325778cb28-public-source.json",
+        "sha256": "f1110cc33129fd7401743dc117f575175dd8f713c228523d931a6808f8ac7a88"
+      },
+      "source_override_record": null
+    },
+    {
+      "cache": {
+        "bytes": 8585,
+        "path": "docs/security/evidence/2026-10-25-market-414f6bc8f9bf-public-cache-classification.json",
+        "sha256": "7b47517b690747dc9789c2375cd5f1b3d1b37bdcd57affd246f6e5491749dd5d"
+      },
+      "cache_count": 13,
+      "explicit_bytecode_loader_reachability_assessed": false,
+      "historical_dependency_lock_sha256": "37c5dd760d0816ad0b4546aca8bc5e18875478cdacfb1620bae3d9f5ff29ae29",
+      "image_id": "sha256:414f6bc8f9bfba443d72357e31c1e1a0f7c23cd43ebf787798a6c18f6f936c59",
+      "label_commit": "75db7dc7635709d72c93a4e21a0dedc32c52ae65",
+      "label_tree": "1be9d0537ca3a13763cc6c2fd3ca98734efd18e3",
+      "new_image_built": false,
+      "non_pyc_file_count": 95,
+      "security_accepted": false,
+      "source": {
+        "bytes": 22741,
+        "path": "docs/security/evidence/2026-10-25-market-414f6bc8f9bf-public-source.json",
+        "sha256": "837fd8c6029dd8a18399fc481f013d0a1ada8e588ef57be9f840f23d47e9666e"
+      },
+      "source_override_record": null
+    },
+    {
+      "cache": {
+        "bytes": 29223,
+        "path": "docs/security/evidence/2026-10-25-market-678aaf5cd8e9-public-cache-classification.json",
+        "sha256": "3c2290f6ece1287592bea8d94998e46e30a8f27ec19456d85ee968d3daa36d20"
+      },
+      "cache_count": 48,
+      "explicit_bytecode_loader_reachability_assessed": false,
+      "historical_dependency_lock_sha256": "37c5dd760d0816ad0b4546aca8bc5e18875478cdacfb1620bae3d9f5ff29ae29",
+      "image_id": "sha256:678aaf5cd8e954f368fc514430e5e63e638d84b2883194465ed0847287bc511c",
+      "label_commit": "aeaa3f0c2be3fab3ce440575b5ce2e2ed22fb0d1",
+      "label_tree": "b1e421c99882e44ce3b6bb05da918a1f8bfd05ce",
+      "new_image_built": false,
+      "non_pyc_file_count": 95,
+      "security_accepted": false,
+      "source": {
+        "bytes": 30600,
+        "path": "docs/security/evidence/2026-10-25-market-678aaf5cd8e9-public-source.json",
+        "sha256": "498d2fee4ef48138c877c074671e6519e14428b0686f47288ff05eadd023c07e"
+      },
+      "source_override_record": null
+    },
+    {
+      "cache": {
+        "bytes": 96244,
+        "path": "docs/security/evidence/2026-10-25-market-f79cdda21c19-public-cache-classification.json",
+        "sha256": "763a7c847c37a0ec30b13893b88acf4f2c82c3f776250da629d9dabad5eb8bdb"
+      },
+      "cache_count": 171,
+      "explicit_bytecode_loader_reachability_assessed": false,
+      "historical_dependency_lock_sha256": "37c5dd760d0816ad0b4546aca8bc5e18875478cdacfb1620bae3d9f5ff29ae29",
+      "image_id": "sha256:f79cdda21c192c52536f4ccfecadc7f724453a9ea4abfae96b1efe540ebbc61b",
+      "label_commit": "4ef8e6dcb2d361b763bd8b72dc730c1f978f564a",
+      "label_tree": "ee7c053b0cc077c1b8a3f83ffb69e69251f0c2e8",
+      "new_image_built": false,
+      "non_pyc_file_count": 93,
+      "security_accepted": false,
+      "source": {
+        "bytes": 57572,
+        "path": "docs/security/evidence/2026-10-25-market-f79cdda21c19-public-source.json",
+        "sha256": "2c1db0b6314e5473770030fa8a23cafc39f9507837fc6fddd8ccd37d3f973e58"
+      },
+      "source_override_record": "docs/security/evidence/2026-10-25-market-f79-public-source-overrides.json"
+    }
+  ],
+  "recorded_at_utc": "2026-10-25T00:06:49.985539+00:00",
+  "runtime_changed": false,
+  "schema": "market_other_nine_public_profile_evidence/1",
+  "security_accepted": false,
+  "source_product_admission_implemented": false
+}

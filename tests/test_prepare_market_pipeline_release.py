@@ -98,6 +98,23 @@ class PrepareMarketPipelineReleaseTests(unittest.TestCase):
             project_name="market-private-pipeline-production",
         )
 
+    def test_in_memory_parser_preserves_normal_env_grammar(self) -> None:
+        good = "# synthetic comment\nKEY=value\nOTHER=/private/path\n"
+        self.web_source.write_text(good)
+        self.assertEqual(
+            release.parse_env_text(good),
+            release.parse_env(self.web_source, secure_input=False),
+        )
+        for raw in ("KEY=value\nKEY=duplicate\n", "export KEY=value\n", "KEY=\"quoted\"\n",
+                    "KEY=$EXPANSION\n", "KEY=value;command\n"):
+            with self.subTest(raw=raw):
+                self.web_source.write_text(raw)
+                with self.assertRaises(release.ReleaseContractError) as memory:
+                    release.parse_env_text(raw)
+                with self.assertRaises(release.ReleaseContractError) as file:
+                    release.parse_env(self.web_source, secure_input=False)
+                self.assertEqual(str(memory.exception), str(file.exception))
+
     def test_pair_is_release_bound_shadow_only_and_secret_free(self) -> None:
         document = self._render()
         self.assertEqual(self.web_env.stat().st_mode & 0o777, 0o600)

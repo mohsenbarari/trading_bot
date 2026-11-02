@@ -1,8 +1,47 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
-ARG PYTHON_BASE_IMAGE=python:3.11-slim-bookworm@sha256:0bee7276f83efd4a1ee05bbbf4281d95ed28e079220a9457f25a93e3f1e3c31b
+ARG PYTHON_BASE_IMAGE=python:3.11.18-slim-trixie@sha256:0451b9eeed3e5a9523d8958cc33262eb5843c7af3114c50f45d99f56e2b883ac
 ARG SOURCE_DATE_EPOCH=0
 
-FROM ${PYTHON_BASE_IMAGE} AS assembly
+FROM ${PYTHON_BASE_IMAGE} AS patched-base
+RUN sed -i 's#http://deb.debian.org/debian-security#https://security.debian.org/debian-security#g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true update \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true upgrade -y --no-install-recommends \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends ca-certificates libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/prepare_app_security_os_cache.py scripts/app_security_os_packages.lock.json scripts/compose_security_os_candidate.py /usr/local/libexec/
+COPY scripts/prepare_sqlite_wal_os_cache.py scripts/sqlite_wal_package.lock.json /usr/local/libexec/
+COPY scripts/prepare_tar_acl_os_cache.py scripts/tar_acl_package.lock.json /usr/local/libexec/
+COPY scripts/prepare_coreutils_acl_os_cache.py scripts/coreutils_acl_package.lock.json /usr/local/libexec/
+RUN --network=none \
+    --mount=type=bind,source=pip_packages/security-os-capsule,target=/capsule,ro \
+    --mount=type=tmpfs,target=/tmp \
+    ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/usr/local/libexec/prepare_app_security_os_cache.py", "--install-image-cache", "--cache-dir", "/capsule"]
+RUN --network=none \
+    --mount=type=bind,source=pip_packages/sqlite-wal-capsule,target=/sqlite-capsule,ro \
+    --mount=type=tmpfs,target=/tmp \
+    ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/usr/local/libexec/prepare_sqlite_wal_os_cache.py", "--install-image-cache", "--cache-dir", "/sqlite-capsule"]
+RUN --network=none \
+    --mount=type=bind,source=pip_packages/tar-acl-capsule,target=/tar-capsule,ro \
+    --mount=type=tmpfs,target=/tmp \
+    ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/usr/local/libexec/prepare_tar_acl_os_cache.py", "--install-image-cache", "--cache-dir", "/tar-capsule"]
+RUN --network=none \
+    --mount=type=bind,source=pip_packages/coreutils-acl-capsule,target=/coreutils-capsule,ro \
+    --mount=type=tmpfs,target=/tmp \
+    ["/usr/bin/setpriv", "--bounding-set=-all,+chown,+fowner,+fsetid,+setuid,+setgid", "--inh-caps=-all", "--ambient-caps=-all", "--no-new-privs", "/usr/local/bin/python3", "-I", "-B", "/usr/local/libexec/prepare_coreutils_acl_os_cache.py", "--install-image-cache", "--cache-dir", "/coreutils-capsule"]
+COPY scripts/verify_image_trust.py /usr/local/libexec/verify_image_trust.py
+COPY scripts/verify_psycopg2_runtime.py /usr/local/libexec/verify_psycopg2_runtime.py
+COPY scripts/verify_sqlite_runtime.py /usr/local/libexec/verify_sqlite_runtime.py
+COPY scripts/remove_runtime_pip.py /usr/local/libexec/remove_runtime_pip.py
+COPY scripts/probe_python_micro_release.py /usr/local/libexec/probe_python_micro_release.py
+COPY deploy/production/pip-bootstrap-requirements.txt /tmp/pip-bootstrap-requirements.txt
+RUN python -m pip install --no-cache-dir -r /tmp/pip-bootstrap-requirements.txt \
+    && rm /tmp/pip-bootstrap-requirements.txt
+RUN python -I -B /usr/local/libexec/verify_image_trust.py
+
+FROM patched-base AS assembly
+RUN apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true update \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::No-Cache=true install -y --no-install-recommends "libpq-dev=$(dpkg-query -W -f='${Version}' libpq5)" build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 ARG SOURCE_DATE_EPOCH
 
@@ -14,8 +53,9 @@ WORKDIR /build
 COPY deploy/market-data/requirements.lock ./requirements.lock
 RUN python -m pip install \
         --no-compile \
+        --no-build-isolation \
         --only-binary=:all: \
-        --no-binary=pyaes \
+        --no-binary=pyaes,psycopg2-binary \
         --require-hashes \
         --target=/rootfs/opt/market-python \
         --requirement requirements.lock
@@ -29,7 +69,7 @@ RUN mkdir -p /rootfs/var/lib/market-data/state \
     && chown -R 10001:10001 /rootfs/app /rootfs/var/lib/market-data \
     && find /rootfs -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} +
 
-FROM ${PYTHON_BASE_IMAGE} AS runtime
+FROM patched-base AS runtime
 
 ARG SOURCE_SHA
 ARG SOURCE_TREE
@@ -52,6 +92,11 @@ ENV LANG=C.UTF-8 \
 
 COPY --from=assembly /rootfs/ /
 WORKDIR /app
+RUN python -I -B /usr/local/libexec/verify_psycopg2_runtime.py --package-root /opt/market-python
+RUN python -I -B /usr/local/libexec/verify_sqlite_runtime.py
+RUN --network=none python -I -S -B /usr/local/libexec/probe_python_micro_release.py --image-self-check
+RUN python -I -B /usr/local/libexec/remove_runtime_pip.py --image-build \
+    && python -I -B /usr/local/libexec/verify_psycopg2_runtime.py --package-root /opt/market-python --final-runtime
 
 USER 10001:10001
 ENTRYPOINT ["python", "-m", "core.market_intelligence.private_pipeline_foundation"]

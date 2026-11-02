@@ -1,0 +1,166 @@
+---
+# Only reboot_guard.py may invoke this finite local playbook under its 3 fences.
+- name: Exact native runtime quiescence or restoration around one kernel reboot
+  hosts: localhost
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    guard: '{{ playbook_dir }}/reboot_guard.py'
+  tasks:
+    - name: Require owned native guard phase never an unguarded direct invocation
+      ansible.builtin.assert:
+        that:
+          - reboot_native_phase in ['quiesce', 'restore']
+          - reboot_manifest is defined
+          - reboot_manifest_sha256 is defined
+
+    - name: Obtain only bound public plan fields after all three native ownership checks
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ guard }}', owned-info, --manifest, '{{ reboot_manifest }}', --manifest-sha256, '{{ reboot_manifest_sha256 }}']
+      register: owned
+      changed_when: false
+      no_log: true
+
+    - name: Read controlled metadata without environment or private-key contents
+      ansible.builtin.set_fact:
+        plan: '{{ (owned.stdout | from_json).plan }}'
+        containers: '{{ (owned.stdout | from_json).containers }}'
+      no_log: true
+
+    - name: Check mode never changes units containers or temporary Golden gate
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+
+    - name: Quiesce exact prior runtime and block explicit Golden cron restart
+      when: reboot_native_phase == 'quiesce'
+      block:
+        - name: Create only the exact Golden temporary drop-in directory
+          ansible.builtin.file:
+            path: /etc/systemd/system/golden_bot.service.d
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
+          when: (owned.stdout | from_json).golden_directory_missing
+
+        - name: Install owned Golden condition without changing original unit or cron
+          ansible.builtin.copy:
+            dest: '{{ (owned.stdout | from_json).golden_inhibitor }}'
+            content: '{{ (owned.stdout | from_json).golden_inhibitor_content }}'
+            owner: root
+            group: root
+            mode: '0644'
+            force: false
+            follow: false
+            unsafe_writes: false
+
+        - name: Load Golden mount and owned quiescence-token condition without restart
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Temporarily disable only originally enabled native timers and daemons
+          ansible.builtin.systemd_service:
+            name: '{{ item.name }}'
+            enabled: false
+          loop: '{{ plan.units | selectattr("enabled", "equalto", "enabled") | rejectattr("kind", "equalto", "oneshot") | list }}'
+
+        - name: Stop exact recorded trigger timers before draining their services
+          ansible.builtin.systemd_service:
+            name: '{{ item.name }}'
+            state: stopped
+          loop: '{{ plan.units | selectattr("kind", "equalto", "timer") | list }}'
+
+        - name: Gracefully stop only recorded daemons and already triggered oneshots
+          ansible.builtin.systemd_service:
+            name: '{{ item.name }}'
+            state: stopped
+          loop: '{{ plan.units | rejectattr("kind", "equalto", "timer") | list }}'
+
+        - name: Persist no automatic container writers across reboot on exact IDs
+          ansible.builtin.command:
+            argv: [/usr/bin/docker, update, --restart=no, '{{ item.id }}']
+          loop: '{{ containers }}'
+
+        - name: Gracefully stop only the exact previously running containers
+          ansible.builtin.command:
+            argv: [/usr/bin/docker, stop, --time, '45', '{{ item.id }}']
+          loop: '{{ containers | selectattr("running", "equalto", true) | list }}'
+          timeout: 60
+
+        - name: Prove quiescent writers unchanged identities and durable control fences
+          ansible.builtin.command:
+            argv: [/usr/bin/python3, -I, -B, '{{ guard }}', phase-check, --manifest, '{{ reboot_manifest }}', --manifest-sha256, '{{ reboot_manifest_sha256 }}', --phase, quiesced]
+          changed_when: false
+          no_log: true
+
+    - name: Restore only the recorded runtime after native postboot proof
+      when: reboot_native_phase == 'restore'
+      block:
+        - name: Start exact prior-running datastore containers first without recreation
+          ansible.builtin.command:
+            argv: [/usr/bin/docker, start, '{{ item }}']
+          loop: '{{ plan.datastore_ids }}'
+
+        - name: Require real PostgreSQL Redis and native quiescence before app writers
+          ansible.builtin.command:
+            argv: [/usr/bin/python3, -I, -B, '{{ guard }}', phase-check, --manifest, '{{ reboot_manifest }}', --manifest-sha256, '{{ reboot_manifest_sha256 }}', --phase, datastores]
+          register: stores
+          until: stores.rc == 0
+          retries: 25
+          delay: 2
+          changed_when: false
+          no_log: true
+
+        - name: Start remaining exact prior-running containers without pull build or compose
+          ansible.builtin.command:
+            argv: [/usr/bin/docker, start, '{{ item.id }}']
+          loop: '{{ containers | selectattr("running", "equalto", true) | rejectattr("id", "in", plan.datastore_ids) | list }}'
+
+        - name: Require actual API database and container health before restoring protection
+          ansible.builtin.command:
+            argv: [/usr/bin/python3, -I, -B, '{{ guard }}', phase-check, --manifest, '{{ reboot_manifest }}', --manifest-sha256, '{{ reboot_manifest_sha256 }}', --phase, healthy]
+          register: healthy
+          until: healthy.rc == 0
+          retries: 30
+          delay: 2
+          changed_when: false
+          no_log: true
+
+        - name: Remove only exact owned token under native fences just before Golden start
+          ansible.builtin.command:
+            argv: [/usr/bin/python3, -I, -B, '{{ guard }}', release-golden, --manifest, '{{ reboot_manifest }}', --manifest-sha256, '{{ reboot_manifest_sha256 }}', --apply]
+          no_log: true
+
+        - name: Start Golden immediately after releasing only its owned quiescence token
+          ansible.builtin.systemd_service:
+            name: golden_bot.service
+            state: started
+          when: plan.units | selectattr('name', 'equalto', 'golden_bot.service') | selectattr('active', 'equalto', true) | list | length == 1
+
+        - name: Start only other previously active recorded native daemons
+          ansible.builtin.systemd_service:
+            name: '{{ item.name }}'
+            state: started
+          loop: '{{ plan.units | selectattr("kind", "equalto", "daemon") | selectattr("active", "equalto", true) | rejectattr("name", "equalto", "golden_bot.service") | list }}'
+
+        - name: Restore only exact original enabled native units never static oneshots
+          ansible.builtin.systemd_service:
+            name: '{{ item.name }}'
+            enabled: true
+          loop: '{{ plan.units | selectattr("enabled", "equalto", "enabled") | rejectattr("kind", "equalto", "oneshot") | list }}'
+
+        - name: Start only prior-active timers without manually launching oneshot jobs
+          ansible.builtin.systemd_service:
+            name: '{{ item.name }}'
+            state: started
+          loop: '{{ plan.units | selectattr("kind", "equalto", "timer") | selectattr("active", "equalto", true) | list }}'
+
+        - name: Restore exact original restart policies only after datastore and API proof
+          ansible.builtin.command:
+            argv: [/usr/bin/docker, update, '--restart={{ item.restart_policy.Name }}{{ ":" ~ item.restart_policy.MaximumRetryCount if item.restart_policy.Name == "on-failure" and item.restart_policy.MaximumRetryCount > 0 else "" }}', '{{ item.id }}']
+          loop: '{{ containers }}'
+
+        - name: Remove only owned temporary Golden drop-in after full integrity proof
+          ansible.builtin.command:
+            argv: [/usr/bin/python3, -I, -B, '{{ guard }}', cleanup-golden, --manifest, '{{ reboot_manifest }}', --manifest-sha256, '{{ reboot_manifest_sha256 }}', --apply]
+          no_log: true

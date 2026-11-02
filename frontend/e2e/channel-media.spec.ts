@@ -1,6 +1,7 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
+import { readFileSync } from 'node:fs'
 import { expect, test, type APIRequestContext, type APIResponse, type Locator, type Page } from '@playwright/test'
 import { primeAuthSession } from './helpers/auth'
 
@@ -373,16 +374,18 @@ async function navigateFromMessengerToMarket(page: Page) {
     // Ignore when the sheet was never mounted or has already been removed.
   }
 
-  const fabButton = page.locator('.fab-btn').first()
-  await expect(fabButton).toBeVisible({ timeout: 30000 })
-  await fabButton.evaluate((node: HTMLElement) => node.click())
-  const marketLink = page.locator('.fab-item').filter({ hasText: 'بازار' }).first()
+  // Messenger is immersive: use its Back flow, then the dashboard's normal
+  // navigation. Keep the SPA alive so pending uploads continue across routes.
+  const backButton = page.locator('.chat-header .back-btn:visible')
+  await expect(backButton).toBeVisible({ timeout: 30000 })
+  await backButton.click()
+  await expect(page.locator('.chat-header .header-title:visible')).toContainText('پیام‌ها', { timeout: 30000 })
+  await expect(backButton).toBeVisible({ timeout: 30000 })
+  await backButton.click()
+  await expect(page).toHaveURL(/\/$/, { timeout: 30000 })
+  const marketLink = page.getByRole('navigation', { name: 'ناوبری اصلی', exact: true }).getByRole('link', { name: /بازار/ })
   await expect(marketLink).toBeVisible({ timeout: 30000 })
-  await marketLink.evaluate((node: HTMLElement) => node.click())
-  const switchedToMarket = await page.waitForURL('**/market', { timeout: 10000 }).then(() => true).catch(() => false)
-  if (!switchedToMarket) {
-    await gotoWithWebKitRetry(page, '/market')
-  }
+  await marketLink.click()
   await expect(page).toHaveURL(/\/market$/, { timeout: 30000 })
 }
 
@@ -417,7 +420,7 @@ function activeVoiceButton(page: Page) {
 }
 
 function activeComposerTextbox(page: Page) {
-  return activeComposerContainer(page).getByRole('textbox', { name: 'پیام...' })
+  return activeComposerContainer(page).getByRole('textbox', { name: 'متن پیام', exact: true })
 }
 
 function forwardedBanner(page: Page, senderName: string) {
@@ -1146,7 +1149,10 @@ async function injectGalleryImageAndVideo(page: Page) {
 
 async function injectDocument(page: Page, prefix = 'pw-room', sizeBytes = 0) {
   const suffix = Date.now()
-  const baseContent = `Playwright document ${suffix}\n`
+  // The same public template is checked with the CI backend's real libmagic
+  // before the browser matrix; repeated "Playwright ..." can resemble SIMH tape.
+  const fixture = JSON.parse(readFileSync(new URL('../../scripts/npm_security_ci/public_document_fixture.json', import.meta.url), 'utf8')) as { template: string }
+  const baseContent = fixture.template.replace('{seed}', String(suffix))
   const repeatCount = sizeBytes > 0
     ? Math.max(1, Math.ceil(sizeBytes / Buffer.byteLength(baseContent, 'utf8')))
     : 1
@@ -1156,7 +1162,9 @@ async function injectDocument(page: Page, prefix = 'pw-room', sizeBytes = 0) {
     {
       name: fileName,
       mimeType: 'text/plain',
-      buffer: Buffer.from(baseContent.repeat(repeatCount), 'utf8'),
+      buffer: sizeBytes > 0
+        ? Buffer.from(baseContent.repeat(repeatCount), 'utf8').subarray(0, sizeBytes)
+        : Buffer.from(baseContent, 'utf8'),
     },
   ])
 

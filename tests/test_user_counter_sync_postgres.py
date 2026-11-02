@@ -125,6 +125,11 @@ class UserCounterDatabaseSafetyTests(unittest.TestCase):
         )
         self.assertEqual(target.database, "stage1_counter_guard_test")
 
+    def test_counter_teardown_does_not_reverse_unrelated_migrations(self):
+        with patch(f"{__name__}._run_alembic") as migration:
+            UserCounterPostgresTests.tearDownClass()
+        migration.assert_not_called()
+
 
 @unittest.skipUnless(
     COUNTER_DATABASE_URLS,
@@ -139,8 +144,10 @@ class UserCounterPostgresTests(unittest.IsolatedAsyncioTestCase):
 
     @classmethod
     def tearDownClass(cls):
-        sync_url, _ = COUNTER_DATABASE_URLS
-        _run_alembic(sync_url, "downgrade", "f7c8d9e0a1b2")
+        # The scratch runner owns and drops its freshly created database in a
+        # finally block. Reversing unrelated newer migrations here violates the
+        # intentional irreversible-migration guard and aborts later suites.
+        # A caller-supplied scratch database is not ours to drop or downgrade.
         super().tearDownClass()
 
     async def asyncSetUp(self):

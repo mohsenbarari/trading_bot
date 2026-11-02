@@ -1,0 +1,49 @@
+{
+  "C_compilation_performed": false,
+  "historical_receipts_modified": false,
+  "image_built": false,
+  "independent_source_peer": {
+    "bytes": 1806,
+    "sha256": "b758b0571045461de4bd8f9df3e687a0c202aab7d97a88ff1f27e18722d0f6d9"
+  },
+  "open_gates": [
+    "authenticated full vendor source/SDK intake",
+    "actual autotools regeneration",
+    "C compile/link and declared/new ABI",
+    "unprivileged owned fixtures including actual gnulib qcopy descriptor0",
+    "full unchanged GNU suite with truthful platform statuses",
+    "kernel/libc compatibility and FD pressure",
+    "ordinary new images/native/source/caller evidence",
+    "whole-image ACL and global security"
+  ],
+  "package_built": false,
+  "patch": {
+    "bytes": 60929,
+    "sha256": "3c91b4386c7608b4620422daaf88ec561d3bc709140ae29dc904ed54a9833d1d"
+  },
+  "reviewed_at": 1793089061,
+  "reviewed_scopes": [
+    "intended object O_PATH type/device/inode binding before recursive directory metadata",
+    "normal return/unwind descriptor ownership boundary",
+    "ordinary regular-copy operations unchanged except false private selectors",
+    "official descriptor0 gnulib hunk",
+    "Linux original MODE/default ACL and unsupported/error policy",
+    "opaque NFSv4/POSIX/general-xattr semantics through maintained empty-path primitives",
+    "no original caller-path fallback",
+    "source dereference policy and intended symlink destination type",
+    "real dh_autoreconf/source dependency requirement"
+  ],
+  "reviewer": "Codex Root",
+  "root_owned_patch_fuzz": 0,
+  "root_owned_patch_roundtrip_files": 23,
+  "root_verified_source_bytes": 994199,
+  "root_verified_source_files": 76,
+  "schema": "root_coreutils_descriptor_source_review/1",
+  "security_accepted": false,
+  "source_manifest": {
+    "bytes": 13474,
+    "sha256": "8300cbac75601f87591263811f95514e1faa8d99c25113189b8e4b91b13f8e0e"
+  },
+  "source_only_approval_for_isolated_vendor_ci": true,
+  "whole_image_acl_closed": false
+}

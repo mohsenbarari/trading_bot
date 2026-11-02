@@ -6,6 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from core.market_intelligence.capture_event_adapter import (
     CAPTURE_ADAPTER_SCHEMA_VERSION,
@@ -17,7 +18,7 @@ from core.market_intelligence.capture_event_adapter import (
     stage_capture_event,
 )
 from core.market_intelligence.coin_group_staging import connect_coin_group_staging
-from core.market_intelligence.market_contracts import derive_event_key
+from core.market_intelligence.market_contracts import derive_event_key, MarketStoreContractError
 from core.market_intelligence.market_fact_projection import initialize_export_ledger
 from core.market_intelligence.market_store import connect_market_store, initialize_market_store
 
@@ -139,6 +140,40 @@ class CaptureEventAdapterTests(unittest.TestCase):
         legacy = group_event(2, text="امام فروش فردا 190000 / 2 تا", available=None)
         with self.assertRaisesRegex(CaptureEventContractError, "available_at_utc_required"):
             decode_coin_group_event(legacy)
+
+    def test_zero_herat_quantity_is_atomic_filtered_and_independent_sources_continue(self):
+        self._stage_market(market_event(90, source="USD_HERAT", message_id=90,
+            text="هرات فردایی 185,200 خرید\nهرات فردایی 185,300 خرید 0 میلیارد"))
+        self._stage_market(market_event(91, source="USD_HERAT", message_id=91,
+            text="هرات فردایی 185,400 خرید 2 میلیارد", available="2026-08-24T10:00:02Z"))
+        self._stage_market(market_event(92, source="XAUUSD", message_id=92, text="4630.10"))
+        self._stage_group(group_event(93, message_id=93, text="امام فروش فردا 190000 / 2 تا"))
+        report = self._project()
+        disposition = self.staging.execute("SELECT status,disposition_code FROM capture_event_lineage WHERE source_id='USD_HERAT' AND message_id=90").fetchone()
+        self.assertEqual(tuple(disposition), ("FILTERED", "INVALID_QUANTITY"))
+        self.assertEqual(report.input_policy_rejections, 1)
+        self.assertEqual(self.market.execute("SELECT count(*) FROM market_observations WHERE source_code='USD_HERAT'").fetchone()[0], 1)
+        self.assertEqual(self.market.execute("SELECT quantity_num FROM market_observations WHERE source_code='USD_HERAT'").fetchone()[0], 2)
+        for source in ("XAUUSD", "GROUP_1"):
+            self.assertGreater(self.market.execute("SELECT count(*) FROM market_observations WHERE source_code=?", (source,)).fetchone()[0], 0)
+        self.assertEqual(self.staging.execute("SELECT count(*) FROM capture_dirty_market_messages").fetchone()[0], 0)
+        self.assertEqual(self._project().input_policy_rejections, 0)
+
+    def test_unknown_store_contract_error_is_not_misclassified_as_bad_input(self):
+        self._stage_market(market_event(94, source="USD_HERAT", message_id=94, text="هرات فردایی 185,200 خرید"))
+        with patch("core.market_intelligence.capture_event_adapter.ingest_public_message", side_effect=MarketStoreContractError("instrument_price_unit_mismatch")):
+            with self.assertRaisesRegex(MarketStoreContractError, "instrument_price_unit_mismatch"):
+                self._project()
+        self.assertEqual(self.staging.execute("SELECT count(*) FROM capture_dirty_market_messages").fetchone()[0], 1)
+
+    def test_zero_xau_price_is_isolated_in_bulk_batch(self):
+        for number, text in ((95, "4630.10"), (96, "000.00"), (97, "4631.20")):
+            self._stage_market(market_event(number, source="XAUUSD", message_id=number, text=text))
+        report = self._project()
+        self.assertEqual(report.input_policy_rejections, 1)
+        self.assertEqual(self.market.execute("SELECT count(*) FROM market_observations WHERE source_code='XAUUSD'").fetchone()[0], 2)
+        self.assertEqual(tuple(self.staging.execute("SELECT status,disposition_code FROM capture_event_lineage WHERE source_id='XAUUSD' AND message_id=96").fetchone()), ("FILTERED", "INVALID_PRICE"))
+        self.assertEqual(self._project().input_policy_rejections, 0)
 
     def test_xau_replay_batch_preserves_every_quote_and_terminal_lineage(self) -> None:
         for message_id in range(1, 51):

@@ -23,14 +23,21 @@ async function setAuthTokens(page: Page, tokens: AuthTokens) {
   await primeAuthSession(page, tokens.access_token, tokens.refresh_token)
 }
 
+function selfProfileDisplayName(profile: { customer_management_name?: unknown; account_name?: unknown }): string {
+  const managementName = typeof profile.customer_management_name === 'string'
+    ? profile.customer_management_name.trim() : ''
+  const accountName = typeof profile.account_name === 'string' ? profile.account_name.trim() : ''
+  return managementName || accountName
+}
+
 test.describe('Login/auth regressions', () => {
   test('unauthenticated protected routes redirect to the login page', async ({ page }) => {
     await disablePwaRegistration(page)
     await page.goto('/profile')
 
     await expect(page).toHaveURL(/\/login$/)
-    await expect(page.getByRole('heading', { name: 'ورود به بازار' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'دریافت کد تایید' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'ورود به سامانه' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'دریافت کد تأیید' })).toBeVisible()
   })
 
   test('developer quick login reaches the dashboard and stores tokens', async ({ page }) => {
@@ -58,9 +65,31 @@ test.describe('Login/auth regressions', () => {
     await page.waitForURL('**/')
     await expect(page.getByText('ورود به بازار')).toBeVisible()
 
-    await page.goto('/profile')
+    const [currentUserResponse, selfProfileResponse] = await Promise.all([
+      page.waitForResponse(response => response.request().method() === 'GET'
+        && new URL(response.url()).pathname === '/api/auth/me'),
+      page.waitForResponse(response => response.request().method() === 'GET'
+        && /^\/api\/users-public\/[1-9]\d*$/.test(new URL(response.url()).pathname)),
+      page.goto('/profile'),
+    ])
     await expect(page).toHaveURL(/\/profile$/)
-    await expect(page.getByRole('heading', { name: 'پروفایل' }).first()).toBeVisible()
+    expect(currentUserResponse.ok()).toBeTruthy()
+    const currentUser = await currentUserResponse.json() as { id?: unknown }
+    const currentUserId = Number(currentUser.id)
+    expect(Number.isInteger(currentUserId)).toBeTruthy()
+    expect(currentUserId).toBeGreaterThan(0)
+    expect(new URL(selfProfileResponse.url()).pathname).toBe(`/api/users-public/${currentUserId}`)
+    expect(selfProfileResponse.ok()).toBeTruthy()
+    const selfProfile = await selfProfileResponse.json() as {
+      customer_management_name?: unknown
+      account_name?: unknown
+    }
+    const expectedProfileName = selfProfileDisplayName(selfProfile)
+    expect(expectedProfileName).not.toBe('')
+    const profileHeading = page.locator('[data-test="profile-identity-header"]').getByRole('heading', { level: 1 })
+    await expect(profileHeading).toBeVisible()
+    await expect(profileHeading).toHaveAttribute('title', expectedProfileName)
+    await expect(profileHeading).toContainText(expectedProfileName)
     await page.goto('/account/security')
     await expect(page).toHaveURL(/\/account\/security$/)
     await expect(page.getByRole('heading', { name: 'امنیت حساب' }).first()).toBeVisible()

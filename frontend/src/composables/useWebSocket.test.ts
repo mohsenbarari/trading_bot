@@ -127,7 +127,7 @@ describe('useWebSocket', () => {
     expect(wildcardListener).toHaveBeenCalledWith({ type: 'other:event', data: { ok: true } })
 
     MockWebSocket.instances[0]?.emitMessage('{invalid-json')
-    expect(parseErrorSpy).toHaveBeenCalledWith('Error parsing WS message:', expect.any(Error))
+    expect(parseErrorSpy).toHaveBeenCalledWith('Error parsing WS message')
 
     vi.advanceTimersByTime(25000)
     expect(MockWebSocket.instances[0]?.send).toHaveBeenCalledWith('ping')
@@ -166,6 +166,46 @@ describe('useWebSocket', () => {
     expect(errorSpy).toHaveBeenCalled()
     expect(MockWebSocket.instances[0]?.close).toHaveBeenCalled()
     errorSpy.mockRestore()
+  })
+
+  it('never logs credential URLs, raw error events or malformed payload bytes on any connection path', async () => {
+    const token = 'fixture-secret/token?query&value'
+    localStorage.setItem('auth_token', token)
+    const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    try {
+      const { useWebSocket } = await importFreshModule()
+      const ws = useWebSocket()
+      ws.connect()
+      const first = MockWebSocket.instances[0]!
+      expect(first.url).toBe(`wss://coin.test/api/realtime/ws?token=${encodeURIComponent(token)}`)
+      first.emitOpen()
+      first.emitMessage(`invalid-json-${token}`)
+      first.close()
+      vi.advanceTimersByTime(3000)
+      const second = MockWebSocket.instances[1]!
+      second.emitOpen()
+      second.onerror?.({ target: { url: second.url }, message: token } as unknown as Event)
+      ws.disconnect()
+      localStorage.removeItem('auth_token')
+      ws.connect()
+
+      const output = JSON.stringify([...logs.mock.calls, ...warnings.mock.calls, ...errors.mock.calls], (_key, value) => (
+        value instanceof Error ? { name: value.name, message: value.message, stack: value.stack } : value
+      ))
+      expect(output).not.toContain(token)
+      expect(output).not.toContain(encodeURIComponent(token))
+      expect(output).not.toContain('?token=')
+      expect(output).not.toContain('wss://')
+      expect(errors).toHaveBeenCalledWith('Error parsing WS message')
+      expect(errors).toHaveBeenCalledWith('WebSocket Error')
+      expect(warnings).toHaveBeenCalledWith('⚠️ No auth token found, skipping WebSocket connection')
+    } finally {
+      logs.mockRestore()
+      warnings.mockRestore()
+      errors.mockRestore()
+    }
   })
 
   it('dispatches one callback per realtime event id and accepts a new id', async () => {

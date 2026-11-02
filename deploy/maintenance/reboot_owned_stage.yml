@@ -1,0 +1,207 @@
+---
+- name: Stage or launch the exact owned continuation without changing canonical HEAD
+  hosts: controller_bot
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    owned_stage_action: check
+    owned_stage_confirmation: ''
+    owned_native_root: /root/trading-bot/trading_bot/.local/security-kernel-reboot-owned-resume-20261023
+    owned_web_root: /root/.local/security-kernel-reboot-20261023-task02
+    owned_unit: security-kernel-owned-resume-672348cb-0415-47f4-95f2-a4702478451d
+  tasks:
+    - name: Refuse third hosts implicit mutation and redirected operation paths
+      ansible.builtin.assert:
+        that:
+          - groups['all'] | sort == ['controller_bot', 'controller_web']
+          - ansible_connection == 'local' and ansible_host == '65.109.216.187'
+          - hostvars.controller_web.ansible_host == '65.109.220.59'
+          - hostvars.controller_web.ansible_port | int == 37067
+          - hostvars.controller_web.ansible_ssh_private_key_file == '/root/.ssh/id_ed25519_iran'
+          - owned_native_root == '/root/trading-bot/trading_bot/.local/security-kernel-reboot-owned-resume-20261023'
+          - owned_web_root == '/root/.local/security-kernel-reboot-20261023-task02'
+          - owned_unit == 'security-kernel-owned-resume-672348cb-0415-47f4-95f2-a4702478451d'
+          - owned_stage_action in ['check', 'setup', 'start']
+          - owned_stage_action == 'check' or owned_stage_confirmation == 'RESUME-OWNED-KERNEL-20261023-02'
+          - owned_helper_sha256 is match('^[a-f0-9]{64}$')
+          - owned_external_sha256 is match('^[a-f0-9]{64}$')
+
+    - name: Prove original failed runner exited before preparing a distinct continuation
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, show, security-kernel-reboot-task02-672348cb-0415-47f4-95f2-a4702478451d.service, -p, ActiveState, -p, MainPID]
+      delegate_to: controller_web
+      register: prior_runner
+      changed_when: false
+
+    - name: Refuse concurrent original runner
+      ansible.builtin.assert:
+        that:
+          - "'ActiveState=failed' in prior_runner.stdout_lines"
+          - "'MainPID=0' in prior_runner.stdout_lines"
+
+    - name: Verify canonical owned ancestry on both hosts before file creation
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -I
+          - -B
+          - -c
+          - |
+            import os,pathlib,stat,sys
+            p=pathlib.Path(sys.argv[1]); assert p.is_absolute() and p.resolve(strict=False)==p
+            for q in p.parents:
+                s=q.lstat(); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and not s.st_mode&0o022
+            if os.path.lexists(p):
+                s=p.lstat(); assert stat.S_ISDIR(s.st_mode) and s.st_uid==0 and stat.S_IMODE(s.st_mode)==0o700
+          - '{{ item.path }}'
+      loop:
+        - {host: controller_bot, path: '{{ owned_native_root }}'}
+        - {host: controller_web, path: '{{ owned_web_root }}'}
+      delegate_to: '{{ item.host }}'
+      changed_when: false
+
+    - name: Default and check mode publish no file or unit
+      ansible.builtin.meta: end_play
+      when: owned_stage_action == 'check' or ansible_check_mode
+
+    - name: Prepare only native public-helper workspace
+      ansible.builtin.file:
+        path: '{{ owned_native_root }}'
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      when: owned_stage_action == 'setup'
+
+    - name: Copy only the reviewed public helper and external playbook
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/{{ item.name }}'
+        dest: '{{ item.path }}'
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+        follow: false
+      loop:
+        - {host: controller_bot, name: reboot_owned_resume.py, path: '{{ owned_native_root }}/reboot_owned_resume.py'}
+        - {host: controller_web, name: reboot_owned_external.yml, path: '{{ owned_web_root }}/reboot_owned_external.yml'}
+      delegate_to: '{{ item.host }}'
+      when: owned_stage_action == 'setup'
+
+    - name: Authenticate deployed public bytes before any Python or Ansible execution
+      ansible.builtin.stat:
+        path: '{{ item.path }}'
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+        get_mime: false
+      loop:
+        - {host: controller_bot, path: '{{ owned_native_root }}/reboot_owned_resume.py', sha256: '{{ owned_helper_sha256 }}'}
+        - {host: controller_web, path: '{{ owned_web_root }}/reboot_owned_external.yml', sha256: '{{ owned_external_sha256 }}'}
+      delegate_to: '{{ item.host }}'
+      register: owned_assets
+
+    - name: Require exact safe single-link owned control assets
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg and not item.stat.islnk
+          - item.stat.uid == 0 and item.stat.nlink == 1 and item.stat.mode == '0600'
+          - item.stat.size > 0 and item.stat.size < 65536
+          - item.stat.checksum == item.item.sha256
+      loop: '{{ owned_assets.results }}'
+
+    - name: Run complete native default continuation check with no mutation
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ owned_native_root }}/reboot_owned_resume.py', check]
+      changed_when: false
+      no_log: true
+
+    - name: Read only the two frozen canonical public SSH and Ansible configurations
+      ansible.builtin.stat:
+        path: '/root/trading-bot/trading_bot/deploy/maintenance/{{ item }}'
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+        get_mime: false
+      loop: [reboot_inventory.yml, reboot_ansible.cfg]
+      register: canonical_configs
+
+    - name: Reauthenticate the same configurations in the independent workspace
+      ansible.builtin.stat:
+        path: '{{ owned_web_root }}/{{ item.item }}'
+        follow: false
+        get_checksum: true
+        checksum_algorithm: sha256
+        get_mime: false
+      loop: '{{ canonical_configs.results }}'
+      delegate_to: controller_web
+      register: remote_configs
+
+    - name: Refuse changed strict SSH configuration before the durable launch
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg and not item.stat.islnk
+          - item.stat.uid == 0 and item.stat.nlink == 1 and item.stat.mode == '0600'
+          - item.stat.size > 0 and item.stat.size < 8192
+          - item.stat.checksum == item.item.stat.checksum
+      loop: '{{ remote_configs.results }}'
+
+    - name: Confirm the exact already prepared independent Ansible version
+      ansible.builtin.command:
+        argv: ['{{ owned_web_root }}/venv/bin/python3', -I, -B, -c, 'import importlib.metadata,sys; assert sys.version_info[:3]==(3,14,4); assert importlib.metadata.version("ansible-core")=="2.21.5"']
+      delegate_to: controller_web
+      changed_when: false
+
+    - name: Require the distinct durable unit to have never been launched
+      ansible.builtin.command:
+        argv: [/usr/bin/systemctl, show, '{{ owned_unit }}.service', -p, LoadState, --value]
+      delegate_to: controller_web
+      register: owned_unit_state
+      changed_when: false
+      when: owned_stage_action == 'start'
+
+    - name: Refuse a continuation replay
+      ansible.builtin.assert:
+        that: owned_unit_state.stdout == 'not-found'
+      when: owned_stage_action == 'start'
+
+    - name: Refuse any preexisting durable output target before systemd opens it
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, -c, 'import os; assert not os.path.lexists("/root/.local/security-kernel-reboot-20261023-task02/owned-resume.log")']
+      delegate_to: controller_web
+      changed_when: false
+      when: owned_stage_action == 'start'
+
+    - name: Launch the independent one-attempt continuation with existing strict non-PTY assets
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/systemd-run
+          - '--unit={{ owned_unit }}'
+          - --property=Type=exec
+          - --property=Restart=no
+          - --property=RuntimeMaxSec=3600
+          - --property=TimeoutStopSec=20
+          - --property=KillMode=control-group
+          - --property=UMask=0077
+          - --property=LimitFSIZE=8388608
+          - '--property=WorkingDirectory={{ owned_web_root }}'
+          - --property=NoNewPrivileges=yes
+          - --property=ProtectSystem=strict
+          - '--property=ReadWritePaths={{ owned_web_root }}'
+          - '--property=StandardOutput=append:{{ owned_web_root }}/owned-resume.log'
+          - '--property=StandardError=append:{{ owned_web_root }}/owned-resume.log'
+          - /usr/bin/env
+          - -i
+          - 'PATH={{ owned_web_root }}/venv/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+          - LANG=C.UTF-8
+          - 'ANSIBLE_CONFIG={{ owned_web_root }}/reboot_ansible.cfg'
+          - 'ANSIBLE_HOME={{ owned_web_root }}/ansible-home'
+          - 'ANSIBLE_LOCAL_TEMP={{ owned_web_root }}/ansible-tmp'
+          - '{{ owned_web_root }}/venv/bin/ansible-playbook'
+          - -i
+          - '{{ owned_web_root }}/reboot_inventory.yml'
+          - '{{ owned_web_root }}/reboot_owned_external.yml'
+          - -e
+          - '{"owned_resume_apply":true}'
+      delegate_to: controller_web
+      when: owned_stage_action == 'start'

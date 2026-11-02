@@ -1,0 +1,20 @@
+{
+  "codename": "noble",
+  "future_build_proven": false,
+  "installed_package": "3.45.1-1ubuntu2.8",
+  "mapped_library": "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6",
+  "production_database_accessed": false,
+  "python_executable": "/usr/bin/python3.12",
+  "python_version": [
+    3,
+    12,
+    3
+  ],
+  "runtime_changed": false,
+  "schema": "ubuntu_sqlite_root_observed_consumer/1",
+  "source": "Root actual isolated metadata-only probe reported 2026-10-26",
+  "sqlite_runtime": "3.45.1",
+  "stdlib_directory": "/usr/lib/python3.12",
+  "stdlib_extension": "/usr/lib/python3.12/lib-dynload/_sqlite3.cpython-312-x86_64-linux-gnu.so",
+  "version_id": "24.04"
+}

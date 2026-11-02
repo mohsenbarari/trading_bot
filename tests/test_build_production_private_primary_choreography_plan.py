@@ -514,11 +514,38 @@ def stat_mode(path: Path) -> int:
     return path.stat().st_mode & 0o777
 
 
+def _isolate_planned_handoff_references(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Validate logical future paths without touching live host authority files."""
+    references = {
+        Path("/root/secure-envs/trading-bot/market-pipeline-cutover") / name
+        for name in ("web-legacy-handoff.json", "bot-legacy-handoff.json")
+    }
+    original = Path.is_symlink
+
+    def is_symlink(path: Path) -> bool:
+        return False if path in references else original(path)
+
+    monkeypatch.setattr(Path, "is_symlink", is_symlink)
+
+
+def test_planned_reference_fixture_preserves_other_symlink_rejection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "target"
+    target.touch()
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    _isolate_planned_handoff_references(monkeypatch)
+    assert link.is_symlink()
+    assert not target.is_symlink()
+
+
 def test_generated_plan_passes_controller_structural_validator(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     args, _files = _fixture(tmp_path)
     plan, _receipt = builder.build(args)
+    _isolate_planned_handoff_references(monkeypatch)
     monkeypatch.setattr(controller, "_assert_exact_release_checkout", lambda *a, **k: None)
     monkeypatch.setattr(controller, "_git_identity", lambda _root: (SHA, TREE))
     validated = controller._validate_plan(plan, release_root=tmp_path)
@@ -767,6 +794,7 @@ def test_official_builder_receipt_is_accepted_by_controller_validate(
 ) -> None:
     args, _files = _fixture(tmp_path)
     plan, receipt = builder.build(args)
+    _isolate_planned_handoff_references(monkeypatch)
     monkeypatch.setattr(controller, "_assert_exact_release_checkout", lambda *a, **k: None)
     monkeypatch.setattr(controller, "_assert_role_env_bindings", lambda *a, **k: None)
     monkeypatch.setattr(controller, "_git_identity", lambda _root: (SHA, TREE))
@@ -796,6 +824,7 @@ def test_handmade_receipt_without_input_inventory_is_rejected(
 ) -> None:
     args, _files = _fixture(tmp_path)
     plan, receipt = builder.build(args)
+    _isolate_planned_handoff_references(monkeypatch)
     receipt_path = Path(args.receipt)
     handmade = json.loads(receipt_path.read_text(encoding="utf-8"))
     handmade.pop("input_paths")

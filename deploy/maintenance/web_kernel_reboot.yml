@@ -1,0 +1,60 @@
+---
+# Use the existing strict Web inventory from an independent finite Native runner.
+# Public helper sources/window must already be staged in the fresh fixed root.
+- name: One separately admitted Web kernel reboot after completed current08
+  hosts: web_engine
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    web_kernel_action: check
+    web_kernel_confirmation: ''
+    web_kernel_guard: /root/.local/security-web-kernel-reboot-20261024-01/source/web_kernel_reboot_guard.py
+  tasks:
+    - name: Require only exact Web scope and fresh independent kernel authority
+      ansible.builtin.assert:
+        that:
+          - groups['all'] == ['web_engine']
+          - ansible_host == '65.109.220.59' and ansible_port | int == 37067 and ansible_user == 'root'
+          - ansible_ssh_common_args == '-o BatchMode=yes -o StrictHostKeyChecking=yes -o ForwardAgent=no -o UpdateHostKeys=no -o ConnectTimeout=10 -o ControlMaster=no -S none'
+          - web_kernel_action in ['check', 'apply']
+          - web_kernel_action == 'check' or web_kernel_confirmation == 'ONE-WEB-KERNEL-REBOOT-20261024-01'
+          - web_kernel_guard == '/root/.local/security-web-kernel-reboot-20261024-01/source/web_kernel_reboot_guard.py'
+          - web_kernel_window_sha256 is match('^[a-f0-9]{64}$')
+
+    - name: Read-only completion boot-selection and exact runtime preflight
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ web_kernel_guard }}', --action, check, --window-sha256, '{{ web_kernel_window_sha256 }}']
+      check_mode: false
+      changed_when: false
+      timeout: 180
+
+    - name: Request exactly one guarded normal Web reboot and verify changed boot ID
+      ansible.builtin.reboot:
+        reboot_command: '/usr/bin/python3 -I -B {{ web_kernel_guard | quote }} --action request --window-sha256 {{ web_kernel_window_sha256 | quote }} --confirmation ONE-WEB-KERNEL-REBOOT-20261024-01'
+        boot_time_command: /usr/bin/cat /proc/sys/kernel/random/boot_id
+        test_command: /usr/bin/true
+        connect_timeout: 5
+        # Ansible applies this separately to boot-ID and test-command phases.
+        reboot_timeout: 300
+        pre_reboot_delay: 0
+        post_reboot_delay: 0
+      timeout: 600
+      when: web_kernel_action == 'apply' and not ansible_check_mode
+
+    - name: Observe postboot target kernel and full exact readiness under owned fences
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ web_kernel_guard }}', --action, post-check, --window-sha256, '{{ web_kernel_window_sha256 }}']
+      register: web_kernel_ready
+      until: web_kernel_ready.rc == 0
+      retries: 8
+      delay: 5
+      timeout: 60
+      changed_when: false
+      when: web_kernel_action == 'apply' and not ansible_check_mode
+
+    - name: Record independent completed evidence and release only owned temporary fences
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, -I, -B, '{{ web_kernel_guard }}', --action, finalize, --window-sha256, '{{ web_kernel_window_sha256 }}', --confirmation, '{{ web_kernel_confirmation }}']
+      timeout: 180
+      changed_when: true
+      when: web_kernel_action == 'apply' and not ansible_check_mode

@@ -1,0 +1,30 @@
+{
+  "advisory_ids": [
+    "CVE-2025-69720",
+    "CVE-2026-119371",
+    "CVE-2026-119372",
+    "CVE-2026-119373",
+    "CVE-2026-119374",
+    "CVE-2026-119375",
+    "CVE-2026-119376",
+    "CVE-2026-119377",
+    "CVE-2026-119378",
+    "CVE-2026-119379",
+    "CVE-2026-119591",
+    "CVE-2026-16742",
+    "CVE-2026-50812",
+    "CVE-2026-50813",
+    "CVE-2026-54369",
+    "CVE-2026-76642",
+    "CVE-2026-78408",
+    "CVE-2026-78409",
+    "CVE-2026-78410",
+    "CVE-2026-9538"
+  ],
+  "official_sources_reviewed": true,
+  "old_probe_or_gate_retimestamps": false,
+  "reviewed_at": 1793620911,
+  "schema": "normal_market_current_security_review/1",
+  "security_accepted": false,
+  "valid_until": 1793693122
+}

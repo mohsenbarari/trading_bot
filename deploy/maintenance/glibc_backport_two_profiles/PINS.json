@@ -1,0 +1,69 @@
+{
+  "files": {
+    "CVE-2026-84243-Ubuntu-Web-2.43-2ubuntu2.4-CANDIDATE.patch": {
+      "bytes": 5601,
+      "sha256": "865fd18d364dd1be3478188b74e365bc8a768dd04bf393eb9dd059c347e3a9b0"
+    },
+    "CVE-2026-84243-glibc-2.41.patch": {
+      "bytes": 5527,
+      "sha256": "b242ad410ae54c64cd77fd95a7813a6e1ea6367a6d81af56a9dc6318d4b0c76b"
+    },
+    "build_hosted.py": {
+      "bytes": 28539,
+      "sha256": "c9a839f0bb44b5932847df8db2c0f6405cc01598085e88a90aa9ec46f5c5a5d6"
+    },
+    "host_io_original.py": {
+      "bytes": 53351,
+      "sha256": "fc9fc8e4ae7fe1af75fd0b4c63fedb0ebfa5820148bb311c5eaafcaaa5bbbb82"
+    },
+    "host_ubuntu243.py": {
+      "bytes": 3751,
+      "sha256": "863012d000ef6a1b71f7a4c343151f55a7b1ee190eb775b3c9223a9d925c52e9"
+    },
+    "profile243.py": {
+      "bytes": 5953,
+      "sha256": "202ee45a680e100056abe167a916fa56f71bcdfdc68e866527ba1e1ce3c29d14"
+    },
+    "snapshot-public-isrg-root-x1.crt": {
+      "bytes": 1939,
+      "sha256": "22b557a27055b33606b6559f37703928d3e4ad79f110b407d04986e1843543d1"
+    },
+    "source_io.py": {
+      "bytes": 8831,
+      "sha256": "b2e6159d62ded26c81c5a72ad9dbda73f6029719451ff2b27d7edeefeae7b568"
+    },
+    "sourcebuild.py": {
+      "bytes": 35721,
+      "sha256": "550d6e4014cbf6c3a11a5c517d0e8fb2dd5fc503f2c355ecc669c1732ab0616b"
+    },
+    "trixie241-original-XPASS-classification.json": {
+      "bytes": 12385,
+      "sha256": "29a094e9626537e10345d1c66c20cf8a232ea89507fdfbe5d19387c16fc3256c"
+    },
+    "two_profile_evidence.py": {
+      "bytes": 24735,
+      "sha256": "e21af7f4a53f637a20419d9b77385787133fc7217ac923196bf9a7af5f82d70e"
+    },
+    "ubuntu243-original-XPASS-classification.json": {
+      "bytes": 19644,
+      "sha256": "27c1ae50b2bd42cce35c699e36f310cd80068c2b0d60d72d17a520f746683a16"
+    },
+    "vendor-tst-gettext-path-traversal.c": {
+      "bytes": 3336,
+      "sha256": "c732e301bbe037a6aa612f1452d7768d0bb3efd893f4fbf1d4d02e4651e2d3f6"
+    },
+    "vendor_merge_ledger.py": {
+      "bytes": 3279,
+      "sha256": "196aa4ffff91679f3cebf4537ed210387d38aa0226b27472a4ae1ee2758fd55d"
+    },
+    "verify_build.py": {
+      "bytes": 7275,
+      "sha256": "26140d57fb5aa6a02625199641eb32f793597d558d0b9fecab5582e522589ae8"
+    },
+    "worker_ubuntu243.py": {
+      "bytes": 3751,
+      "sha256": "afe4e7edde080a83b4ebb2277154c9a8f5a5419e4fc006d8134a5609d65dc478"
+    }
+  },
+  "schema": "glibc84243_source_recipe/1"
+}

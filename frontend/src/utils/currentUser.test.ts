@@ -474,4 +474,87 @@ describe('currentUser utils', () => {
       account_status: 'inactive',
     })
   })
+
+  it('coalesces ordinary page loads and shell priming into the active fresh authority request', async () => {
+    let resolve!: (value: unknown) => void
+    routeRequestJsonMock.mockReturnValueOnce(new Promise((done) => { resolve = done }))
+    const { loadCurrentUserSummary, primeCurrentUserSummary } = await import('./currentUser')
+    localStorage.setItem('auth_token', 'same-token')
+    const first = loadCurrentUserSummary({ force: true })
+    const second = loadCurrentUserSummary()
+    const prime = primeCurrentUserSummary(true)
+    expect(second).toBe(first)
+    expect(routeRequestJsonMock).toHaveBeenCalledTimes(1)
+    expect(apiFetchMock).not.toHaveBeenCalled()
+    resolve(authoritativeUser({ id: 81 }))
+    await expect(first).resolves.toMatchObject({ state: 'ready', user: { id: 81 } })
+    await expect(second).resolves.toMatchObject({ state: 'ready', user: { id: 81 } })
+    await expect(prime).resolves.toMatchObject({ id: 81 })
+
+    routeRequestJsonMock.mockResolvedValueOnce(authoritativeUser({ id: 82 }))
+    await expect(loadCurrentUserSummary({ force: true })).resolves.toMatchObject({ state: 'ready', source: 'network', user: { id: 82 } })
+    expect(routeRequestJsonMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves real error semantics for every consumer of a coalesced load', async () => {
+    let reject!: (error: unknown) => void
+    routeRequestJsonMock.mockReturnValueOnce(new Promise((_done, fail) => { reject = fail }))
+    const { AppHttpError } = await import('./httpErrorPolicy')
+    const { loadCurrentUserSummary, primeCurrentUserSummary } = await import('./currentUser')
+    const first = loadCurrentUserSummary()
+    const second = loadCurrentUserSummary()
+    const prime = primeCurrentUserSummary()
+    reject(new AppHttpError({ status: 503, detail: 'unavailable' }))
+    for (const request of [first, second]) {
+      await expect(request).resolves.toMatchObject({ state: 'error', user: null, error: { status: 503 } })
+    }
+    await expect(prime).resolves.toBeNull()
+    expect(routeRequestJsonMock).toHaveBeenCalledTimes(1)
+    expect(apiFetchMock).not.toHaveBeenCalled()
+  })
+
+  it('cache clear fences old same-token structured responses and starts a separate fresh request', async () => {
+    let resolveOld!: (value: unknown) => void
+    let resolveNew!: (value: unknown) => void
+    routeRequestJsonMock
+      .mockReturnValueOnce(new Promise((done) => { resolveOld = done }))
+      .mockReturnValueOnce(new Promise((done) => { resolveNew = done }))
+    const { loadCurrentUserSummary, clearCurrentUserSummary, readCachedCurrentUserSummary } = await import('./currentUser')
+    localStorage.setItem('auth_token', 'same-token')
+    const old = loadCurrentUserSummary()
+    clearCurrentUserSummary()
+    const fresh = loadCurrentUserSummary()
+    expect(routeRequestJsonMock).toHaveBeenCalledTimes(2)
+    resolveNew(authoritativeUser({ id: 92, role: 'عادی' }))
+    await expect(fresh).resolves.toMatchObject({ state: 'ready', user: { id: 92 } })
+    resolveOld(authoritativeUser({ id: 91, role: 'مدیر ارشد' }))
+    await expect(old).resolves.toMatchObject({ state: 'stale', user: { id: 92 }, error: { errorCode: 'CURRENT_USER_REQUEST_SUPERSEDED' } })
+    expect(readCachedCurrentUserSummary()).toMatchObject({ id: 92, role: 'عادی' })
+  })
+
+  it('logout cache clear prevents a delayed structured response from restoring old identity', async () => {
+    let resolve!: (value: unknown) => void
+    routeRequestJsonMock.mockReturnValueOnce(new Promise((done) => { resolve = done }))
+    const { loadCurrentUserSummary, clearCurrentUserSummary, readCachedCurrentUserSummary } = await import('./currentUser')
+    const pending = loadCurrentUserSummary({ force: true })
+    clearCurrentUserSummary()
+    resolve(authoritativeUser({ id: 101, role: 'مدیر ارشد' }))
+    await expect(pending).resolves.toMatchObject({ state: 'error', user: null, error: { errorCode: 'CURRENT_USER_REQUEST_SUPERSEDED' } })
+    expect(readCachedCurrentUserSummary()).toBeNull()
+  })
+
+  it.each(['clear', 'token-change'])('fences an old prime response if %s occurs while JSON decoding awaits', async (action) => {
+    let resolveBody!: (value: unknown) => void
+    apiFetchMock.mockResolvedValueOnce({ ok: true, json: () => new Promise((done) => { resolveBody = done }) })
+    const { primeCurrentUserSummary, clearCurrentUserSummary, readCachedCurrentUserSummary } = await import('./currentUser')
+    localStorage.setItem('auth_token', 'old-token')
+    const pending = primeCurrentUserSummary(true)
+    await Promise.resolve()
+    expect(resolveBody).toBeTypeOf('function')
+    if (action === 'clear') clearCurrentUserSummary()
+    else localStorage.setItem('auth_token', 'new-token')
+    resolveBody(authoritativeUser({ id: 111, role: 'مدیر ارشد' }))
+    await expect(pending).resolves.toBeNull()
+    expect(readCachedCurrentUserSummary()).toBeNull()
+  })
 })

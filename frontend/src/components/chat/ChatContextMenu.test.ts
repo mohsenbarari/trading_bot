@@ -335,4 +335,85 @@ describe('ChatContextMenu.vue', () => {
     await wrapper.get('.context-overlay').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
+  it('places the measured DOM bounds inside the viewport instead of trusting the model estimate', async () => {
+    const originalRect = HTMLElement.prototype.getBoundingClientRect
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') !== 'menu') return originalRect.call(this)
+      // Owned DOM geometry: real fonts/touch targets can exceed the initial estimate.
+      return new DOMRect(0, 0, 296, Math.min(640, Number.parseFloat(this.style.maxHeight) || 640))
+    })
+    let wrapper: ReturnType<typeof mount> | undefined
+    try {
+      const ChatContextMenu = (await import('./ChatContextMenu.vue')).default
+      wrapper = mount(ChatContextMenu, {
+        props: {
+          menuState: { x: 20, y: 700, visible: true, message: { id: 9, message_type: 'text' },
+            style: { left: '20px', top: '500px', width: '296px' } },
+          isAlbumSelection: false, currentUserId: 7, canEdit: true, canDelete: true,
+          canPin: true, isPinnedMessage: false, availableReactions: [],
+        },
+        attachTo: document.body,
+        global: { directives: { ripple: {} }, stubs: { teleport: true, transition: false } },
+      })
+      await waitForReactionShell()
+      const menu = wrapper.get('[role="menu"]').element as HTMLElement
+      expect(Number.parseFloat(menu.style.top)).toBeGreaterThanOrEqual(8)
+      expect(Number.parseFloat(menu.style.top) + menu.getBoundingClientRect().height)
+        .toBeLessThanOrEqual(window.innerHeight - 8)
+      const deletion = wrapper.findAll('[role="menuitem"]').find((item) => item.text().includes('حذف'))
+      expect(deletion).toBeTruthy()
+      await deletion!.trigger('click')
+      expect(wrapper.emitted('delete')).toHaveLength(1)
+    } finally {
+      wrapper?.unmount()
+      geometry.mockRestore()
+    }
+  })
+
+  it('re-measures on viewport resize and disconnects the actual observer on unmount', async () => {
+    const originalRect = HTMLElement.prototype.getBoundingClientRect
+    const geometry = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') !== 'menu') return originalRect.call(this)
+      return new DOMRect(0, 0, 220, Math.min(600, Number.parseFloat(this.style.maxHeight) || 600))
+    })
+    const observers: Array<{ observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = []
+    vi.stubGlobal('ResizeObserver', class {
+      observe = vi.fn()
+      disconnect = vi.fn()
+      constructor() { observers.push(this) }
+    })
+    const originalHeight = window.innerHeight
+    let wrapper: ReturnType<typeof mount> | undefined
+    try {
+      const ChatContextMenu = (await import('./ChatContextMenu.vue')).default
+      wrapper = mount(ChatContextMenu, {
+        props: {
+          menuState: { x: 20, y: 600, visible: true, message: { id: 10, message_type: 'text' } },
+          isAlbumSelection: false, currentUserId: 7, canEdit: false, canDelete: true,
+          canPin: false, isPinnedMessage: false, availableReactions: [],
+        },
+        global: { directives: { ripple: {} }, stubs: { teleport: true, transition: false } },
+      })
+      await waitForReactionShell()
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: 240 })
+      window.dispatchEvent(new Event('resize'))
+      await waitForReactionShell()
+      const menu = wrapper.get('[role="menu"]').element as HTMLElement
+      expect(menu.style.maxHeight).toBe('224px')
+      expect(Number.parseFloat(menu.style.top)).toBe(8)
+      expect(Number.parseFloat(menu.style.top) + menu.getBoundingClientRect().height).toBe(232)
+      const originalObservers = observers.filter((observer) =>
+        observer.observe.mock.calls.some(([element]) => element === menu))
+      expect(originalObservers.length).toBeGreaterThan(0)
+      wrapper.unmount();wrapper = undefined
+      // Verify each observer belonging to this menu, rather than unrelated mounted menus.
+      for (const observer of originalObservers) expect(observer.disconnect).toHaveBeenCalledOnce()
+    } finally {
+      wrapper?.unmount()
+      Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalHeight })
+      geometry.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
 })

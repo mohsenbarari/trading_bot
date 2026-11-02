@@ -1,0 +1,5 @@
+These Source unit suites run with ordinary unittest/pytest discovery and need no network, package fixtures, downloads or custom runner.
+
+The glibc context in unit codec/parcel cases uses explicitly inert bytes labelled OWNED UNIT MOCK ONLY. The helper only accepts private owned unittest module objects, patches their local file/context/receipt constants with test cleanup restoration, and runs the real file, FD, archive and finality guards. It never changes source files, live runtime, installed packages or Root approvals. The same inert bytes and record are explicitly refused by an unpatched copy of the actual production code.
+
+These mocks prove unit protocol/FD/parcel behavior only. They do not prove genuine package, runtime, image, hosted historical81 or security acceptance. Real-input integration evidence using the five exact public runtime files and Root receipt is retained separately from this offline unit suite; it is not substituted with mocked bytes. Ordinary product code never imports or consults this helper.

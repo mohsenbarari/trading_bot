@@ -1,0 +1,164 @@
+{
+  "Main_modules_or_Host_mutated": false,
+  "all_installed_package_regular_files_compared": true,
+  "fresh_missing_archive_GETs": [
+    "node_modules/workbox-build/node_modules/minimatch"
+  ],
+  "known_alias_authority": "c3bba0/0 and023272/0: exact byte-equal distinct publisher members only",
+  "lock": {
+    "bytes": 446733,
+    "path": "/root/trading-bot/trading_bot/frontend/package-lock.json",
+    "sha256": "634b6706b16c74b7630e85b81b4413d8d3aa7a21d881dc946fe8e245d75a7608"
+  },
+  "observed_at": "2026-11-01T00:36:11.722382+00:00",
+  "physical_finality": "Sequential original closes and immediate EBADF checks, no shared FD allocator threads",
+  "prior_failures_preserved": [
+    "56032a/1 parallel descriptor reuse during EBADF assertion",
+    "9d5bf0/1 exact publisher physical alias refused before network"
+  ],
+  "rows": [
+    {
+      "all_regular_files_byte_equal": 12,
+      "archive": {
+        "bytes": 12860,
+        "lock_sha512_verified": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-npm-compatible-backport-candidates-20261101-01/Root-official-originals-01/node_modules__@eslint__config-array__node_modules__minimatch.tgz",
+        "sha256": "d81817ecf72de3c8c5d3724407752d943c9e1a42af5c437d9cb923be8a72c648"
+      },
+      "archive_unique_regular_members": 4,
+      "exact_installed_instances": [
+        "node_modules/@eslint/config-array/node_modules/minimatch",
+        "node_modules/@eslint/eslintrc/node_modules/minimatch",
+        "node_modules/eslint/node_modules/minimatch"
+      ],
+      "lock_package": "node_modules/@eslint/config-array/node_modules/minimatch",
+      "original_readers_EBADF": 12,
+      "retained_distinct_physical_aliases": {},
+      "url": "https://registry.npmjs.org/minimatch/-/minimatch-3.1.5.tgz",
+      "version": "3.1.5"
+    },
+    {
+      "all_regular_files_byte_equal": 7,
+      "archive": {
+        "bytes": 38722,
+        "lock_sha512_verified": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-npm-compatible-backport-candidates-20261101-01/Root-official-originals-01/node_modules__@rollup__plugin-node-resolve.tgz",
+        "sha256": "ac24c623758c33f54d5b09d8a07bbaa99ea413b209e0e2aea8f158c5e5fedfa4"
+      },
+      "archive_unique_regular_members": 7,
+      "exact_installed_instances": [
+        "node_modules/@rollup/plugin-node-resolve"
+      ],
+      "lock_package": "node_modules/@rollup/plugin-node-resolve",
+      "original_readers_EBADF": 7,
+      "retained_distinct_physical_aliases": {
+        "dist/cjs/index.js": [
+          {
+            "bytes": 45678,
+            "physical_name": "package/./dist/cjs/index.js",
+            "sha256": "ad72d8208522c6cac4d5ffdb64b380cbe1ad06059a3f0b20529581444851e506"
+          },
+          {
+            "bytes": 45678,
+            "physical_name": "package/dist/cjs/index.js",
+            "sha256": "ad72d8208522c6cac4d5ffdb64b380cbe1ad06059a3f0b20529581444851e506"
+          }
+        ]
+      },
+      "url": "https://registry.npmjs.org/@rollup/plugin-node-resolve/-/plugin-node-resolve-15.3.1.tgz",
+      "version": "15.3.1"
+    },
+    {
+      "all_regular_files_byte_equal": 6,
+      "archive": {
+        "bytes": 14405,
+        "lock_sha512_verified": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-npm-compatible-backport-candidates-20261101-01/Root-official-originals-01/node_modules__filelist__node_modules__minimatch.tgz",
+        "sha256": "67e7dacfba9fcabb6ac661620b67e6c22600b4aa56ffa14431cbdfdeebbd4cfe"
+      },
+      "archive_unique_regular_members": 6,
+      "exact_installed_instances": [
+        "node_modules/filelist/node_modules/minimatch"
+      ],
+      "lock_package": "node_modules/filelist/node_modules/minimatch",
+      "original_readers_EBADF": 6,
+      "retained_distinct_physical_aliases": {},
+      "url": "https://registry.npmjs.org/minimatch/-/minimatch-5.1.9.tgz",
+      "version": "5.1.9"
+    },
+    {
+      "all_regular_files_byte_equal": 65,
+      "archive": {
+        "bytes": 74227,
+        "lock_sha512_verified": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-npm-compatible-backport-candidates-20261101-01/Root-official-originals-01/node_modules__glob.tgz",
+        "sha256": "18b75cb9c66c8c08bab5cacccd09013c31d3182f1e001c19d8815c5bb46e0802"
+      },
+      "archive_unique_regular_members": 65,
+      "exact_installed_instances": [
+        "node_modules/glob"
+      ],
+      "lock_package": "node_modules/glob",
+      "original_readers_EBADF": 65,
+      "retained_distinct_physical_aliases": {},
+      "url": "https://registry.npmjs.org/glob/-/glob-10.5.0.tgz",
+      "version": "10.5.0"
+    },
+    {
+      "all_regular_files_byte_equal": 53,
+      "archive": {
+        "bytes": 101396,
+        "lock_sha512_verified": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-npm-compatible-backport-candidates-20261101-01/Root-official-originals-01/node_modules__minimatch.tgz",
+        "sha256": "7d28c9a3ef17ce542093c78ec191481503e2711d29db1bd1522062303ab40478"
+      },
+      "archive_unique_regular_members": 53,
+      "exact_installed_instances": [
+        "node_modules/minimatch"
+      ],
+      "lock_package": "node_modules/minimatch",
+      "original_readers_EBADF": 53,
+      "retained_distinct_physical_aliases": {},
+      "url": "https://registry.npmjs.org/minimatch/-/minimatch-9.0.9.tgz",
+      "version": "9.0.9"
+    },
+    {
+      "all_regular_files_byte_equal": 65,
+      "archive": {
+        "bytes": 74669,
+        "lock_sha512_verified": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-npm-compatible-backport-candidates-20261101-01/Root-official-originals-01/node_modules__workbox-build__node_modules__glob.tgz",
+        "sha256": "8816e244d245d86a1b8adf9ed0bf61c9665dbb1ee7b00dd6b3283f3ac0393bfb"
+      },
+      "archive_unique_regular_members": 65,
+      "exact_installed_instances": [
+        "node_modules/workbox-build/node_modules/glob"
+      ],
+      "lock_package": "node_modules/workbox-build/node_modules/glob",
+      "original_readers_EBADF": 65,
+      "retained_distinct_physical_aliases": {},
+      "url": "https://registry.npmjs.org/glob/-/glob-11.1.0.tgz",
+      "version": "11.1.0"
+    },
+    {
+      "all_regular_files_byte_equal": 53,
+      "archive": {
+        "bytes": 117062,
+        "lock_sha512_verified": true,
+        "path": "/root/trading-bot/trading_bot/.local/security-npm-compatible-backport-candidates-20261101-01/Root-official-originals-01/node_modules__workbox-build__node_modules__minimatch.tgz",
+        "sha256": "a6cea46915bfc6c3fae60f9bd003ea4f9d6a4233aa59a9ca729474d3824ca9e5"
+      },
+      "archive_unique_regular_members": 53,
+      "exact_installed_instances": [
+        "node_modules/workbox-build/node_modules/minimatch"
+      ],
+      "lock_package": "node_modules/workbox-build/node_modules/minimatch",
+      "original_readers_EBADF": 53,
+      "retained_distinct_physical_aliases": {},
+      "url": "https://registry.npmjs.org/minimatch/-/minimatch-10.2.5.tgz",
+      "version": "10.2.5"
+    }
+  ],
+  "schema": "Root_authenticated_npm_original_archive_and_installed_preimages/1",
+  "vulnerability_patch_or_build_accepted": false
+}

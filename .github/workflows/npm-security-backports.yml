@@ -1,0 +1,389 @@
+name: Isolated npm security backport qualification
+on:
+  workflow_dispatch:
+    inputs:
+      project_commit:
+        description: Exact reviewed project commit (40 hex), never a mutable branch
+        required: true
+      worker_sha256:
+        description: SHA256 of scripts/npm_security_ci/worker.py
+        required: true
+      spec_sha256:
+        description: SHA256 of armed scripts/npm_security_ci/spec.json
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: npm-security-${{ inputs.project_commit }}
+  cancel-in-progress: false
+jobs:
+  upstream:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [glob10, glob11, mm9, mm10, resolve]
+    steps:
+      - name: Validate reviewed immutable inputs
+        env:
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+          WORKER_SHA: ${{ inputs.worker_sha256 }}
+          SPEC_SHA: ${{ inputs.spec_sha256 }}
+        run: |
+          python3 - <<'PY'
+          import os,re
+          assert re.fullmatch('[a-f0-9]{40}',os.environ['PROJECT_COMMIT'])
+          assert all(re.fullmatch('[a-f0-9]{64}',os.environ[k]) for k in ('WORKER_SHA','SPEC_SHA'))
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.project_commit }}
+          persist-credentials: false
+      - name: Provision official test-only Node22 for the two glob harnesses
+        if: matrix.profile == 'glob10' || matrix.profile == 'glob11'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - name: Exact worker and armed specification preflight
+        env:
+          WORKER_SHA: ${{ inputs.worker_sha256 }}
+          SPEC_SHA: ${{ inputs.spec_sha256 }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path('scripts/npm_security_ci')
+          assert hashlib.sha256((root/'worker.py').read_bytes()).hexdigest()==os.environ['WORKER_SHA']
+          assert hashlib.sha256((root/'spec.json').read_bytes()).hexdigest()==os.environ['SPEC_SHA']
+          assert json.loads((root/'spec.json').read_bytes())['armed'] is True
+          PY
+      - name: Build and test one maintained same-major fork
+        env:
+          PROFILE: ${{ matrix.profile }}
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+          WORKER_SHA: ${{ inputs.worker_sha256 }}
+          SPEC_SHA: ${{ inputs.spec_sha256 }}
+        run: |
+          python3 -I -B scripts/npm_security_ci/worker.py --execute --phase upstream --profile "$PROFILE" --spec scripts/npm_security_ci/spec.json --spec-sha256 "$SPEC_SHA" --self-sha256 "$WORKER_SHA" --repo "$GITHUB_WORKSPACE" --expected-project-commit "$PROJECT_COMMIT" --workspace "$RUNNER_TEMP/npm-upstream" --out "$RUNNER_TEMP/npm-result"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-fork-${{ matrix.profile }}
+          path: ${{ runner.temp }}/npm-result
+          if-no-files-found: error
+          retention-days: 7
+  frontend:
+    needs: upstream
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.project_commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npm-fork-*
+          path: ${{ runner.temp }}/npm-forks
+      - name: Preserve graph identity, fresh installs and all frontend source gates
+        env:
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+          WORKER_SHA: ${{ inputs.worker_sha256 }}
+          SPEC_SHA: ${{ inputs.spec_sha256 }}
+        run: |
+          python3 -I -B scripts/npm_security_ci/worker.py --execute --phase frontend --spec scripts/npm_security_ci/spec.json --spec-sha256 "$SPEC_SHA" --self-sha256 "$WORKER_SHA" --repo "$GITHUB_WORKSPACE" --expected-project-commit "$PROJECT_COMMIT" --workspace "$RUNNER_TEMP/npm-frontend" --out "$RUNNER_TEMP/npm-result" --artifacts "$RUNNER_TEMP/npm-forks"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-frontend-qualified-proposal
+          path: ${{ runner.temp }}/npm-result
+          if-no-files-found: error
+          retention-days: 7
+  browsers:
+    name: browsers (${{ matrix.browser }} shard ${{ matrix.shard }}/4)
+    needs: frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: read
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+        shard: [1, 2, 3, 4]
+    env:
+      CI: 'true'
+      NPM_SECURITY_ISOLATED_BROWSER_FIXTURE: '1'
+      CERTS_HOST_PATH: /tmp/trading-ci-certs
+      PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR: /tmp/trading-ci-models/coin
+      PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR: /tmp/trading-ci-models/product
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.project_commit }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-frontend-qualified-proposal
+          path: ${{ runner.temp }}/npm-proposal
+      - name: Admit proposal produced by the completed frontend job
+        run: |
+          python3 - <<'PY'
+          import json,os,pathlib,shutil
+          source=pathlib.Path(os.environ['RUNNER_TEMP'])/'npm-proposal'
+          report=json.loads((source/'RESULT.json').read_bytes())
+          assert report['schema']=='qualified_frontend_source_proposal/1'
+          assert all(report[k] is True for k in ('two_fresh_npmci_passed','non_target_graph_identities_preserved','frontend_output_byte_identical_to_baseline','upstream_and_project_tests_passed'))
+          for name in ('package.json','package-lock.json'):shutil.copyfile(source/'proposal'/name,pathlib.Path('frontend')/name)
+          shutil.copytree(source/'proposal/vendor/security-backports','frontend/vendor/security-backports')
+          PY
+      - name: Disposable local-only CI environment (existing merge-gate pattern)
+        run: |
+          cat > .env <<'EOF'
+          ENVIRONMENT=staging
+          SERVER_MODE=iran
+          BOT_USERNAME=ci_test_bot
+          POSTGRES_DB=trading_bot_db
+          POSTGRES_USER=admin
+          POSTGRES_PASSWORD=strongpassword
+          DATABASE_URL=postgresql+asyncpg://admin:strongpassword@db:5432/trading_bot_db
+          SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
+          REDIS_URL=redis://redis:6379/0
+          FRONTEND_URL=https://127.0.0.1:4173
+          PUBLIC_WEBAPP_URL=https://ci-iran.invalid
+          IRAN_SERVER_DOMAIN=ci-iran.invalid
+          DEV_API_KEY=REDACTED_DEV_API_KEY
+          JWT_SECRET_KEY=ci_jwt_secret_key_please_override_in_real_envs
+          EOF
+          cat > frontend/.env.local <<'EOF'
+          VITE_API_BASE_URL=
+          VITE_STAGING_DEV_LOGIN=true
+          EOF
+          mkdir -p "$CERTS_HOST_PATH" "$PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR" "$PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR"
+      - name: Prepare ephemeral isolated loopback browser TLS
+        id: browser_tls
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CI" = true
+          test "$NPM_SECURITY_ISOLATED_BROWSER_FIXTURE" = 1
+          umask 077
+          tls_dir="$RUNNER_TEMP/npm-isolated-browser-tls"
+          mkdir -m 700 "$tls_dir"
+          echo 'created=true' >> "$GITHUB_OUTPUT"
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' \
+            -keyout "$tls_dir/key.pem" -out "$tls_dir/cert.pem" >/dev/null 2>&1
+          chmod 600 "$tls_dir/key.pem" "$tls_dir/cert.pem"
+      - name: Admit exact retained security release assets before expensive browser setup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -I -B scripts/prepare_ci_security_caches.py
+      - name: Install exact proposed lock and browser
+        working-directory: frontend
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: |
+          npm ci --audit=false --fund=false
+          npx --no-install playwright install --with-deps "$BROWSER"
+          npm run build
+      - name: Start only the runner's disposable backend fixture
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ./scripts/bootstrap_ci_backend.sh
+      - name: Verify browser CI backend surface
+        shell: bash
+        run: |
+          docker compose exec -T app python - <<'PY'
+          from core.config import settings
+          from core.public_webapp_url import public_webapp_url_for_links
+          from hashlib import sha256
+          from pathlib import Path
+          import json
+          import magic
+
+          EXPECTED_CI_PUBLIC_WEBAPP_ORIGIN = "https://ci-iran.invalid"
+
+          environment = (settings.environment or "").strip().lower()
+          server_mode = (settings.server_mode or "").strip().lower()
+          if environment != "staging":
+              raise SystemExit("unexpected_ci_environment")
+          if server_mode != "iran":
+              raise SystemExit("unexpected_ci_server_mode")
+          try:
+              public_origin = public_webapp_url_for_links(settings_obj=settings)
+          except Exception:
+              raise SystemExit("invalid_ci_public_webapp_origin") from None
+          if public_origin != EXPECTED_CI_PUBLIC_WEBAPP_ORIGIN:
+              raise SystemExit("unexpected_ci_public_webapp_origin")
+          # Same public template used by injectDocument; no upload/API or MIME bypass.
+          with Path("scripts/npm_security_ci/public_document_fixture.json").open("rb") as fixture_file:
+              fixture_raw = fixture_file.read(132)
+          if (len(fixture_raw), sha256(fixture_raw).hexdigest()) != (131, "8f1c0062f5c8bd157ce9145e4369bbc109f49607ac1f80a4029a170d70ba7f96"):
+              raise SystemExit("unexpected_ci_public_document_source")
+          fixture = json.loads(fixture_raw)
+          unit = fixture["template"].replace("{seed}", "1793552400000").encode("ascii")
+          size = 12 * 1024 * 1024
+          document = (unit * ((size + len(unit) - 1) // len(unit)))[:size]
+          if sha256(document).hexdigest() != "b24434d88423fe82a69c5e4a8d30d52ced4d5f22a8073310f04da1e89ded21c4":
+              raise SystemExit("unexpected_ci_public_document_bytes")
+          if magic.from_buffer(document, mime=True) != "text/plain":
+              raise SystemExit("unexpected_ci_public_document_mime")
+          print(json.dumps({"public_document_mime_preflight": "PASS", "bytes": size, "libmagic_version": magic.version()}))
+          PY
+          curl -fsS -o /dev/null -X POST http://127.0.0.1:8000/api/auth/dev-login \
+            -H 'Content-Type: application/json'
+          curl -fsS -o /dev/null -D /tmp/browser-ci-cors.headers \
+            -X OPTIONS http://127.0.0.1:8000/api/auth/dev-login \
+            -H 'Origin: https://127.0.0.1:4173' \
+            -H 'Access-Control-Request-Method: POST'
+          grep -qi '^access-control-allow-origin: https://127.0.0.1:4173' /tmp/browser-ci-cors.headers
+      - name: Collect complete browser identities without executing tests
+        working-directory: frontend
+        env:
+          BROWSER: ${{ matrix.browser }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/npm-browser-whole.json
+          E2E_TARGET_ENV: local
+          E2E_ALLOW_LOCAL_MUTATION: local-dev-only
+          E2E_BACKEND_BASE_URL: http://127.0.0.1:8000
+          E2E_APP_CONTAINER_NAME: trading_bot_app
+          E2E_REDIS_CONTAINER_NAME: trading_bot_redis
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-browser-summary"
+          # Temporary diagnostic budget: collect up to six failed cases; every failure still rejects.
+          case "$BROWSER" in
+            chromium) npm run test:e2e -- --list --reporter=json ;;
+            firefox) npm run test:e2e:firefox -- --list --reporter=json ;;
+            webkit) npm run test:e2e:webkit -- --list --reporter=json ;;
+            *) exit 2 ;;
+          esac
+      - name: Observe public backend state before browser gate
+        if: always()
+        env:
+          BROWSER: ${{ matrix.browser }}
+          SHARD: ${{ matrix.shard }}
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+        run: python3 -I -B scripts/npm_security_ci/backend_diagnostics.py before --browser "$BROWSER" --shard "$SHARD" --head "$PROJECT_COMMIT"
+      - name: Existing complete browser gate
+        id: browser_gate
+        working-directory: frontend
+        env:
+          BROWSER: ${{ matrix.browser }}
+          SHARD: ${{ matrix.shard }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: ${{ runner.temp }}/npm-browser-results.json
+          PLAYWRIGHT_HTML_OPEN: never
+          E2E_TARGET_ENV: local
+          E2E_ALLOW_LOCAL_MUTATION: local-dev-only
+          E2E_BACKEND_BASE_URL: http://127.0.0.1:8000
+          E2E_APP_CONTAINER_NAME: trading_bot_app
+          E2E_REDIS_CONTAINER_NAME: trading_bot_redis
+        run: |
+          case "$BROWSER" in
+            chromium) npm run test:e2e -- --shard="$SHARD/4" --max-failures=6 --reporter=github,json,html ;;
+            firefox) npm run test:e2e:firefox -- --shard="$SHARD/4" --max-failures=6 --reporter=github,json,html ;;
+            webkit) npm run test:e2e:webkit -- --shard="$SHARD/4" --max-failures=6 --reporter=github,json,html ;;
+            *) exit 2 ;;
+          esac
+      - name: Remove only this job's ephemeral browser TLS material
+        if: always() && steps.browser_tls.outputs.created == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tls_dir="$RUNNER_TEMP/npm-isolated-browser-tls"
+          rm -f -- "$tls_dir/key.pem" "$tls_dir/cert.pem"
+          rmdir -- "$tls_dir"
+          test ! -e "$tls_dir"
+      - name: Observe public backend state after browser gate
+        if: always()
+        env:
+          BROWSER: ${{ matrix.browser }}
+          SHARD: ${{ matrix.shard }}
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+          GATE_OUTCOME: ${{ steps.browser_gate.outcome }}
+        run: python3 -I -B scripts/npm_security_ci/backend_diagnostics.py after --browser "$BROWSER" --shard "$SHARD" --head "$PROJECT_COMMIT" --outcome "$GATE_OUTCOME"
+      - name: Upload small public backend diagnostics
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-backend-diagnostics-${{ matrix.browser }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/npm-browser-backend-diagnostics/${{ matrix.browser }}-${{ matrix.shard }}-*.json
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Preserve bounded actual shard evidence
+        if: always()
+        env:
+          BROWSER: ${{ matrix.browser }}
+          SHARD: ${{ matrix.shard }}
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+          GATE_OUTCOME: ${{ steps.browser_gate.outcome }}
+        run: |
+          python3 -I -B scripts/npm_security_ci/browser_evidence.py summarize --collection "$RUNNER_TEMP/npm-browser-whole.json" --report "$RUNNER_TEMP/npm-browser-results.json" --browser "$BROWSER" --shard "$SHARD" --outcome "$GATE_OUTCOME" --head "$PROJECT_COMMIT" --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/npm-browser-summary/$BROWSER-$SHARD.json"
+      - name: Upload small shard evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-browser-summary-${{ matrix.browser }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/npm-browser-summary/${{ matrix.browser }}-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload small public App exception structure after a failed browser gate
+        uses: actions/upload-artifact@v4
+        if: always() && steps.browser_gate.outcome == 'failure'
+        with:
+          name: npm-backend-exceptions-${{ matrix.browser }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/npm-browser-backend-exceptions/${{ matrix.browser }}-${{ matrix.shard }}.json
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-browser-${{ matrix.browser }}-shard-${{ matrix.shard }}
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7
+      - name: Dispose only this runner's backend
+        if: always()
+        run: docker compose down --volumes --remove-orphans
+  browser-evidence:
+    name: Verify complete browser shard coverage
+    needs: [frontend, browsers]
+    if: always() && needs.frontend.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.project_commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npm-browser-summary-*
+          path: ${{ runner.temp }}/npm-browser-shards
+          merge-multiple: true
+      - name: Check same-subject complete disjoint shard unions
+        env:
+          PROJECT_COMMIT: ${{ inputs.project_commit }}
+        run: |
+          python3 -I -B scripts/npm_security_ci/browser_evidence.py aggregate --reports "$RUNNER_TEMP/npm-browser-shards" --head "$PROJECT_COMMIT" --run "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" --out "$RUNNER_TEMP/npm-browser-matrix.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-browser-matrix-evidence
+          path: ${{ runner.temp }}/npm-browser-matrix.json
+          if-no-files-found: warn
+          retention-days: 7

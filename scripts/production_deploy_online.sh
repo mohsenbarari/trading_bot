@@ -4414,58 +4414,171 @@ verify_frozen_release_source() {
 }
 
 local_node_version_ok() {
-    local version major minor
+    local policy="${LOCAL_FRONTEND_DIR:-$PROJECT_DIR/frontend}/scripts/check-node-security-baseline.mjs"
     command -v node >/dev/null 2>&1 || return 1
-    version="$(node -p 'process.versions.node' 2>/dev/null || true)"
-    [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
-    major="${version%%.*}"
-    minor="${version#*.}"
-    minor="${minor%%.*}"
+    [[ -f "$policy" && ! -L "$policy" ]] || return 1
+    # One policy for npm, preflight and cached builds; do not duplicate floors.
+    node "$policy" >/dev/null 2>&1
+}
 
-    if (( major > 22 )); then
-        return 0
-    fi
-    if (( major == 22 && minor >= 12 )); then
-        return 0
-    fi
-    if (( major == 20 && minor >= 19 )); then
-        return 0
-    fi
-    return 1
+unpack_local_node_archive() {
+    python3 - "$1" "$2" "$3" "$4" <<'PY'
+import hashlib
+import os
+from pathlib import Path, PurePosixPath
+import posixpath
+import re
+import stat
+import sys
+import tarfile
+
+archive_path, expected_sha, expected_root, destination = sys.argv[1:]
+if not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
+    raise SystemExit("Invalid Node archive digest binding")
+if not re.fullmatch(r"node-v24\.22\.1-linux-(?:x64|arm64)", expected_root):
+    raise SystemExit("Invalid Node archive root binding")
+target = Path(destination)
+info = target.lstat()
+if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o700:
+    raise SystemExit("Node extraction requires an owned private staging directory")
+descriptor = os.open(archive_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+with os.fdopen(descriptor, "rb") as stream:
+    info = os.fstat(stream.fileno())
+    limit = 80 * 1024 * 1024
+    if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= limit:
+        raise SystemExit("Node archive size/type refused")
+    digest = hashlib.sha256()
+    total = 0
+    while chunk := stream.read(1024 * 1024):
+        total += len(chunk)
+        if total > limit:
+            raise SystemExit("Node archive exceeded download bound")
+        digest.update(chunk)
+    if digest.hexdigest() != expected_sha:
+        raise SystemExit("Node archive SHA-256 mismatch")
+    stream.seek(0)
+    with tarfile.open(fileobj=stream, mode="r:xz") as archive:
+        members, names, expanded = [], set(), 0
+        for member in archive:
+            parts = PurePosixPath(member.name).parts
+            if (
+                len(members) >= 16000 or len(member.name) > 4096
+                or not parts or parts[0] != expected_root
+                or any(part in {".", ".."} for part in member.name.split("/")) or "\\" in member.name
+                or member.name in names
+                or not (member.isfile() or member.isdir() or member.issym())
+            ):
+                raise SystemExit("Unsafe Node archive entry")
+            if member.issym():
+                link = member.linkname
+                resolved = posixpath.normpath(posixpath.join(posixpath.dirname(member.name), link))
+                if link.startswith("/") or "\\" in link or PurePosixPath(resolved).parts[0] != expected_root:
+                    raise SystemExit("Node archive symlink escapes bundle")
+            expanded += member.size
+            if not 0 <= member.size <= 128 * 1024 * 1024 or expanded > 512 * 1024 * 1024:
+                raise SystemExit("Node archive expansion bound exceeded")
+            names.add(member.name)
+            members.append(member)
+        # Digest is verified before parsing or extraction. data_filter additionally
+        # rejects symlink-mediated escapes and strips dangerous owner/mode bits.
+        archive.extractall(target, members=members, filter="data")
+PY
+}
+
+verify_local_node_bundle() {
+    local bundle="$1" node_arch="$2" expected_sha="$3" identity
+    [[ -d "$bundle" && ! -L "$bundle" \
+        && -f "$bundle/bin/node" && ! -L "$bundle/bin/node" \
+        && -x "$bundle/bin/node" \
+        && -f "$bundle/.verified-archive-sha256" \
+        && ! -L "$bundle/.verified-archive-sha256" \
+        && "$(stat -c '%s' "$bundle/.verified-archive-sha256")" == "65" \
+        && "$(cat "$bundle/.verified-archive-sha256")" == "$expected_sha" ]] || return 1
+    identity="$("$bundle/bin/node" -p 'process.versions.node + "|" + process.platform + "|" + process.arch')" \
+        || return 1
+    [[ "$identity" == "24.22.1|linux|$node_arch" ]] || return 1
+    PATH="$bundle/bin:$PATH" local_node_version_ok || return 1
+    PATH="$bundle/bin:$PATH" "$bundle/bin/npm" --version >/dev/null 2>&1
 }
 
 install_local_node_runtime() {
-    local node_version="${DEPLOY_NODE_VERSION:-22.12.0}"
-    local node_arch install_root archive_url tmp_dir archive_path extracted_dir
-
+    if local_node_version_ok && command -v npm >/dev/null 2>&1; then
+        return 0
+    fi
+    local node_version="24.22.1" node_arch expected_sha project_root install_root bundle_root bundle
+    [[ "${DEPLOY_NODE_VERSION:-24.22.1}" == "$node_version" ]] \
+        || die "Only the audited Node 24.22.1 bootstrap is supported."
     case "$(normalize_arch "$(uname -m)")" in
-        amd64) node_arch="x64" ;;
-        arm64) node_arch="arm64" ;;
+        amd64)
+            node_arch="x64"
+            expected_sha="6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6"
+            ;;
+        arm64)
+            node_arch="arm64"
+            expected_sha="dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e"
+            ;;
         *) die "Unsupported local Node.js architecture: $(uname -m)" ;;
     esac
+    project_root="$(readlink -e -- "${LOCAL_PROJECT_DIR:-$PROJECT_DIR}")" \
+        || die "Node tools require an existing checkout root."
+    [[ -n "$project_root" && "$project_root" != "/" ]] || die "Invalid Node checkout root."
+    install_root="$project_root/.local/tools"
+    [[ ! -L "$(dirname "$install_root")" && ! -L "$install_root" ]] \
+        || die "Node tools directory must not be a symlink."
+    install -d -m 0700 -- "$install_root" || die "Cannot create the private Node tools directory."
+    bundle_root="node-v${node_version}-linux-${node_arch}"
+    bundle="$install_root/$bundle_root"
+    (
+        umask 077
+        [[ ! -L "$install_root/.node-install.lock" \
+            && ( ! -e "$install_root/.node-install.lock" || -f "$install_root/.node-install.lock" ) ]] \
+            || die "Invalid Node installer lock."
+        # Append-open without truncation; a pre-existing hardlink must never
+        # damage another file before its inode/type/ownership is checked.
+        exec 9>>"$install_root/.node-install.lock" || die "Cannot open the Node installer lock."
+        python3 - "$install_root/.node-install.lock" <<'PY' || die "Invalid Node installer lock identity."
+import os
+import stat
+import sys
 
-    log "Installing local Node.js $node_version for frontend production builds"
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get -o Acquire::Retries=5 update
-    apt-get -o Acquire::Retries=5 install -y ca-certificates curl xz-utils
-
-    install_root="/usr/local/lib/nodejs"
-    tmp_dir="$RELEASE_TMP_DIR/nodejs"
-    archive_url="https://nodejs.org/dist/v${node_version}/node-v${node_version}-linux-${node_arch}.tar.xz"
-    archive_path="$tmp_dir/node-v${node_version}-linux-${node_arch}.tar.xz"
-    extracted_dir="$install_root/node-v${node_version}-linux-${node_arch}"
-
-    mkdir -p "$tmp_dir" "$install_root"
-    curl -fsSL "$archive_url" -o "$archive_path"
-    rm -rf "$extracted_dir"
-    tar -xJf "$archive_path" -C "$install_root"
-    ln -sfn "$extracted_dir/bin/node" /usr/local/bin/node
-    ln -sfn "$extracted_dir/bin/npm" /usr/local/bin/npm
-    ln -sfn "$extracted_dir/bin/npx" /usr/local/bin/npx
+opened = os.fstat(9)
+named = os.lstat(sys.argv[1])
+if (
+    not stat.S_ISREG(opened.st_mode) or not stat.S_ISREG(named.st_mode)
+    or opened.st_uid != os.geteuid() or stat.S_IMODE(opened.st_mode) != 0o600
+    or opened.st_nlink != 1
+    or (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)
+):
+    raise SystemExit("Node installer lock inode/type/ownership refused")
+PY
+        flock -w 180 9 || die "Another Node installer is still active."
+        if [[ -e "$bundle" || -L "$bundle" ]]; then
+            verify_local_node_bundle "$bundle" "$node_arch" "$expected_sha" \
+                || die "Existing Node bundle failed verification; it was not overwritten."
+            exit 0
+        fi
+        need_cmd curl
+        log "Staging verified Node.js $node_version for this checkout only"
+        stage="$(mktemp -d "$install_root/.node-install.XXXXXX")" || die "Cannot create Node staging directory."
+        # This private, freshly generated child is the only recursive-cleanup
+        # target; never remove an existing bundle, repository or global runtime.
+        trap 'if [[ "$stage" == "$install_root"/.node-install.* && -d "$stage" && ! -L "$stage" ]]; then rm -rf -- "$stage"; fi' EXIT
+        curl --disable --noproxy '*' --proto '=https' --tlsv1.2 \
+            --fail --silent --show-error --connect-timeout 15 --max-time 180 \
+            --max-filesize 83886080 --output "$stage/node.tar.xz" \
+            "https://nodejs.org/dist/v${node_version}/${bundle_root}.tar.xz" \
+            || die "Node archive download failed."
+        unpack_local_node_archive "$stage/node.tar.xz" "$expected_sha" "$bundle_root" "$stage" \
+            || die "Node archive validation failed."
+        printf '%s\n' "$expected_sha" > "$stage/$bundle_root/.verified-archive-sha256" \
+            || die "Cannot record the verified Node archive digest."
+        verify_local_node_bundle "$stage/$bundle_root" "$node_arch" "$expected_sha" \
+            || die "Downloaded Node runtime failed version/architecture/policy verification."
+        mv -T -- "$stage/$bundle_root" "$bundle" || die "Cannot atomically promote the verified Node bundle."
+    ) || die "Scoped Node bootstrap failed; existing runtimes were preserved."
+    export PATH="$bundle/bin:$PATH"
     hash -r
-
-    local_node_version_ok || die "Installed Node.js is still too old for the frontend build: $(node --version 2>/dev/null || true)"
-    npm --version >/dev/null 2>&1 || die "npm is unavailable after local Node.js installation"
+    local_node_version_ok || die "Scoped Node runtime failed the frontend security policy."
 }
 
 ensure_local_runtime_packages() {
@@ -4513,7 +4626,7 @@ ensure_local_runtime_packages() {
 
     need_cmd docker
     need_cmd npm
-    local_node_version_ok || die "Node.js $(node --version 2>/dev/null || true) is too old. Frontend build requires Node.js 20.19+ or 22.12+."
+    local_node_version_ok || die "Node.js does not satisfy the frontend security baseline (22.23.4+, 24.22.1+, or 26.12.1+ on supported lines)."
     python3 -m pip --version >/dev/null 2>&1 || die "python3-pip is still unavailable after local installation"
     if [[ $need_buildx -eq 1 ]]; then
         docker buildx version >/dev/null 2>&1 || die "docker buildx is still unavailable after local installation"
@@ -4868,6 +4981,7 @@ prepare_pip_packages() {
     hash_material="$(
         {
             md5sum "$LOCAL_PROJECT_DIR/requirements.txt"
+            md5sum "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py"
             md5sum "$bootstrap_requirements"
         } | md5sum | cut -d' ' -f1
     )-$target_arch"
@@ -4877,18 +4991,22 @@ prepare_pip_packages() {
     if [[ "$IRAN_FORCE_RELEASE_REFRESH" == "1" || ! -f "$hash_file" || "$(cat "$hash_file")" != "$current_hash" ]]; then
         needs_refresh=1
     fi
+    if ! python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py" check --cache-dir "$output_dir" --requirements "$LOCAL_PROJECT_DIR/requirements.txt"; then
+        needs_refresh=1
+    fi
     if [[ "$needs_refresh" == "0" && "$target_arch" == "$LOCAL_HOST_ARCH" ]]; then
         if ! docker run --rm \
             -v "$output_dir:/tmp/pip_packages:ro" \
             -v "$bootstrap_requirements:/tmp/pip-bootstrap-requirements.txt:ro" \
-            -v "$LOCAL_PROJECT_DIR/requirements.txt:/tmp/requirements.txt:ro" \
-            "python:3.11-slim-bullseye" sh -lc 'python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/pip-bootstrap-requirements.txt >/dev/null && python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/requirements.txt --target /tmp/pip-verify >/dev/null'; then
+            -v "$output_dir/.requirements-without-psycopg2.txt:/tmp/requirements.txt:ro" \
+            "python:3.11.18-slim-trixie@sha256:0451b9eeed3e5a9523d8958cc33262eb5843c7af3114c50f45d99f56e2b883ac" sh -lc 'python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/pip-bootstrap-requirements.txt >/dev/null && python -m pip install --no-cache-dir --no-index --find-links=/tmp/pip_packages -r /tmp/requirements.txt --target /tmp/pip-verify >/dev/null'; then
             log "Existing wheel cache failed validation; rebuilding it."
             needs_refresh=1
         fi
     fi
     if [[ "$needs_refresh" == "1" ]]; then
         rm -f "$output_dir"/*.whl "$output_dir"/*.tar.gz "$output_dir"/*.zip "$output_dir"/.requirements_hash 2>/dev/null || true
+        python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py" prepare --cache-dir "$output_dir" --requirements "$LOCAL_PROJECT_DIR/requirements.txt"
         mapfile -t pip_platform_args < <(append_pip_platform_args "$target_arch")
         python3 -m pip download -r "$bootstrap_requirements" \
             -d "$output_dir/" \
@@ -4902,7 +5020,7 @@ prepare_pip_packages() {
         # resolve pywebpush without using the pip-conflicting --no-binary flag.
         python3 -m pip wheel --no-deps "http-ece==1.2.1" \
             -w "$output_dir/"
-        python3 -m pip download -r "$LOCAL_PROJECT_DIR/requirements.txt" \
+        python3 -m pip download -r "$output_dir/.requirements-without-psycopg2.txt" \
             -d "$output_dir/" \
             --find-links "$output_dir/" \
             --python-version 311 \
@@ -4936,7 +5054,7 @@ build_image_bundle_signature() {
         printf 'signature_scope=%s\n' "iran-immutable-runtime-image-v3"
         printf 'iran_image_platform=%s\n' "$IRAN_IMAGE_PLATFORM"
         printf 'iran_host_arch=%s\n' "$IRAN_HOST_ARCH"
-        printf 'python_base_image=%s\n' "python:3.11-slim-bullseye"
+        printf 'python_base_image=%s\n' "python:3.11.18-slim-trixie@sha256:0451b9eeed3e5a9523d8958cc33262eb5843c7af3114c50f45d99f56e2b883ac"
         printf 'postgres_image=%s\n' "postgres:15-alpine"
         printf 'redis_image=%s\n' "redis:7-alpine"
         # Production containers execute only the receipt-bound image payload.
@@ -4981,7 +5099,21 @@ market_pipeline_image_input_signature() {
             contracts/market_data \
             deploy/market-data/Dockerfile \
             deploy/market-data/requirements.lock \
-            deploy/market-data/migrations
+            deploy/market-data/migrations \
+            deploy/production/pip-bootstrap-requirements.txt \
+            scripts/verify_psycopg2_runtime.py \
+            scripts/verify_sqlite_runtime.py \
+            scripts/prepare_app_security_os_cache.py \
+            scripts/app_security_os_packages.lock.json \
+            scripts/compose_security_os_candidate.py \
+            scripts/prepare_sqlite_wal_os_cache.py \
+            scripts/sqlite_wal_package.lock.json \
+            scripts/prepare_tar_acl_os_cache.py \
+            scripts/tar_acl_package.lock.json \
+            scripts/prepare_coreutils_acl_os_cache.py \
+            scripts/coreutils_acl_package.lock.json \
+            scripts/remove_runtime_pip.py \
+            scripts/verify_image_trust.py
     } | sha256sum | awk '{print $1}'
 }
 
@@ -5042,6 +5174,15 @@ build_market_pipeline_release_image() {
     [[ "$PRODUCTION_MARKET_PIPELINE_EVIDENCE_REQUESTED" == "1" ]] || return 0
     [[ "$LOCAL_HOST_ARCH" == "amd64" && "$IRAN_HOST_ARCH" == "amd64" ]] \
         || die "Market Pipeline release currently requires linux/amd64 on both hosts."
+    mkdir -p -- "$LOCAL_PROJECT_DIR/pip_packages"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/security-os-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/sqlite-wal-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_tar_acl_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/tar-acl-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_coreutils_acl_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/coreutils-acl-capsule"
     local image_reference="market_pipeline_release:$RELEASE_SHA"
     local input_signature source_date_epoch existing_identity image_id
     input_signature="$(market_pipeline_image_input_signature)"
@@ -5130,6 +5271,20 @@ prepare_market_pipeline_control_payload() {
         deploy/market-data/compose.yml \
         deploy/market-data/compose.web.yml \
         deploy/market-data/compose.bot.yml \
+        deploy/production/pip-bootstrap-requirements.txt \
+        scripts/verify_psycopg2_runtime.py \
+        scripts/verify_sqlite_runtime.py \
+        scripts/prepare_app_security_os_cache.py \
+        scripts/app_security_os_packages.lock.json \
+        scripts/compose_security_os_candidate.py \
+        scripts/prepare_sqlite_wal_os_cache.py \
+        scripts/sqlite_wal_package.lock.json \
+        scripts/prepare_tar_acl_os_cache.py \
+        scripts/tar_acl_package.lock.json \
+        scripts/prepare_coreutils_acl_os_cache.py \
+        scripts/coreutils_acl_package.lock.json \
+        scripts/remove_runtime_pip.py \
+        scripts/verify_image_trust.py \
         scripts/prepare_market_pipeline_release.py \
         scripts/prepare_market_pipeline_primary_release.py \
         scripts/prepare_private_primary_control_release.py \
@@ -6656,6 +6811,7 @@ iran_release_image_matches() {
 }
 
 frontend_build_signature() {
+    local_node_version_ok || die "Unsafe Node runtime refused before frontend cache lookup."
     {
         printf 'node=%s\n' "$(node -p 'process.versions.node' 2>/dev/null || true)"
         printf 'npm=%s\n' "$(npm --version 2>/dev/null || true)"
@@ -6664,6 +6820,7 @@ frontend_build_signature() {
         for rel in \
             package.json \
             package-lock.json \
+            scripts/check-node-security-baseline.mjs \
             vite.config.ts \
             tsconfig.json \
             tsconfig.app.json \
@@ -6723,12 +6880,28 @@ build_release() {
     ensure_frontend_dist
     verify_frontend_release_contracts "$LOCAL_DIST_DIR"
     prepare_pip_packages "$LOCAL_HOST_ARCH" "$LOCAL_PROJECT_DIR/pip_packages" "$LOCAL_PROJECT_DIR/pip_packages/.requirements_hash"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/security-os-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/sqlite-wal-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_tar_acl_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/tar-acl-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_coreutils_acl_os_cache.py" \
+        --cache-dir "$LOCAL_PROJECT_DIR/pip_packages/coreutils-acl-capsule"
     [[ -d "$LOCAL_DIST_DIR" ]] || die "Frontend dist directory missing: $LOCAL_DIST_DIR"
     mkdir -p "$RELEASE_TMP_DIR"
     local iran_context_dir="$RELEASE_TMP_DIR/iran-build-context"
     local iran_pip_dir="$RELEASE_TMP_DIR/pip_packages-${IRAN_HOST_ARCH}"
     local iran_pip_hash="$iran_pip_dir/.requirements_hash"
     prepare_pip_packages "$IRAN_HOST_ARCH" "$iran_pip_dir" "$iran_pip_hash"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --cache-dir "$iran_pip_dir/security-os-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
+        --cache-dir "$iran_pip_dir/sqlite-wal-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_tar_acl_os_cache.py" \
+        --cache-dir "$iran_pip_dir/tar-acl-capsule"
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_coreutils_acl_os_cache.py" \
+        --cache-dir "$iran_pip_dir/coreutils-acl-capsule"
     rm -rf "$iran_context_dir"
     mkdir -p "$iran_context_dir"
     rsync -a --delete \
@@ -6787,7 +6960,7 @@ build_release() {
     if [[ "$LOCAL_HOST_ARCH" == "$IRAN_HOST_ARCH" ]]; then
         docker pull "postgres:15-alpine" >/dev/null
         docker pull "redis:7-alpine" >/dev/null
-        docker build \
+        DOCKER_BUILDKIT=1 docker build \
             --label "org.opencontainers.image.revision=$RELEASE_SHA" \
             --label "io.gold-trade.release.tree=$PRODUCTION_RELEASE_TREE" \
             --label "io.gold-trade.release.input-signature=$image_signature" \
@@ -6818,6 +6991,7 @@ expected_wheel_cache_signature() {
     local bootstrap_requirements="$LOCAL_PROJECT_DIR/deploy/production/pip-bootstrap-requirements.txt"
     {
         md5sum "$LOCAL_PROJECT_DIR/requirements.txt"
+        md5sum "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py"
         md5sum "$bootstrap_requirements"
     } | md5sum | cut -d' ' -f1 | awk -v arch="$target_arch" '{print $1 "-" arch}'
 }
@@ -6830,6 +7004,20 @@ verify_prepared_wheel_cache() {
     actual="$(cat "$output_dir/.requirements_hash")"
     [[ "$actual" == "$expected" ]] \
         || die "Prepared wheel cache does not match release requirements for architecture $target_arch."
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_psycopg2_source.py" check --cache-dir "$output_dir" --requirements "$LOCAL_PROJECT_DIR/requirements.txt" \
+        || die "Prepared wheel cache failed exact psycopg2 source admission for architecture $target_arch."
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_app_security_os_cache.py" \
+        --check --cache-dir "$output_dir/security-os-capsule" \
+        || die "Prepared App OS security cache failed admission for architecture $target_arch."
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_sqlite_wal_os_cache.py" \
+        --check --cache-dir "$output_dir/sqlite-wal-capsule" \
+        || die "Prepared SQLite security cache failed admission for architecture $target_arch."
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_tar_acl_os_cache.py" \
+        --check --cache-dir "$output_dir/tar-acl-capsule" \
+        || die "Prepared Tar ACL caller cache failed admission for architecture $target_arch."
+    python3 -I -B "$LOCAL_PROJECT_DIR/scripts/prepare_coreutils_acl_os_cache.py" \
+        --check --cache-dir "$output_dir/coreutils-acl-capsule" \
+        || die "Prepared Coreutils ACL caller cache failed admission for architecture $target_arch."
     find "$output_dir" -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' \) -print -quit | grep -q . \
         || die "Prepared wheel cache is empty for architecture $target_arch."
 }

@@ -12,7 +12,7 @@ import secrets
 import hashlib
 import hmac
 import time
-from jose import JWTError, jwt
+from core.jwt_codec import JWTError, jwt
 from core.db import get_db
 from models.user import User, UserRole
 from models.customer_relation import CustomerTier
@@ -2922,7 +2922,7 @@ async def setup_admin_password(
 ):
     from api.deps import get_current_user
     # We must decode token manually since get_current_user blocks it
-    from jose import jwt, JWTError
+    from core.jwt_codec import jwt, JWTError
     from pydantic import ValidationError
     
     try:

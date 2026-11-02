@@ -53,6 +53,7 @@ Description=Check private Market pipeline every 15 seconds
 
 [Timer]
 OnBootSec=45s
+OnActiveSec=15s
 OnUnitInactiveSec=15s
 AccuracySec=1s
 Persistent=true

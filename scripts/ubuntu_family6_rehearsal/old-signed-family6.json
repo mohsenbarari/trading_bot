@@ -1,0 +1,301 @@
+{
+  "Root_installed_family": {
+    "bytes": 2779,
+    "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/ROOT-INSTALLED-GLIBC-FAMILIES.json",
+    "sha256": "7709e0fdba5186118978d7394171f2fa028aba4867cf479cffe3a09c159dede4"
+  },
+  "new_download_bytes": 14311932,
+  "no_Host_install_or_C_build": true,
+  "records": [
+    {
+      "authenticated_Packages": {
+        "bytes": 1407696,
+        "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/noble-updates-main-amd64-Packages.xz",
+        "sha256": "14e4812e5725296279524bcabda205a6d924877545c59c0a070df2dd44b2e6ed"
+      },
+      "authenticated_signed_InRelease": {
+        "bytes": 126125,
+        "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/noble-updates.InRelease",
+        "sha256": "8eb1e59e1d6bea248c204a9d43920aef4263891fa47e4881695a384ef46b0c79"
+      },
+      "packages": {
+        "libc-bin": {
+          "DEB": {
+            "bytes": 682164,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-libc-bin_2.39-0ubuntu8.9_amd64.deb",
+            "sha256": "066398a06ef1a218d4109461d4c636eafe83322ad19b179de9ef7af42b3fec58"
+          },
+          "archive_filename": "pool/main/g/glibc/libc-bin_2.39-0ubuntu8.9_amd64.deb",
+          "control": {
+            "Architecture": "amd64",
+            "Package": "libc-bin",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9"
+          },
+          "existing_baseline_reused": true,
+          "package_entry": {
+            "bytes": 1121,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/noble-updates-family6-libc-bin.package-entry",
+            "sha256": "8090fb4f89bd9561ee9fdb44a457854d4cafc3000614879308170a78bcf54109"
+          }
+        },
+        "libc-dev-bin": {
+          "DEB": {
+            "bytes": 20402,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-libc-dev-bin_2.39-0ubuntu8.9_amd64.deb",
+            "sha256": "77db23aba4582d034d9a95e4818a16e7e51a2d4fb17a9204439688e288d67f4c"
+          },
+          "archive_filename": "pool/main/g/glibc/libc-dev-bin_2.39-0ubuntu8.9_amd64.deb",
+          "control": {
+            "Architecture": "amd64",
+            "Package": "libc-dev-bin",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9"
+          },
+          "existing_baseline_reused": false,
+          "package_entry": {
+            "bytes": 1594,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/noble-updates-family6-libc-dev-bin.package-entry",
+            "sha256": "c311564626b8e14ab3995e48f499cebe5b6d6c121b070de1caa2bf1491333e35"
+          }
+        },
+        "libc-devtools": {
+          "DEB": {
+            "bytes": 29334,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-libc-devtools_2.39-0ubuntu8.9_amd64.deb",
+            "sha256": "3eff6f67712cfb5b4586e1276fbb5cd481102a28241058a8a8258f8ce0c660b0"
+          },
+          "archive_filename": "pool/main/g/glibc/libc-devtools_2.39-0ubuntu8.9_amd64.deb",
+          "control": {
+            "Architecture": "amd64",
+            "Package": "libc-devtools",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9"
+          },
+          "existing_baseline_reused": false,
+          "package_entry": {
+            "bytes": 1621,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/noble-updates-family6-libc-devtools.package-entry",
+            "sha256": "92b8679405c397eb837d8a7c320fcf3ad0be801b54cb6e4f7fc798c4f5f9ad67"
+          }
+        },
+        "libc6": {
+          "DEB": {
+            "bytes": 3264314,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-libc6_2.39-0ubuntu8.9_amd64.deb",
+            "sha256": "ff5557d99b51f761c4b7c92368b9cc45565eda17df9bf9eb4b134d09825008be"
+          },
+          "archive_filename": "pool/main/g/glibc/libc6_2.39-0ubuntu8.9_amd64.deb",
+          "control": {
+            "Architecture": "amd64",
+            "Package": "libc6",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9"
+          },
+          "existing_baseline_reused": true,
+          "package_entry": {
+            "bytes": 1732,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/noble-updates-family6-libc6.package-entry",
+            "sha256": "c3fecd7255b9cf198f325b1def0aa04356683971cb0ba5a328d9d370276b9a8e"
+          }
+        },
+        "libc6-dev": {
+          "DEB": {
+            "bytes": 2125612,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-libc6-dev_2.39-0ubuntu8.9_amd64.deb",
+            "sha256": "e13d5fcc1b2a86f75bca8e0026a8e39f24fe97ca86e92be79991f8697eb1306f"
+          },
+          "archive_filename": "pool/main/g/glibc/libc6-dev_2.39-0ubuntu8.9_amd64.deb",
+          "control": {
+            "Architecture": "amd64",
+            "Package": "libc6-dev",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9"
+          },
+          "existing_baseline_reused": false,
+          "package_entry": {
+            "bytes": 5425,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/noble-updates-family6-libc6-dev.package-entry",
+            "sha256": "cf4c1dfaa4153f030ddf52a7d44b4d1c19cbbd675274177f3fe19cfbe4ac87b6"
+          }
+        },
+        "locales": {
+          "DEB": {
+            "bytes": 4231704,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Native-locales_2.39-0ubuntu8.9_all.deb",
+            "sha256": "f8310ef4ba442845cf5d44a5ce3d5d7accb659bae96b3a0999002132209cd367"
+          },
+          "archive_filename": "pool/main/g/glibc/locales_2.39-0ubuntu8.9_all.deb",
+          "control": {
+            "Architecture": "all",
+            "Package": "locales",
+            "Source": "glibc",
+            "Version": "2.39-0ubuntu8.9"
+          },
+          "existing_baseline_reused": false,
+          "package_entry": {
+            "bytes": 1086,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/noble-updates-family6-locales.package-entry",
+            "sha256": "a33fad55af87e6261f752fb6f32ca151fc1e0f90705e32b74ce83c93fc3095b3"
+          }
+        }
+      },
+      "runtime_packages": [
+        "libc-bin",
+        "libc-dev-bin",
+        "libc-devtools",
+        "libc6",
+        "libc6-dev",
+        "locales"
+      ],
+      "site": "Native",
+      "version": "2.39-0ubuntu8.9"
+    },
+    {
+      "authenticated_Packages": {
+        "bytes": 802568,
+        "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/resolute-updates-main-amd64-Packages.xz",
+        "sha256": "4be43dcea665c635cc0b26a95da538d91cb1696907aabc4a3e1475ad7b32e732"
+      },
+      "authenticated_signed_InRelease": {
+        "bytes": 137401,
+        "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/resolute-updates.InRelease",
+        "sha256": "1e2d91b94c525902e4187150b3d80ebc813886e599cbbfde5a61027bd2e16dc0"
+      },
+      "packages": {
+        "libc-bin": {
+          "DEB": {
+            "bytes": 700954,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-libc-bin_2.43-2ubuntu2.4_amd64.deb",
+            "sha256": "bc4f50a0aebbb348598749c291a3742f9485d94b044715d382388607b9159a1b"
+          },
+          "archive_filename": "pool/main/g/glibc/libc-bin_2.43-2ubuntu2.4_amd64.deb",
+          "control": {
+            "Architecture": "amd64",
+            "Package": "libc-bin",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4"
+          },
+          "existing_baseline_reused": true,
+          "package_entry": {
+            "bytes": 1092,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/resolute-updates-family6-libc-bin.package-entry",
+            "sha256": "2d869766e8cfaf29a05acb5add2f5c0992a3de836a45e629cad04a6785af216e"
+          }
+        },
+        "libc-dev-bin": {
+          "DEB": {
+            "bytes": 23328,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-libc-dev-bin_2.43-2ubuntu2.4_amd64.deb",
+            "sha256": "515a2f156a94b7467842409f9bd9db1330b136f44a1791ed747f0708fb1a7227"
+          },
+          "archive_filename": "pool/main/g/glibc/libc-dev-bin_2.43-2ubuntu2.4_amd64.deb",
+          "control": {
+            "Architecture": "amd64",
+            "Package": "libc-dev-bin",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4"
+          },
+          "existing_baseline_reused": false,
+          "package_entry": {
+            "bytes": 1371,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/resolute-updates-family6-libc-dev-bin.package-entry",
+            "sha256": "63f0c4fcd873383307897beec732ba8a7f623f672ad4f19c1f7b9f0281031658"
+          }
+        },
+        "libc-gconv-modules-extra": {
+          "DEB": {
+            "bytes": 1362202,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-libc-gconv-modules-extra_2.43-2ubuntu2.4_amd64.deb",
+            "sha256": "c2194b87c7f628722036bbe9f9bbdf20c1ebdb05ecd68b7a3a52dd1a76f3c5d6"
+          },
+          "archive_filename": "pool/main/g/glibc/libc-gconv-modules-extra_2.43-2ubuntu2.4_amd64.deb",
+          "control": {
+            "Architecture": "amd64",
+            "Package": "libc-gconv-modules-extra",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4"
+          },
+          "existing_baseline_reused": false,
+          "package_entry": {
+            "bytes": 1150,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/resolute-updates-family6-libc-gconv-modules-extra.package-entry",
+            "sha256": "b86053af7aee3caa84aacfbbfc60730ec0c82390a5ba742941898e1b3d72661c"
+          }
+        },
+        "libc6": {
+          "DEB": {
+            "bytes": 2104056,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-libc6_2.43-2ubuntu2.4_amd64.deb",
+            "sha256": "a613b457f3ff9c84ebd28af8a05afdec22605ad9aed87c71e3a6ae5170aeb9ca"
+          },
+          "archive_filename": "pool/main/g/glibc/libc6_2.43-2ubuntu2.4_amd64.deb",
+          "control": {
+            "Architecture": "amd64",
+            "Package": "libc6",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4"
+          },
+          "existing_baseline_reused": true,
+          "package_entry": {
+            "bytes": 1817,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/resolute-updates-family6-libc6.package-entry",
+            "sha256": "9acc33716a293c58c92dc08a202fe5e7284c0d603dd846bdd3724a64fa6c52ab"
+          }
+        },
+        "libc6-dev": {
+          "DEB": {
+            "bytes": 2294116,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-libc6-dev_2.43-2ubuntu2.4_amd64.deb",
+            "sha256": "17bb816a65a25c3416854eef7e9cc6d9a3761f45bad0d44e49bc676b7bab1769"
+          },
+          "archive_filename": "pool/main/g/glibc/libc6-dev_2.43-2ubuntu2.4_amd64.deb",
+          "control": {
+            "Architecture": "amd64",
+            "Package": "libc6-dev",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4"
+          },
+          "existing_baseline_reused": false,
+          "package_entry": {
+            "bytes": 1606,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/resolute-updates-family6-libc6-dev.package-entry",
+            "sha256": "64802e24b23a49722397996ab0956b323c13950be8956e142550b116b63a0475"
+          }
+        },
+        "locales": {
+          "DEB": {
+            "bytes": 4225234,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/Ubuntu-Web-locales_2.43-2ubuntu2.4_all.deb",
+            "sha256": "a1abf41b517f767018d5eab519d55b9269fe0a04ae49ea35f7c3ad1b8870ab32"
+          },
+          "archive_filename": "pool/main/g/glibc/locales_2.43-2ubuntu2.4_all.deb",
+          "control": {
+            "Architecture": "all",
+            "Package": "locales",
+            "Source": "glibc",
+            "Version": "2.43-2ubuntu2.4"
+          },
+          "existing_baseline_reused": false,
+          "package_entry": {
+            "bytes": 1086,
+            "path": "/root/trading-bot/trading_bot/.local/security-glibc84243-source-assessment-20261101-01/resolute-updates-family6-locales.package-entry",
+            "sha256": "3f4564c171f40e13f6423ca10b82edb3e453fac77cc15a8171c22f4218db346c"
+          }
+        }
+      },
+      "runtime_packages": [
+        "libc-bin",
+        "libc-dev-bin",
+        "libc-gconv-modules-extra",
+        "libc6",
+        "libc6-dev",
+        "locales"
+      ],
+      "site": "Web",
+      "version": "2.43-2ubuntu2.4"
+    }
+  ],
+  "schema": "Root_exact_installed_Ubuntu_glibc_family6_public_inputs/1",
+  "security_accepted": false
+}

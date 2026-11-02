@@ -1,0 +1,362 @@
+---
+# Root invokes one phase at a time from the OTHER host. Never invokes old guards.
+- name: One-host offline library maintenance preserving the observed runtime
+  hosts: maintenance
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  vars:
+    maintenance_kind: glibc
+    touch_containers: '{{ maintenance_kind != "sqlite" }}'
+    token: '{{ maintenance_dir }}/QUIESCED'
+    dropin: '{{ "97-security-sqlite-20261102.conf" if maintenance_kind == "sqlite" else "97-security-glibc-20261102.conf" }}'
+    sqlite_container_format: !unsafe '{"id":{{json .Id}},"running":{{json .State.Running}},"pid":{{json .State.Pid}},"started":{{json .State.StartedAt}},"restarts":{{json .RestartCount}},"restart_policy":{{json .HostConfig.RestartPolicy}},"image":{{json .Image}},"mounts":{{json .Mounts}}}'
+    container_format: !unsafe '{"id":{{json .Id}},"running":{{json .State.Running}},"restart_policy":{{json .HostConfig.RestartPolicy}},"image":{{json .Image}},"name":{{json .Name}}}'
+  tasks:
+    - name: Require the Root-reviewed one-host inputs
+      ansible.builtin.assert:
+        that:
+          - phase in ['snapshot', 'quiesce', 'install', 'reboot', 'restore', 'finish', 'cleanup', 'rollback']
+          - maintenance_kind in ['glibc', 'sqlite']
+          - maintenance_kind == 'sqlite' or phase != 'rollback'
+          - maintenance_kind != 'sqlite' or (not (touch_containers | bool) and phase != 'reboot')
+          - maintenance_units | length > 0
+          - "'cron.service' in maintenance_units"
+          - "'atd.service' in maintenance_units"
+          - new_debs | length == (1 if maintenance_kind == 'sqlite' else 6)
+          - datastore_ids is defined
+          - (health_urls | default([]) | length) + (health_commands | default([]) | length) > 0
+    - name: Require the exact one-package SQLite descriptors and ordinary verifier
+      when: maintenance_kind == 'sqlite'
+      ansible.builtin.assert:
+        that:
+          - new_debs == [sqlite_candidate.path]
+          - maintenance_absolute_deadline_epoch is defined
+          - sqlite_candidate.version is match('^3[.]54[.]1-0[+]trading1~(noble|resolute)1$')
+          - sqlite_rollback.version is match('^3[.][0-9.]+-.*[+]gold1$')
+          - sqlite_candidate.library.path == sqlite_rollback.library.path
+          - sqlite_candidate.library.path == '/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6'
+          - sqlite_python in ['/usr/bin/python3.12', '/usr/bin/python3.14']
+          - sqlite_runtime_helper is match('^/')
+          - sqlite_recipe_verify is match('^/')
+          - sqlite_recipe_verify_sha256 is match('^[a-f0-9]{64}$')
+          - sqlite_allow_held_upgrade | default(false) | type_debug == 'bool'
+          - maintenance_units | intersect(['docker.service', 'docker.socket', 'containerd.service']) | length == 0
+    - name: Check mode performs no partial maintenance
+      ansible.builtin.meta: end_play
+      when: ansible_check_mode
+    - name: Snapshot units including dependency and trigger graph without Env
+      when: phase == 'snapshot'
+      block:
+        - ansible.builtin.stat: {path: '{{ maintenance_dir }}/snapshot.json'}
+          register: old_snapshot
+        - ansible.builtin.assert: {that: 'not old_snapshot.stat.exists'}
+        - ansible.builtin.command:
+            argv: [/usr/bin/systemctl, show, '{{ item }}', '--property=Id,LoadState,ActiveState,SubState,UnitFileState,Type,Requires,Wants,Requisite,BindsTo,PartOf,Triggers,TriggeredBy,Before,After,RequiresMountsFor']
+          loop: '{{ maintenance_units }}'
+          register: units
+          changed_when: false
+        - ansible.builtin.set_fact:
+            unit_rows: '{{ unit_rows | default([]) + [{"Type": ""} | combine(dict(item.stdout_lines | map("split", "=", 1)))] }}'
+          loop: '{{ units.results }}'
+        - ansible.builtin.command: {argv: [/usr/bin/docker, container, ls, -aq, --no-trunc]}
+          register: ids
+          changed_when: false
+        - ansible.builtin.command:
+            argv: '{{ ["/usr/bin/docker", "inspect", "--format", (sqlite_container_format if maintenance_kind == "sqlite" else container_format)] + ids.stdout_lines }}'
+          register: containers
+          changed_when: false
+        - name: Validate both exact SQLite DEBs before any interruption
+          when: maintenance_kind == 'sqlite'
+          block:
+            - ansible.builtin.stat: {path: '{{ item.path }}', checksum_algorithm: sha256}
+              loop: '{{ [sqlite_candidate, sqlite_rollback] }}'
+              register: sqlite_deb_stats
+            - ansible.builtin.assert:
+                that:
+                  - item.stat.isreg and item.stat.size == item.item.bytes and item.stat.checksum == item.item.sha256
+              loop: '{{ sqlite_deb_stats.results }}'
+            - ansible.builtin.command: {argv: [/usr/bin/dpkg, --audit]}
+              register: sqlite_audit
+              changed_when: false
+            - ansible.builtin.assert: {that: 'sqlite_audit.stdout | trim == ""'}
+            - ansible.builtin.command: {argv: [/usr/bin/apt-mark, showhold, libsqlite3-0]}
+              register: sqlite_hold
+              changed_when: false
+            - ansible.builtin.assert:
+                that: sqlite_hold.stdout | trim == '' or (sqlite_allow_held_upgrade | default(false) | bool)
+                fail_msg: 'Held SQLite requires an explicit scoped admission; no hold was changed.'
+            - ansible.builtin.set_fact:
+                sqlite_original: {hold: '{{ sqlite_hold.stdout_lines }}', deadline_epoch: '{{ maintenance_absolute_deadline_epoch | int }}'}
+            - ansible.builtin.copy:
+                src: '{{ item.path }}'
+                dest: '/var/cache/apt/archives/{{ item.path | basename }}'
+                remote_src: true
+                mode: '0644'
+              loop: '{{ [sqlite_candidate, sqlite_rollback] }}'
+            - name: Simulate exactly the cached SQLite transaction before interruption
+              ansible.builtin.command:
+                argv: '{{ ["/usr/bin/apt-get", "--simulate", "--no-download", "--no-remove", "--no-install-recommends"] + (["--allow-change-held-packages"] if sqlite_hold.stdout | trim != "" else []) + ["install", "/var/cache/apt/archives/" + (sqlite_candidate.path | basename)] }}'
+              register: sqlite_simulation
+              changed_when: false
+            - ansible.builtin.assert:
+                that:
+                  - sqlite_simulation.stdout_lines | select('match', '^Inst ') | list | length == 1
+                  - "sqlite_simulation.stdout_lines | select('match', '^Inst libsqlite3-0(?:[: ]|$)') | list | length == 1"
+            - name: Capture fresh native SQLite baseline and admitted library consumers
+              ansible.builtin.command:
+                argv: '{{ [sqlite_python, "-I", "-B", sqlite_runtime_helper, "baseline", "--recipe-verify", sqlite_recipe_verify, "--recipe-verify-sha256", sqlite_recipe_verify_sha256, "--package-version", sqlite_rollback.version, "--library", sqlite_rollback.library.path, "--library-sha256", sqlite_rollback.library.sha256, "--baseline", maintenance_dir + "/sqlite-baseline.json"] + (maintenance_units | select("match", ".*[.]service$") | map("regex_replace", "^", "--admitted-unit=") | list) }}'
+              changed_when: false
+        - ansible.builtin.copy:
+            dest: '{{ maintenance_dir }}/snapshot.json'
+            content: '{{ {"units": unit_rows, "containers": containers.stdout_lines | map("from_json") | list} | combine({"sqlite": sqlite_original} if maintenance_kind == "sqlite" else {}) | to_nice_json }}'
+            mode: '0600'
+            force: false
+    - name: Load the original snapshot for subsequent phases
+      when: phase != 'snapshot'
+      block:
+        - ansible.builtin.slurp: {src: '{{ maintenance_dir }}/snapshot.json'}
+          register: snapshot
+        - ansible.builtin.set_fact:
+            prior: '{{ snapshot.content | b64decode | from_json }}'
+        - ansible.builtin.assert:
+            that:
+              - datastore_ids | unique | list | length == datastore_ids | length
+              - datastore_ids | difference(prior.containers | selectattr('running', 'equalto', true) | map(attribute='id') | list) | length == 0
+    - name: Keep the original SQLite operation deadline unchanged across phases
+      when: maintenance_kind == 'sqlite' and phase != 'snapshot'
+      ansible.builtin.assert:
+        that: (maintenance_absolute_deadline_epoch | int) == (prior.sqlite.deadline_epoch | int)
+    - name: Require the persistent inhibition before any installation reboot or restoration
+      when: phase in ['install', 'reboot', 'restore', 'finish', 'rollback']
+      block:
+        - ansible.builtin.stat: {path: '{{ token }}'}
+          register: fence
+        - ansible.builtin.assert:
+            that: fence.stat.exists and fence.stat.isreg and fence.stat.uid == 0 and fence.stat.mode == '0600'
+    - name: Refuse SQLite installation after a partial or failed quiesce
+      when: maintenance_kind == 'sqlite' and phase in ['install', 'rollback', 'restore', 'finish']
+      block:
+        - ansible.builtin.stat: {path: '{{ maintenance_dir }}/SQLITE-QUIESCE-COMPLETE'}
+          register: sqlite_quiesced
+        - ansible.builtin.assert:
+            that: sqlite_quiesced.stat.exists and sqlite_quiesced.stat.isreg and sqlite_quiesced.stat.uid == 0 and sqlite_quiesced.stat.mode == '0600'
+    - name: Require the actual SQLite package verification before restoring consumers
+      when: maintenance_kind == 'sqlite' and phase == 'finish'
+      block:
+        - ansible.builtin.stat:
+            path: '{{ maintenance_dir }}/{{ "sqlite-postrollback.json" if sqlite_rollback_completed | default(false) | bool else "sqlite-postinstall.json" }}'
+          register: sqlite_package_checked
+        - ansible.builtin.assert:
+            that: sqlite_package_checked.stat.exists and sqlite_package_checked.stat.isreg and sqlite_package_checked.stat.uid == 0 and sqlite_package_checked.stat.mode == '0600'
+        - ansible.builtin.slurp:
+            src: '{{ maintenance_dir }}/{{ "sqlite-postrollback.json" if sqlite_rollback_completed | default(false) | bool else "sqlite-postinstall.json" }}'
+          register: sqlite_package_receipt
+        - ansible.builtin.assert:
+            that:
+              - (sqlite_package_receipt.content | b64decode | from_json).schema == 'sqlite_host_runtime_verification/1'
+              - (sqlite_package_receipt.content | b64decode | from_json).status == ('PASS_ROLLBACK_RUNTIME_ONLY' if sqlite_rollback_completed | default(false) | bool else 'PASS_RUNTIME_ONLY')
+    - name: Check the full remaining maintenance budget before first interruption
+      when: phase == 'quiesce' or (maintenance_kind == 'sqlite' and phase in ['install', 'rollback', 'finish'])
+      block:
+        - ansible.builtin.command: {argv: [/usr/bin/date, '+%s']}
+          register: budget_clock
+          changed_when: false
+        - name: Reserve installation, recovery and restoration within the original user cap
+          ansible.builtin.assert:
+            that:
+              - maintenance_absolute_deadline_epoch is defined
+              - maintenance_kind != 'sqlite' or phase != 'quiesce' or (maintenance_absolute_deadline_epoch | int) - (budget_clock.stdout | int) <= 5400
+              - maintenance_kind == 'sqlite' or (maintenance_absolute_deadline_epoch | int) - (budget_clock.stdout | int) >= (maintenance_quiesce_install_budget_seconds | default(600) | int) + 2 * (maintenance_reboot_timeout_seconds | default(300) | int) + (maintenance_restore_budget_seconds | default(600) | int) + 40
+              - maintenance_kind != 'sqlite' or (maintenance_absolute_deadline_epoch | int) - (budget_clock.stdout | int) >= ((maintenance_quiesce_install_budget_seconds | default(600) | int) if phase in ['quiesce', 'install'] else 0) + (maintenance_restore_budget_seconds | default(600) | int) + (maintenance_rollback_budget_seconds | default(600) | int) + 40
+            fail_msg: 'Insufficient original outage budget; no inhibition, stop or reboot was requested.'
+    - name: Persistently inhibit triggers before naturally draining oneshots
+      when: phase == 'quiesce'
+      block:
+        - name: Invalidate only the previous SQLite completion marker before this quiesce
+          ansible.builtin.file: {path: '{{ maintenance_dir }}/SQLITE-QUIESCE-COMPLETE', state: absent}
+          when: maintenance_kind == 'sqlite'
+        - ansible.builtin.copy: {dest: '{{ token }}', content: 'QUIESCED', mode: '0600', force: false}
+        - ansible.builtin.file: {path: '/etc/systemd/system/{{ item }}.d', state: directory, mode: '0755'}
+          loop: '{{ maintenance_units }}'
+        - ansible.builtin.copy:
+            dest: '/etc/systemd/system/{{ item }}.d/{{ dropin }}'
+            content: "# Temporary {{ maintenance_kind }} maintenance; Root-owned.\n[Unit]\nConditionPathExists=!{{ token }}\n"
+            mode: '0644'
+            force: false
+          loop: '{{ maintenance_units }}'
+        - ansible.builtin.systemd_service: {daemon_reload: true}
+        - ansible.builtin.systemd_service: {name: '{{ item.Id }}', state: stopped}
+          loop: '{{ prior.units | selectattr("Id", "search", "[.](timer|socket)$") | list }}'
+        - ansible.builtin.systemd_service: {name: '{{ item }}', state: stopped}
+          loop: [cron.service, atd.service]
+        - ansible.builtin.command: {argv: [/usr/bin/systemctl, show, '{{ item.Id }}', --property=SubState, --value]}
+          loop: '{{ prior.units | selectattr("Type", "equalto", "oneshot") | list }}'
+          register: drain
+          until: drain.stdout in ['dead', 'exited', 'failed', 'condition']
+          retries: 90
+          delay: 2
+          changed_when: false
+        - name: Require successful natural SQLite oneshot completion
+          when: maintenance_kind == 'sqlite'
+          ansible.builtin.assert:
+            that: item.stdout != 'failed'
+            fail_msg: 'An admitted oneshot failed naturally; it is not reset or cancelled, and installation is not admitted.'
+          loop: '{{ drain.results | default([]) }}'
+        - ansible.builtin.systemd_service: {name: '{{ item.Id }}', state: stopped}
+          loop: '{{ prior.units | rejectattr("Type", "equalto", "oneshot") | selectattr("Id", "search", "[.]service$") | list }}'
+        - ansible.builtin.command: {argv: [/usr/bin/docker, update, --restart=no, '{{ item.id }}']}
+          loop: '{{ prior.containers }}'
+          when: touch_containers | bool
+        - ansible.builtin.command: {argv: [/usr/bin/docker, stop, --timeout, '45', '{{ item.id }}']}
+          loop: '{{ prior.containers | selectattr("running", "equalto", true) | list }}'
+          timeout: 60
+          when: touch_containers | bool
+        - name: Record SQLite quiesce completion only after every natural drain and stop succeeded
+          ansible.builtin.copy: {dest: '{{ maintenance_dir }}/SQLITE-QUIESCE-COMPLETE', content: 'QUIESCED', mode: '0600', force: false}
+          when: maintenance_kind == 'sqlite'
+    - name: Verify the exact selected SQLite archive immediately before its transaction
+      when: maintenance_kind == 'sqlite' and phase in ['install', 'rollback']
+      block:
+        - ansible.builtin.set_fact:
+            sqlite_transaction: '{{ sqlite_rollback if phase == "rollback" else sqlite_candidate }}'
+        - ansible.builtin.stat:
+            path: '/var/cache/apt/archives/{{ sqlite_transaction.path | basename }}'
+            checksum_algorithm: sha256
+          register: sqlite_selected_archive
+        - ansible.builtin.assert:
+            that: sqlite_selected_archive.stat.isreg and sqlite_selected_archive.stat.size == sqlite_transaction.bytes and sqlite_selected_archive.stat.checksum == sqlite_transaction.sha256
+    - name: Stage only the admitted packages in the ordinary APT archive cache
+      ansible.builtin.copy:
+        src: '{{ item }}'
+        dest: '/var/cache/apt/archives/{{ item | basename }}'
+        remote_src: true
+        mode: '0644'
+      loop: '{{ new_debs }}'
+      when: phase == 'install' and maintenance_kind == 'glibc'
+    - name: Install only the exact cached packages in one offline APT transaction
+      ansible.builtin.command:
+        argv: '{{ ["/usr/bin/apt-get", "--yes", "--no-download", "--no-remove", "--no-install-recommends", "-o", "Dpkg::Options::=--force-confold"] + (["--allow-change-held-packages"] if maintenance_kind == "sqlite" and prior.sqlite.hold | length > 0 else []) + ["install"] + (new_debs | map("basename") | map("regex_replace", "^", "/var/cache/apt/archives/") | list) }}'
+      environment: {DEBIAN_FRONTEND: noninteractive, NEEDRESTART_MODE: l}
+      when: phase == 'install'
+    - name: Reinstall only the exact original SQLite package for explicit reaped-failure rollback
+      ansible.builtin.command:
+        argv: '{{ ["/usr/bin/apt-get", "--yes", "--no-download", "--no-remove", "--no-install-recommends", "--allow-downgrades", "-o", "Dpkg::Options::=--force-confold"] + (["--allow-change-held-packages"] if prior.sqlite.hold | length > 0 else []) + ["install", "/var/cache/apt/archives/" + (sqlite_rollback.path | basename)] }}'
+      environment: {DEBIAN_FRONTEND: noninteractive, NEEDRESTART_MODE: l}
+      when: maintenance_kind == 'sqlite' and phase == 'rollback'
+    - name: Retain the original SQLite hold following the one-package transaction
+      ansible.builtin.command: {argv: [/usr/bin/apt-mark, hold, libsqlite3-0]}
+      when: maintenance_kind == 'sqlite' and phase in ['install', 'rollback'] and prior.sqlite.hold | length > 0
+    - name: Require the SQLite hold selection to remain exactly as captured
+      when: maintenance_kind == 'sqlite' and phase in ['install', 'rollback', 'finish']
+      block:
+        - ansible.builtin.command: {argv: [/usr/bin/apt-mark, showhold, libsqlite3-0]}
+          register: sqlite_hold_after
+          changed_when: false
+        - ansible.builtin.assert: {that: 'sqlite_hold_after.stdout_lines == prior.sqlite.hold'}
+    - name: Verify the installed SQLite runtime before releasing any Host trigger
+      when: maintenance_kind == 'sqlite' and phase in ['install', 'rollback']
+      ansible.builtin.command:
+        argv: '{{ [sqlite_python, "-I", "-B", sqlite_runtime_helper, "verify", "--recipe-verify", sqlite_recipe_verify, "--recipe-verify-sha256", sqlite_recipe_verify_sha256, "--package-version", sqlite_transaction.version, "--library", sqlite_transaction.library.path, "--library-sha256", sqlite_transaction.library.sha256, "--baseline", maintenance_dir + "/sqlite-baseline.json", "--output", maintenance_dir + ("/sqlite-postrollback.json" if phase == "rollback" else "/sqlite-postinstall.json")] + (["--rollback"] if phase == "rollback" else []) + (maintenance_units | select("match", ".*[.]service$") | map("regex_replace", "^", "--admitted-unit=") | list) }}'
+      changed_when: false
+    - name: Reboot from an external controller leaving all inhibitors in place
+      ansible.builtin.reboot: {reboot_timeout: '{{ maintenance_reboot_timeout_seconds | default(300) | int }}', connect_timeout: 10, post_reboot_delay: 10}
+      when: phase == 'reboot' and maintenance_kind == 'glibc'
+    - name: Start only original running datastores before Root checks their health
+      ansible.builtin.command: {argv: [/usr/bin/docker, start, '{{ item }}']}
+      loop: '{{ datastore_ids }}'
+      when: phase == 'restore' and touch_containers | bool
+    - name: Finish only under Root datastore proof and recover inhibition on any failure
+      when: phase == 'finish'
+      block:
+        - name: Start remaining original running containers
+          ansible.builtin.command: {argv: [/usr/bin/docker, start, '{{ item.id }}']}
+          loop: '{{ prior.containers | selectattr("running", "equalto", true) | rejectattr("id", "in", datastore_ids) | list }}'
+          when: touch_containers | bool
+        - name: Require API health before releasing project unit inhibitors
+          ansible.builtin.uri: {url: '{{ item }}', status_code: 200, return_content: false}
+          loop: '{{ health_urls | default([]) }}'
+          register: health
+          until: health is succeeded
+          retries: 30
+          delay: 2
+          no_log: true
+        - name: Require the reviewed role-specific loopback health commands
+          ansible.builtin.command: {argv: '{{ item }}'}
+          loop: '{{ health_commands | default([]) }}'
+          changed_when: false
+          register: command_health
+          until: command_health is succeeded
+          retries: 30
+          delay: 2
+          no_log: true
+        - ansible.builtin.file: {path: '{{ token }}', state: absent}
+        - ansible.builtin.systemd_service: {name: '{{ item.Id }}', state: started}
+          loop: '{{ prior.units | selectattr("ActiveState", "equalto", "active") | selectattr("Id", "search", "[.]service$") | rejectattr("Type", "equalto", "oneshot") | rejectattr("Id", "search", "^(cron|atd)[.]service$") | list }}'
+        - ansible.builtin.systemd_service: {name: '{{ item.Id }}', state: started}
+          loop: '{{ prior.units | selectattr("ActiveState", "equalto", "active") | selectattr("Id", "search", "[.](timer|socket)$") | list }}'
+        - ansible.builtin.command:
+            argv: [/usr/bin/docker, update, '--restart={{ item.restart_policy.Name }}{{ ":" ~ item.restart_policy.MaximumRetryCount if item.restart_policy.Name == "on-failure" and item.restart_policy.MaximumRetryCount > 0 else "" }}', '{{ item.id }}']
+          loop: '{{ prior.containers }}'
+          when: touch_containers | bool
+        - ansible.builtin.systemd_service: {name: '{{ item.Id }}', state: started}
+          loop: '{{ prior.units | selectattr("Id", "search", "^(cron|atd)[.]service$") | selectattr("ActiveState", "equalto", "active") | list }}'
+        - name: Require originally active Host units to be active after SQLite restoration
+          when: maintenance_kind == 'sqlite'
+          ansible.builtin.command: {argv: [/usr/bin/systemctl, is-active, '{{ item.Id }}']}
+          loop: '{{ prior.units | selectattr("ActiveState", "equalto", "active") | rejectattr("Type", "equalto", "oneshot") | list }}'
+          changed_when: false
+        - name: Recheck role-specific JSON API health after restoring Host consumers
+          when: maintenance_kind == 'sqlite'
+          ansible.builtin.command: {argv: '{{ item }}'}
+          loop: '{{ health_commands | default([]) }}'
+          changed_when: false
+          no_log: true
+        - name: Verify actual native SQLite, fresh consumers and unchanged Docker runtime
+          when: maintenance_kind == 'sqlite'
+          block:
+            - ansible.builtin.command:
+                argv: '{{ [sqlite_python, "-I", "-B", sqlite_runtime_helper, "verify", "--recipe-verify", sqlite_recipe_verify, "--recipe-verify-sha256", sqlite_recipe_verify_sha256, "--package-version", (sqlite_rollback.version if sqlite_rollback_completed | default(false) | bool else sqlite_candidate.version), "--library", sqlite_candidate.library.path, "--library-sha256", (sqlite_rollback.library.sha256 if sqlite_rollback_completed | default(false) | bool else sqlite_candidate.library.sha256), "--baseline", maintenance_dir + "/sqlite-baseline.json", "--output", maintenance_dir + ("/sqlite-rollback-verified.json" if sqlite_rollback_completed | default(false) | bool else "/sqlite-candidate-verified.json")] + (["--rollback"] if sqlite_rollback_completed | default(false) | bool else []) + (maintenance_units | select("match", ".*[.]service$") | map("regex_replace", "^", "--admitted-unit=") | list) }}'
+              changed_when: false
+            - ansible.builtin.command: {argv: [/usr/bin/docker, container, ls, -aq, --no-trunc]}
+              register: sqlite_final_ids
+              changed_when: false
+            - ansible.builtin.assert: {that: 'sqlite_final_ids.stdout_lines | sort == prior.containers | map(attribute="id") | sort'}
+            - ansible.builtin.command:
+                argv: '{{ ["/usr/bin/docker", "inspect", "--format", sqlite_container_format] + sqlite_final_ids.stdout_lines }}'
+              register: sqlite_final_containers
+              changed_when: false
+            - ansible.builtin.assert:
+                that: sqlite_final_containers.stdout_lines | map('from_json') | sort(attribute='id') == prior.containers | sort(attribute='id')
+      rescue:
+        - ansible.builtin.set_fact:
+            finish_primary_task: '{{ ansible_failed_task.name }}'
+        - name: Reinstate the owned token without replacing an existing fence
+          ansible.builtin.copy: {dest: '{{ token }}', content: 'QUIESCED', mode: '0600', force: false}
+          register: refence
+          ignore_errors: true
+        - ansible.builtin.fail:
+            msg: 'Finish failed at {{ finish_primary_task }}; original Ansible failure retained. QUIESCED restored={{ not (refence.failed | default(false)) }}; all owned drop-ins retained. Root must reconcile before recovery.'
+    - name: Cleanup only after Root independently proves actual complete health
+      when: phase == 'cleanup'
+      block:
+        - name: Require completed SQLite restoration before removing its owned fences
+          when: maintenance_kind == 'sqlite'
+          block:
+            - ansible.builtin.stat: {path: '{{ token }}'}
+              register: sqlite_cleanup_token
+            - ansible.builtin.stat:
+                path: '{{ maintenance_dir }}/{{ "sqlite-rollback-verified.json" if sqlite_rollback_completed | default(false) | bool else "sqlite-candidate-verified.json" }}'
+              register: sqlite_cleanup_receipt
+            - ansible.builtin.assert:
+                that: not sqlite_cleanup_token.stat.exists and sqlite_cleanup_receipt.stat.exists and sqlite_cleanup_receipt.stat.isreg and sqlite_cleanup_receipt.stat.uid == 0 and sqlite_cleanup_receipt.stat.mode == '0600'
+            - ansible.builtin.slurp:
+                src: '{{ maintenance_dir }}/{{ "sqlite-rollback-verified.json" if sqlite_rollback_completed | default(false) | bool else "sqlite-candidate-verified.json" }}'
+              register: sqlite_cleanup_proof
+            - ansible.builtin.assert:
+                that:
+                  - (sqlite_cleanup_proof.content | b64decode | from_json).schema == 'sqlite_host_runtime_verification/1'
+                  - (sqlite_cleanup_proof.content | b64decode | from_json).status == ('PASS_ROLLBACK_RUNTIME_ONLY' if sqlite_rollback_completed | default(false) | bool else 'PASS_RUNTIME_ONLY')
+        - ansible.builtin.file: {path: '/etc/systemd/system/{{ item }}.d/{{ dropin }}', state: absent}
+          loop: '{{ prior.units | map(attribute="Id") | list }}'
+        - ansible.builtin.systemd_service: {daemon_reload: true}

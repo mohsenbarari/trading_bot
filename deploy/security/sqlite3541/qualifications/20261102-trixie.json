@@ -1,0 +1,43 @@
+{
+  "2048_legacy_CAST_byte_parity_and_exact_finite_numeric_roundtrip": true,
+  "App32_or_Market81_on_resulting_images_claimed": false,
+  "Host_install_or_activation_authorized_by_this_receipt": false,
+  "actual32_concurrent4_reinitialize_and24_fresh_connections": true,
+  "actual_artifact": {
+    "bytes": 837759,
+    "head_sha": "caf4ec17f4d8b69c084c3436857fe896237900da",
+    "id": 13138410737,
+    "job_id": 125251337840,
+    "members": 32,
+    "name": "sqlite3541-library-trixie-41437637885-1",
+    "run_attempt": 1,
+    "run_id": 41437637885,
+    "sha256": "69ec0eb7b85a640ec9b9f265e3a63ba867cfd459d25c67e7221d3674b07e8518",
+    "workflow_id": 404280924
+  },
+  "genuine_source_provenance_and_original_archive_admitted": true,
+  "global_security_accepted": false,
+  "installed_library": {
+    "bytes": 1640768,
+    "path": "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6",
+    "sha256": "daf0fa411c67f005ec3ba164a41bd233b85a27fe37131f4fe0bfa7b2a1fb4fd2"
+  },
+  "numeric_contract": "legacy_cast15_exact_quote_json_numeric_roundtrip_exact",
+  "package": {
+    "bytes": 728604,
+    "path": "libsqlite3-0_3.54.1-0+trading1~trixie1_amd64.deb",
+    "sha256": "0a125ed2577726f8ba218db1b9a6561abebe0d486b6d0839268cd7a2b94f5d8b"
+  },
+  "proof_valid_until_epoch": 1793705549,
+  "public_ABI_features_limits_and_old_new_reopen_passed": true,
+  "reviewed_at": "2026-11-02T12:01:51.538656+00:00",
+  "schema": "sqlite3541_Root_component_qualification/1",
+  "source_qualification": {
+    "bytes": 8462,
+    "sha256": "bace4b4ca292555384cb9e3f16774bfb1e03576ffc81ec670e61b509b3488960"
+  },
+  "status": "ACCEPTED_FOR_EXACT_LIBRARY_COMPONENT",
+  "unused_quote_JSON_format_bytes_equal_claimed": false,
+  "upstream_979160_tests_zero_errors": true,
+  "variant": "trixie"
+}

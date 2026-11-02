@@ -1,0 +1,15 @@
+--- a/debian/changelog
++++ b/debian/changelog
+@@ -1,3 +1,12 @@
++tar (1.35+dfsg-5~trixie+gold2) trixie; urgency=medium
++
++  * Local descriptor-bound ACL caller patch for the pinned libacl2.4 toolchain.
++  * Carry actual tar object descriptors through ACL operations, and preserve
++    independent runtime identities for delayed directory ACL restoration.
++  * Preserve libacl legacy ABI; candidate requires ordinary native validation.
++
++ -- Project local build <local-build@invalid>  Mon, 26 Oct 2026 00:00:00 +0000
++
+ tar (1.35+dfsg-5) unstable; urgency=medium
+ 
+   * Team upload (salsa.debian.org/debian namespace)

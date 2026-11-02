@@ -1,0 +1,36 @@
+{
+  "Root_source_review_tools": [
+    "182ff1/0",
+    "95de35/0",
+    "43fb1e/0"
+  ],
+  "advisory": "CVE-2026-118764",
+  "basis": "Authenticated legacy3.1.5 and5.1.9 compile brace-expanded patterns directly by slash/map(parse)/filter/set; the advisory-specific optimizationLevel>=2 fixpoint generation and pairwise second phase are absent. This is algorithm absence, not trusted-input/dev-only/reachability waiver.",
+  "decision": "component_not_present_for_exact_four_legacy_instances_only",
+  "exact_instances": [
+    "node_modules/@eslint/eslintrc/node_modules/minimatch",
+    "node_modules/@eslint/config-array/node_modules/minimatch",
+    "node_modules/eslint/node_modules/minimatch",
+    "node_modules/filelist/node_modules/minimatch"
+  ],
+  "extraneous_test_exclude_modern10_still_separate_open": true,
+  "global_security_accepted": false,
+  "historical_pending_fields_preserved": true,
+  "maintainer_fix": "https://github.com/isaacs/minimatch/commit/77a0f5c",
+  "modern_versions_or_other_advisories_resolved": false,
+  "official_preimage_verification": {
+    "bytes": 7176,
+    "path": "/root/trading-bot/trading_bot/.local/security-npm-compatible-backport-candidates-20261101-01/ROOT-OFFICIAL-PREIMAGE-VERIFICATION.json",
+    "sha256": "23c9d6d3adc8f79c1d352be2a2976fd6a6ab8fe8cf86252a05cac4a2db45c1c0"
+  },
+  "primary_advisory": "https://github.com/isaacs/minimatch/security/advisories/GHSA-g3hv-75wg-m249",
+  "raw_audit_modified": false,
+  "recorded_at": "2026-11-01T00:37:55.864320+00:00",
+  "schema": "Root_exact_legacy_minimatch_optimizer_absence_decision/1",
+  "source_identity_verification_actual": "affabe/0 sevenofficialtgz/nineinstances261files/all261originalreaderEBADF",
+  "source_review": {
+    "bytes": 11098,
+    "path": "/root/trading-bot/trading_bot/.local/security-minimatch-legacy-optimizer-source-review-20261101-01/ASSESSMENT.json",
+    "sha256": "4cf7eb92565441db8f7c43d0c675338d90363c336cb51d2bad9cd1ba6c2f7f7c"
+  }
+}

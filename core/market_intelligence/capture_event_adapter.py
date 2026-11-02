@@ -104,6 +104,23 @@ _V8_RECONCILIATION_CODE = "V8_PRIVATE_ROOT_AND_COIN_PARSER_REPAIR"
 _PRIMARY_PRICE_POLICY_REJECTION = "PRICE_OUT_OF_CANONICAL_RANGE"
 
 
+def _input_policy_rejection(error: MarketStoreContractError) -> str | None:
+    """Only known untrusted numeric failures are terminal input rejections.
+
+    Never swallow identity, chronology, schema, unit or database defects. A
+    zero/invalid quantity in one Herat message must not stop every coin group.
+    The per-message savepoints preserve atomicity before recording disposition.
+    """
+    reason = str(error)
+    if reason.startswith("price_out_of_canonical_range:"):
+        return _PRIMARY_PRICE_POLICY_REJECTION
+    if reason in {"price_invalid", "price_must_be_positive"}:
+        return "INVALID_PRICE"
+    if reason in {"quantity_invalid", "quantity_must_be_positive"}:
+        return "INVALID_QUANTITY"
+    return None
+
+
 class CaptureEventContractError(RuntimeError):
     """An event cannot safely cross the capture/model boundary."""
 
@@ -151,6 +168,7 @@ class CaptureProjectionReport:
     group_pipeline: CoinGroupPipelineReport | None
     raw_rows_purged: int
     public_price_policy_rejections: int = 0
+    input_policy_rejections: int = 0
 
 
 _SCHEMA = """
@@ -1978,7 +1996,7 @@ def _project_xau_batch(
         batch = ingest_xau_messages_batch(market, messages)
     except MarketStoreContractError as exc:
         market.execute("ROLLBACK TO xau_batch_projection")
-        if not str(exc).startswith("price_out_of_canonical_range:"):
+        if _input_policy_rejection(exc) is None:
             raise
         # Healthy batches keep the bulk fast path. On this narrow input
         # failure, retry messages atomically to isolate the offending quote.
@@ -1989,13 +2007,14 @@ def _project_xau_batch(
             try:
                 count, _flow_keys = _project_public_row(staging, market, row)
             except MarketStoreContractError as error:
-                if not str(error).startswith("price_out_of_canonical_range:"):
+                rejection = _input_policy_rejection(error)
+                if rejection is None:
                     raise
                 rejected_ids.add(identity)
                 keys[identity] = ()
                 _finish_capture_lineage(
                     staging, stream="market", source_id="XAUUSD", message_id=identity,
-                    status="FILTERED", disposition_code="PRICE_OUT_OF_CANONICAL_RANGE",
+                    status="FILTERED", disposition_code=rejection,
                     completed_at_utc=as_of_utc,
                 )
             else:
@@ -2553,6 +2572,7 @@ def project_capture_changes(
     )
     projected = upserted = retracted = 0
     public_price_policy_rejections = 0
+    input_policy_rejections = 0
     private_trades = private_finalized = private_ambiguous = 0
     primary_changed = False
     primary_minutes: set[str] = set()
@@ -2569,6 +2589,7 @@ def project_capture_changes(
         upserted += xau_upserted
         retracted += xau_retracted
         public_price_policy_rejections += xau_rejected
+        input_policy_rejections += xau_rejected
     for item in dirty:
         source_id = str(item["source_id"])
         if source_id == "XAUUSD":
@@ -2620,20 +2641,20 @@ def project_capture_changes(
                     as_of_utc=as_of,
                 )
             except MarketStoreContractError as exc:
-                # Capture text is untrusted input.  A value outside the
-                # canonical magnitude policy is an input rejection, not a
-                # process-wide dependency failure.  Terminalize only this
-                # narrow policy error; every other store-contract violation
-                # remains fail-closed because it can indicate a code defect.
-                if not str(exc).startswith("price_out_of_canonical_range:"):
+                # Untrusted numeric input is a per-message rejection, not a
+                # process-wide failure. Other contract violations can indicate
+                # a code defect and must still fail closed.
+                rejection = _input_policy_rejection(exc)
+                if rejection is None:
                     raise
+                input_policy_rejections += 1
                 _finish_capture_lineage(
                     staging,
                     stream="market",
                     source_id=source_id,
                     message_id=int(item["message_id"]),
                     status="FILTERED",
-                    disposition_code=_PRIMARY_PRICE_POLICY_REJECTION,
+                    disposition_code=rejection,
                     completed_at_utc=as_of,
                 )
                 staging.execute(
@@ -2663,13 +2684,15 @@ def project_capture_changes(
             try:
                 public_upserted, flow_keys = _project_public_row(staging, market, row)
             except MarketStoreContractError as exc:
-                if not str(exc).startswith("price_out_of_canonical_range:"):
+                rejection = _input_policy_rejection(exc)
+                if rejection is None:
                     raise
-                public_price_policy_rejections += 1
+                input_policy_rejections += 1
+                public_price_policy_rejections += int(rejection != "INVALID_QUANTITY")
                 _finish_capture_lineage(
                     staging, stream="market", source_id=source_id,
                     message_id=int(item["message_id"]), status="FILTERED",
-                    disposition_code="PRICE_OUT_OF_CANONICAL_RANGE",
+                    disposition_code=rejection,
                     completed_at_utc=as_of,
                 )
                 continue
@@ -2835,6 +2858,7 @@ def project_capture_changes(
     raw_purged = purge_capture_staging(staging, as_of_utc=as_of)
     return CaptureProjectionReport(
         public_price_policy_rejections=public_price_policy_rejections,
+        input_policy_rejections=input_policy_rejections,
         market_messages_reprojected=projected,
         market_facts_upserted=upserted,
         market_facts_retracted=retracted + (group_report.retracted_facts if group_report else 0),

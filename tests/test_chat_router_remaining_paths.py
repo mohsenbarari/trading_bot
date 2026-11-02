@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi import BackgroundTasks, HTTPException
-from jose import JWTError
+from core.jwt_codec import JWTError
 
 from api.routers.chat import (
     _build_direct_message_accountant_serializer,

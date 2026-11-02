@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from datetime import timedelta
 from copy import deepcopy
+import io
 import json
 from pathlib import Path
 import tempfile
 import subprocess
 import unittest
+import os
+import errno
+import socket
+import stat
 from unittest import mock
 
 from scripts import backup_market_pipeline_archive as backup
@@ -98,11 +103,38 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         )
         self.source_guard.start()
         self.directory_guard.start()
+        # Only ambient /tmp lies outside the private fixture boundary. Exercise
+        # real owner/mode and all stable-FD checks for the fixture itself.
+        trusted_parent = backup._trusted_env_parent
+        ambient = Path(tempfile.gettempdir()).stat()
+        def fixture_parent(info):
+            if (info.st_dev, info.st_ino) == (ambient.st_dev, ambient.st_ino):
+                return True
+            return trusted_parent(info)
+        self.parent_guard = mock.patch.object(backup, "_trusted_env_parent", side_effect=fixture_parent)
+        self.parent_guard.start()
+        self.command_guards = [
+            mock.patch.object(backup.subprocess, name, side_effect=AssertionError("unmocked_host_command"))
+            for name in ("run", "Popen")
+        ]
+        self.command_guards.extend([
+            mock.patch.object(socket, "socket", side_effect=AssertionError("unmocked_network")),
+            mock.patch.object(socket, "create_connection", side_effect=AssertionError("unmocked_network")),
+        ])
+        for guard in self.command_guards:
+            guard.start()
 
     def tearDown(self) -> None:
+        for guard in reversed(self.command_guards):
+            guard.stop()
+        self.parent_guard.stop()
         self.directory_guard.stop()
         self.source_guard.stop()
         self.temporary.cleanup()
+
+    def _env_binding(self) -> dict[str, object]:
+        with backup.BoundRoleEnv(self.env_file) as bound:
+            return dict(bound.binding)
 
     def _verify(self, **overrides: object) -> dict[str, object]:
         arguments: dict[str, object] = {
@@ -120,6 +152,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
     def _write_bound_receipt(self, payload: dict[str, object]) -> None:
         run_id = "deadbeefdeadbeef"
         payload["backup_run_id"] = run_id
+        payload.setdefault("backup_mode", "quiesced")
         payload.setdefault("source_after", deepcopy(payload["source"]))
         artifact = payload.get("backup")
         artifact_path = (
@@ -130,6 +163,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         )
         journal = {
             "schema": backup.JOURNAL_SCHEMA,
+            "backup_mode": payload["backup_mode"],
             "status": "COMPLETE",
             "backup_status": payload["status"],
             "run_id": run_id,
@@ -138,7 +172,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             "release_tree": RELEASE_TREE,
             "image_id": IMAGE_ID,
             "image_input_signature": IMAGE_SIGNATURE,
-            "role_env_sha256": backup.file_digest(self.env_file),
+            "role_env_binding": self._env_binding(),
             "receipt_path": str(self.receipt),
             "artifact_path": str(artifact_path),
             "candidate_path": str(self.backup_dir / f".{artifact_path.name}.pending"),
@@ -151,6 +185,1091 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         }
         backup._write_journal(backup._journal_path(self.backup_dir), journal)
         backup._write_receipt(self.receipt, payload)
+
+    def _create_empty(self) -> dict[str, object]:
+        with mock.patch.object(backup, "_running_project_services", return_value=[]):
+            return backup.create_backup(
+                env_file=self.env_file, backup_dir=self.backup_dir,
+                receipt=self.receipt, release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+            )
+
+    def _legacy_evidence(self) -> tuple[str, str]:
+        self._create_empty()
+        journal_path = backup._journal_path(self.backup_dir)
+        for path, schema in ((self.receipt, backup.LEGACY_RECEIPT_SCHEMA),
+                             (journal_path, backup.LEGACY_JOURNAL_SCHEMA)):
+            payload = json.loads(path.read_text())
+            payload["schema"] = schema
+            del payload["backup_mode"]
+            del payload["role_env_binding"]
+            payload["role_env_sha256"] = "1" * 64  # historical stored value only
+            backup._write_receipt(path, payload)
+        return backup.file_digest(self.receipt), backup.file_digest(journal_path)
+
+    def _hot_fixture(self, *, restore_changes=None, create_overrides=None, restore_callback=None) -> dict[str, object]:
+        pgdata = self.postgres_root / "pgdata"
+        pgdata.mkdir(mode=0o700)
+        (pgdata / "PG_VERSION").write_text("15\n")
+        source = {
+            "container_id": "e" * 64, "database": "market_archive",
+            "database_size_bytes": 12345, "database_identity_sha256": "f" * 64,
+            "schema_versions": [1, 2], "table_count": 1, "fact_count": 10,
+            **_invariants(fact_count=10),
+        }
+        after = deepcopy(source)
+        after.update(fact_count=12, table_row_counts={"market_facts": 12})
+        after["sequence_values"]["market_facts_id_seq"]["last_value"] = 103
+        restored = {"status": "PASS", "cleanup_status": "PASS", **backup._invariant_view(source)}
+        restored.update(fact_count=11, table_row_counts={"market_facts": 11})
+        restored["sequence_values"] = {"market_facts_id_seq": {"last_value": 102, "is_called": True}}
+        restored.update(restore_changes or {})
+        def dump(**arguments):
+            arguments["destination"].write_bytes(b"synthetic-custom-dump")
+            arguments["destination"].chmod(0o600)
+        with mock.patch.object(backup, "inspect_source_database", side_effect=[source, source, after]), \
+                mock.patch.object(backup, "_write_dump", side_effect=dump), \
+                mock.patch.object(backup, "_dump_archive_is_valid", return_value=True), \
+                mock.patch.object(backup, "restore_smoke", return_value=restored, side_effect=restore_callback):
+            return backup.create_backup(
+                env_file=self.env_file, backup_dir=self.backup_dir, receipt=self.receipt,
+                release_sha=RELEASE_SHA, release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE, allow_running_writers=True,
+                **(create_overrides or {}),
+            )
+
+    def _limits(self, **overrides):
+        values = dict(metadata_timeout_seconds=3, dump_timeout_seconds=30, restore_timeout_seconds=40,
+                      dump_max_bytes=1024, minimum_free_bytes=8 * 1024**3,
+                      pg_application_name="hot3-dump-" + "a" * 32, restore_cpus=2,
+                      restore_memory_bytes=2 * 1024**3, restore_pids_limit=256,
+                      daemon_deadline_epoch_seconds=int(backup.time.time()) + 1800)
+        values.update(overrides)
+        return backup.BackupExecutionLimits(**values)
+
+    def _dump_child(self, data=b"", *, open_writer=False):
+        reader, writer = os.pipe()
+        if data:
+            os.write(writer, data)
+        if open_writer:
+            self.addCleanup(os.close, writer)
+        else:
+            os.close(writer)
+        stdout = os.fdopen(reader, "rb", buffering=0)
+        self.addCleanup(stdout.close)
+        return mock.Mock(stdout=stdout, wait=mock.Mock(return_value=0), poll=mock.Mock(return_value=None))
+
+    def test_execution_limits_reject_bad_types_and_deadlines_before_env_or_commands(self):
+        bad = {"metadata_timeout_seconds": True, "dump_timeout_seconds": 1801,
+               "restore_timeout_seconds": 0, "dump_max_bytes": -1, "minimum_free_bytes": 0,
+               "restore_cpus": float("nan"), "restore_memory_bytes": True,
+               "restore_pids_limit": "256", "pg_application_name": "private value\n",
+               "daemon_deadline_epoch_seconds": int(backup.time.time()) - 1, "checkpoint": 1}
+        for name, value in bad.items():
+            with self.subTest(field=name), self.assertRaisesRegex(backup.BackupError, "backup_execution_limits_invalid"):
+                self._limits(**{name: value})
+        with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            for overrides in ({"execution_limits": {}}, {"allow_private_primary_source": True},
+                              {"allow_private_primary_source": 1}):
+                with self.assertRaises(backup.BackupError):
+                    backup.create_backup(env_file=self.env_file, backup_dir=self.backup_dir, receipt=self.receipt,
+                                         release_sha=RELEASE_SHA, release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                                         image_input_signature=IMAGE_SIGNATURE, **overrides)
+
+    def test_bounded_dump_stream_never_writes_excess_and_reaps_client(self):
+        limits = self._limits(dump_max_bytes=4)
+        child = self._dump_child(b"abcdef")
+        original_read = os.read
+        reads = []
+        def short_read(descriptor, count):
+            reads.append(count)
+            return original_read(descriptor, min(2, count))
+        output = self.root / "bounded.pending"
+        with output.open("wb") as stream, mock.patch.object(backup.subprocess, "Popen", return_value=child), \
+                mock.patch.object(backup.os, "read", side_effect=short_read), \
+                mock.patch.object(backup.os, "fstatvfs", return_value=mock.Mock(f_bavail=64 * 1024**3, f_frsize=1)):
+            with self.assertRaisesRegex(backup.BackupError, "backup_dump_byte_bound"):
+                backup._bounded_dump(["owned-docker-client"], stream, limits)
+        self.assertEqual(output.read_bytes(), b"abcd")
+        self.assertEqual(reads, [5, 3, 1])
+        child.kill.assert_called_once_with()
+        self.assertEqual(child.wait.call_args.kwargs["timeout"], 3)
+        self.assertTrue(child.stdout.closed)
+
+    def test_bounded_dump_rechecks_free_floor_before_each_write(self):
+        limits = self._limits()
+        child = self._dump_child(b"ab")
+        output = self.root / "floor.pending"
+        space = [mock.Mock(f_bavail=limits.minimum_free_bytes + 1024, f_frsize=1),
+                 mock.Mock(f_bavail=limits.minimum_free_bytes + 1, f_frsize=1)]
+        with output.open("wb") as stream, mock.patch.object(backup.subprocess, "Popen", return_value=child), \
+                mock.patch.object(backup.os, "fstatvfs", side_effect=space):
+            with self.assertRaisesRegex(backup.BackupError, "backup_dump_free_floor"):
+                backup._bounded_dump(["owned-docker-client"], stream, limits)
+        self.assertEqual(output.read_bytes(), b"")
+        child.kill.assert_called_once_with()
+
+    def test_bounded_dump_timeout_and_checkpoint_do_not_claim_daemon_cancellation(self):
+        limits = self._limits()
+        child = self._dump_child(open_writer=True)
+        with (self.root / "timeout.pending").open("wb") as stream, \
+                mock.patch.object(backup.subprocess, "Popen", return_value=child), \
+                mock.patch.object(backup.os, "fstatvfs", return_value=mock.Mock(f_bavail=64 * 1024**3, f_frsize=1)), \
+                mock.patch.object(backup.time, "monotonic", side_effect=[0, 31]):
+            with self.assertRaisesRegex(backup.BackupError, "backup_pg_dump_timeout"):
+                backup._bounded_dump(["owned-docker-client"], stream, limits)
+        child.kill.assert_called_once_with()
+        guard = mock.Mock(side_effect=backup.BackupError("outer_guard_refused"))
+        with (self.root / "guard.pending").open("wb") as stream, \
+                mock.patch.object(backup.subprocess, "Popen", side_effect=AssertionError("client_started")):
+            with self.assertRaisesRegex(backup.BackupError, "outer_guard_refused"):
+                backup._bounded_dump(["owned-docker-client"], stream, self._limits(checkpoint=guard))
+        with (self.root / "late.pending").open("wb") as stream, \
+                mock.patch.object(backup.time, "time", return_value=limits.daemon_deadline_epoch_seconds + 1), \
+                mock.patch.object(backup.subprocess, "Popen", side_effect=AssertionError("late_client_started")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_execution_deadline"):
+                backup._bounded_dump(["owned-docker-client"], stream, limits)
+
+    def test_bounded_write_dump_has_public_pgappname_and_fixed_positional_daemon_guard(self):
+        limits = self._limits()
+        child = self._dump_child(b"ordinary-custom-dump")
+        child.poll.return_value = 0
+        target = self.root / "owned.dump"
+        with mock.patch.object(backup.subprocess, "Popen", return_value=child) as launch, \
+                mock.patch.object(backup.os, "fstatvfs", return_value=mock.Mock(f_bavail=64 * 1024**3, f_frsize=1)), \
+                mock.patch.object(backup, "_dump_archive_is_valid", return_value=True):
+            backup._write_dump(container_id="e" * 64, user="market_data", database="market_archive",
+                               destination=target, execution_limits=limits)
+        argv = launch.call_args.args[0]
+        self.assertEqual(argv[:5], ["docker", "exec", "-e", "PGAPPNAME=" + limits.pg_application_name, "e" * 64])
+        self.assertEqual(argv[5:9], ["/bin/sh", "-ec", backup._DAEMON_GUARD, "backup-deadline"])
+        self.assertEqual(argv[9:12], [str(limits.daemon_deadline_epoch_seconds), "30", "pg_dump"])
+        self.assertEqual(argv[12:], ["-U", "market_data", "-d", "market_archive", "-Fc", "--no-owner", "--no-privileges"])
+        self.assertIn('command -v timeout', backup._DAEMON_GUARD)
+        self.assertIn('[ "$remaining" -gt 0 ] || exit 124', backup._DAEMON_GUARD)
+        self.assertIn('exec timeout -s TERM -k 5 "$remaining" "$@"', backup._DAEMON_GUARD)
+        self.assertEqual(target.read_bytes(), b"ordinary-custom-dump")
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+        self.assertFalse((self.root / ".owned.dump.pending").exists())
+
+    def test_metadata_timeout_and_cleanup_refuse_content_free_without_foreign_deletion(self):
+        limits = self._limits()
+        with mock.patch.object(backup.subprocess, "run", side_effect=subprocess.TimeoutExpired(["private-argument"], 3)) as run:
+            with self.assertRaisesRegex(backup.BackupError, "^backup_command_timeout$"):
+                backup._run_text(["owned-command"], label="owned_metadata", execution_limits=limits)
+        self.assertEqual(run.call_args.kwargs["timeout"], 3)
+        with mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="foreign-owner")), \
+                mock.patch.object(backup, "_run_text", side_effect=AssertionError("deletion_started")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_restore_container_owner_mismatch"):
+                backup._cleanup_owned_restore_resource("container", "owned-name", "owned-label", execution_limits=limits)
+        with mock.patch.object(backup.subprocess, "run", side_effect=subprocess.TimeoutExpired(["inspect"], 3)):
+            with self.assertRaisesRegex(backup.BackupError, "backup_command_timeout"):
+                backup._assert_restore_resource_absent("container", "owned-name", execution_limits=limits)
+
+    def test_metadata_sql_and_archive_parser_have_positional_in_container_deadline_guards(self):
+        limits = self._limits()
+        sql = "SELECT 'ordinary fixture';"
+        with mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=0, stdout="fixture")) as run:
+            self.assertEqual(backup._restore_query("owned-container", sql, execution_limits=limits), "fixture")
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[:5], ["docker", "exec", "-e", "PGAPPNAME=" + limits.pg_application_name, "owned-container"])
+        self.assertEqual(argv[5:12], ["/bin/sh", "-ec", backup._DAEMON_GUARD, "backup-deadline",
+                                    str(limits.daemon_deadline_epoch_seconds), "3", "psql"])
+        self.assertEqual(argv[-2:], ["-c", sql])
+        self.assertNotIn(sql, backup._DAEMON_GUARD)
+        artifact = self.root / "parser.dump"
+        artifact.write_bytes(b"owned-parser-input")
+        artifact.chmod(0o600)
+        with mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=0)) as run:
+            self.assertTrue(backup._dump_archive_is_valid(container_id="owned-container", path=artifact, execution_limits=limits))
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[-2:], ["pg_restore", "--list"])
+        self.assertEqual(argv[argv.index("backup-deadline") + 1:][-4:],
+                         [str(limits.daemon_deadline_epoch_seconds), "40", "pg_restore", "--list"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 40)
+
+    def test_limited_cleanup_accepts_only_fixed_name_explicit_absence(self):
+        limits = self._limits()
+        for kind, message in (("container", "Error: No such container: owned-name"),
+                              ("container", "Error: No such object: owned-name"),
+                              ("volume", "Error response from daemon: get owned-name: no such volume")):
+            with self.subTest(kind=kind, message=message), \
+                    mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=1, stderr=message)), \
+                    mock.patch.object(backup, "_run_text", side_effect=AssertionError("deletion_started")):
+                backup._assert_restore_resource_absent(kind, "owned-name", execution_limits=limits)
+                backup._cleanup_owned_restore_resource(kind, "owned-name", "owned-label", execution_limits=limits)
+        for error in ("Cannot connect to the Docker daemon", "Error: No such container: other-name", "", "context deadline exceeded"):
+            with self.subTest(error=error), \
+                    mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=1, stderr=error)), \
+                    mock.patch.object(backup, "_run_text", side_effect=AssertionError("deletion_started")):
+                for check in (lambda: backup._assert_restore_resource_absent("container", "owned-name", execution_limits=limits),
+                              lambda: backup._cleanup_owned_restore_resource("container", "owned-name", "owned-label", execution_limits=limits)):
+                    with self.assertRaisesRegex(backup.BackupError, "^backup_restore_container_absence_unknown$"):
+                        check()
+        # Existing unbounded callers retain their original interface semantics.
+        with mock.patch.object(backup.subprocess, "run", return_value=mock.Mock(returncode=1, stderr="old daemon error")):
+            backup._assert_restore_resource_absent("container", "owned-name")
+            backup._cleanup_owned_restore_resource("container", "owned-name", "owned-label")
+
+    def test_limited_restore_uses_resource_caps_deadline_and_finite_pg_restore_timeout(self):
+        limits = self._limits()
+        artifact = self.root / "owned-restore.dump"
+        artifact.write_bytes(b"retained-restore-bytes")
+        descriptor = os.open(artifact, os.O_RDONLY)
+        self.addCleanup(os.close, descriptor)
+        invariants = {"schema_versions": [1], "table_count": 1, "fact_count": 1, **_invariants(fact_count=1)}
+        binding = {"container": "market_pipeline_restore_0123456789abcdef",
+                   "volume": "market_pipeline_restore_0123456789abcdef_data",
+                   "label": "market-pipeline-backup-0123456789abcdef"}
+        commands = []
+        restores = []
+        def command(arguments, *, label, execution_limits):
+            self.assertIs(execution_limits, limits)
+            commands.append(arguments)
+            return binding["label"] if label.endswith("_owner") else "owned"
+        def run(arguments, **kwargs):
+            self.assertEqual(kwargs["timeout"], 40 if "pg_restore" in arguments else 3)
+            if "pg_restore" in arguments:
+                restores.append(kwargs["stdin"].read())
+            return mock.Mock(returncode=0, stdout="1", stderr=b"")
+        with mock.patch.object(backup, "_cleanup_owned_restore_resource"), \
+                mock.patch.object(backup, "_assert_restore_resource_absent"), \
+                mock.patch.object(backup, "_database_invariants", return_value=invariants), \
+                mock.patch.object(backup, "_run_text", side_effect=command), \
+                mock.patch.object(backup.subprocess, "run", side_effect=run), \
+                mock.patch.object(backup.time, "sleep"):
+            result = backup.restore_smoke(artifact, invariants, resource_binding=binding,
+                                          artifact_descriptor=descriptor, execution_limits=limits)
+        start = next(argv for argv in commands if argv[:2] == ["docker", "run"])
+        for flag, value in (("--cpus", "2"), ("--memory", str(2 * 1024**3)),
+                            ("--memory-swap", str(2 * 1024**3)), ("--pids-limit", "256")):
+            self.assertEqual(start[start.index(flag) + 1], value)
+        self.assertEqual(start[start.index("--entrypoint") + 1], "/bin/sh")
+        self.assertEqual(start[start.index(backup.POSTGRES_IMAGE) + 1:],
+                         backup._guarded_arguments(limits, ["/usr/local/bin/docker-entrypoint.sh", "postgres"], 40)[1:])
+        self.assertFalse(any(arg.startswith("--cap-") or arg == "--privileged" for arg in start))
+        self.assertEqual(restores, [b"retained-restore-bytes"])
+        self.assertEqual(result["cleanup_status"], "PASS")
+
+    def test_limited_hot_create_uses_preowned_resources_primary_permission_and_pinned_artifact(self):
+        self.values.update(MARKET_PIPELINE_FEED_MODE="PRIVATE_PRIMARY", MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY="1",
+                           MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE="PRIVATE_PRIMARY")
+        _write_env(self.env_file, self.values)
+        limits = self._limits()
+        binding = {"container": "market_pipeline_restore_0123456789abcdef",
+                   "volume": "market_pipeline_restore_0123456789abcdef_data",
+                   "label": "market-pipeline-backup-0123456789abcdef"}
+        observed = []
+        def restore(artifact, source, **kwargs):
+            self.assertIs(kwargs["execution_limits"], limits)
+            self.assertEqual(kwargs["resource_binding"], binding)
+            observed.append(os.pread(kwargs["artifact_descriptor"], 64, 0))
+            return {"status": "PASS", "cleanup_status": "PASS", **backup._invariant_view(source)}
+        payload = self._hot_fixture(create_overrides=dict(execution_limits=limits, allow_private_primary_source=True,
+                                                          restore_resource_binding=binding), restore_callback=restore)
+        self.assertEqual(observed, [b"synthetic-custom-dump"])
+        self.assertEqual(json.loads(backup._journal_path(self.backup_dir).read_text())["restore_resources"], binding)
+        with mock.patch.object(backup, "inspect_source_database", return_value=payload["source_after"]), \
+                mock.patch.object(backup, "restore_smoke", return_value=payload["restore_smoke"]) as fresh:
+            result = backup.verify_hot_receipt(**self._hot_arguments(execution_limits=limits, allow_private_primary_source=True))
+        self.assertIs(fresh.call_args.kwargs["execution_limits"], limits)
+        self.assertTrue(result["fresh_restore_verified"])
+        self.assertFalse(result["eligible_for_new_deployment"])
+        other = {"container": "market_pipeline_restore_fedcba9876543210",
+                 "volume": "market_pipeline_restore_fedcba9876543210_data",
+                 "label": "market-pipeline-backup-fedcba9876543210"}
+        controls = (self.receipt.read_bytes(), backup._journal_path(self.backup_dir).read_bytes())
+        with self.assertRaisesRegex(backup.BackupError, "backup_hot_source_identity_mismatch"):
+            backup.create_backup(env_file=self.env_file, backup_dir=self.backup_dir, receipt=self.receipt,
+                                 release_sha=RELEASE_SHA, release_tree=RELEASE_TREE, image_id="sha256:" + "f" * 64,
+                                 image_input_signature=IMAGE_SIGNATURE, allow_running_writers=True,
+                                 allow_target_identity_mismatch=True, allow_private_primary_source=True, execution_limits=limits)
+        with self.assertRaisesRegex(backup.BackupError, "backup_restore_resource_binding_mismatch"):
+            backup.create_backup(env_file=self.env_file, backup_dir=self.backup_dir, receipt=self.receipt,
+                                 release_sha=RELEASE_SHA, release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                                 image_input_signature=IMAGE_SIGNATURE, allow_running_writers=True,
+                                 allow_private_primary_source=True, execution_limits=limits, restore_resource_binding=other)
+        self.assertEqual(controls, (self.receipt.read_bytes(), backup._journal_path(self.backup_dir).read_bytes()))
+
+    def test_limited_hot_create_detects_artifact_rewrite_before_complete_publication(self):
+        limits = self._limits()
+        def restore(artifact, source, **kwargs):
+            original = artifact.stat()
+            self.assertEqual(os.pread(kwargs["artifact_descriptor"], 64, 0), b"synthetic-custom-dump")
+            artifact.write_bytes(b"rewritten-custom-dump")
+            artifact.write_bytes(b"synthetic-custom-dump")
+            os.utime(artifact, ns=(original.st_atime_ns, original.st_mtime_ns))
+            return {"status": "PASS", "cleanup_status": "PASS", **backup._invariant_view(source)}
+        with self.assertRaisesRegex(backup.BackupError, "backup_artifact_drifted"):
+            self._hot_fixture(create_overrides={"execution_limits": limits}, restore_callback=restore)
+        self.assertFalse(self.receipt.exists())
+        self.assertEqual(json.loads(backup._journal_path(self.backup_dir).read_text())["status"], "RESTORE_RUNNING")
+
+    def _hot_arguments(self, **overrides):
+        arguments = dict(
+            env_file=self.env_file, receipt=self.receipt,
+            receipt_sha256=backup.file_digest(self.receipt),
+            journal_sha256=backup.file_digest(backup._journal_path(self.backup_dir)),
+            release_sha=RELEASE_SHA, release_tree=RELEASE_TREE,
+            image_id=IMAGE_ID, image_input_signature=IMAGE_SIGNATURE,
+            maximum_age_seconds=3600,
+        )
+        arguments.update(overrides)
+        return arguments
+
+    def test_hot_create_binds_mode_and_ordinary_verify_cannot_accept_it(self):
+        payload = self._hot_fixture()
+        self.assertEqual(payload["backup_mode"], "hot")
+        self.assertEqual(json.loads(backup._journal_path(self.backup_dir).read_text())["backup_mode"], "hot")
+        self.assertNotEqual(payload["source"]["table_row_counts"], payload["restore_smoke"]["table_row_counts"])
+        with self.assertRaisesRegex(backup.BackupError, "backup_mode_mismatch"):
+            self._verify()
+
+    def test_verify_hot_allows_live_row_drift_and_restores_same_pinned_artifact(self):
+        payload = self._hot_fixture()
+        current = deepcopy(payload["source_after"])
+        current.update(fact_count=30, table_row_counts={"market_facts": 30})
+        def restore(artifact, source, **arguments):
+            self.assertEqual(source, current)
+            descriptor = arguments["artifact_descriptor"]
+            self.assertEqual(os.fstat(descriptor).st_ino, artifact.stat().st_ino)
+            self.assertEqual(os.pread(descriptor, 64, 0), b"synthetic-custom-dump")
+            self.assertNotEqual(arguments["resource_binding"], json.loads(backup._journal_path(self.backup_dir).read_text())["restore_resources"])
+            return deepcopy(payload["restore_smoke"])
+        with mock.patch.object(backup, "inspect_source_database", return_value=current) as inspect, \
+                mock.patch.object(backup, "restore_smoke", side_effect=restore) as fresh:
+            result = backup.verify_hot_receipt(**self._hot_arguments())
+        self.assertEqual(inspect.call_count, 2)
+        self.assertEqual(fresh.call_count, 1)
+        self.assertTrue(result["current_environment_verified"])
+        self.assertTrue(result["fresh_restore_verified"])
+        self.assertFalse(result["eligible_for_new_deployment"])
+        self.assertTrue(result["off_host_copy_required"])
+
+    def test_current_modes_cannot_be_reinterpreted_on_create_resume(self):
+        self._hot_fixture()
+        with self.assertRaisesRegex(backup.BackupError, "backup_mode_mismatch"):
+            backup.create_backup(
+                env_file=self.env_file, backup_dir=self.backup_dir, receipt=self.receipt,
+                release_sha=RELEASE_SHA, release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE, allow_running_writers=False,
+            )
+
+    def test_verify_hot_refuses_quiesced_mode_before_env_open(self):
+        self._create_empty()
+        with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_mode_mismatch"):
+                backup.verify_hot_receipt(**self._hot_arguments())
+
+    def test_v13_controls_are_historical_only_and_refuse_all_live_commands_before_env(self):
+        self._create_empty()
+        for path, schema in ((self.receipt, backup.METADATA_LEGACY_RECEIPT_SCHEMA),
+                             (backup._journal_path(self.backup_dir), backup.METADATA_LEGACY_JOURNAL_SCHEMA)):
+            document = json.loads(path.read_text())
+            document["schema"] = schema
+            del document["backup_mode"]
+            backup._write_receipt(path, document)
+        arguments = self._hot_arguments()
+        with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            for operation in (self._create_empty, self._verify,
+                              lambda: backup.verify_hot_receipt(**arguments)):
+                with self.assertRaisesRegex(backup.BackupError, "backup_mode_migration_required"):
+                    operation()
+            historical = backup.verify_historical_receipt(**{
+                key: value for key, value in arguments.items()
+                if key not in {"env_file", "maximum_age_seconds"}
+            })
+        self.assertTrue(historical["historical_only"])
+        self.assertFalse(historical["current_environment_verified"])
+
+    def test_hot_verifier_rejects_bad_pins_before_env_open(self):
+        self._hot_fixture()
+        for key in ("receipt_sha256", "journal_sha256"):
+            with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+                with self.assertRaisesRegex(backup.BackupError, "backup_hot_evidence_identity_mismatch"):
+                    backup.verify_hot_receipt(**self._hot_arguments(**{key: "0" * 64}))
+
+    def test_hot_control_rewrite_restore_is_detected_by_retained_fd(self):
+        payload = self._hot_fixture()
+        arguments = self._hot_arguments()
+        original = self.receipt.read_bytes()
+        identity = self.receipt.stat()
+        def restore(*args, **kwargs):
+            self.receipt.write_bytes(original + b" ")
+            self.receipt.write_bytes(original)
+            os.utime(self.receipt, ns=(identity.st_atime_ns, identity.st_mtime_ns))
+            return deepcopy(payload["restore_smoke"])
+        with mock.patch.object(backup, "inspect_source_database", return_value=payload["source_after"]), \
+                mock.patch.object(backup, "restore_smoke", side_effect=restore):
+            with self.assertRaisesRegex(backup.BackupError, "backup_hot_evidence_identity_mismatch"):
+                backup.verify_hot_receipt(**arguments)
+
+    def test_hot_current_source_container_database_schema_drift_refuses_before_restore(self):
+        payload = self._hot_fixture()
+        for key, value in (("container_id", "1" * 64), ("database", "other_archive"),
+                           ("database_identity_sha256", "0" * 64),
+                           ("schema_catalog_sha256", "0" * 64), ("schema_objects_sha256", "0" * 64)):
+            current = {**payload["source_after"], key: value}
+            with self.subTest(field=key), \
+                    mock.patch.object(backup, "inspect_source_database", return_value=current), \
+                    mock.patch.object(backup, "restore_smoke", side_effect=AssertionError("restore_started")):
+                with self.assertRaisesRegex(backup.BackupError, "backup_hot_current_source_mismatch"):
+                    backup.verify_hot_receipt(**self._hot_arguments())
+
+    def test_hot_current_source_is_rechecked_after_independent_restore(self):
+        payload = self._hot_fixture()
+        changed = {**payload["source_after"], "container_id": "0" * 64}
+        with mock.patch.object(backup, "inspect_source_database", side_effect=[payload["source_after"], changed]), \
+                mock.patch.object(backup, "restore_smoke", return_value=payload["restore_smoke"]):
+            with self.assertRaisesRegex(backup.BackupError, "backup_hot_current_source_mismatch"):
+                backup.verify_hot_receipt(**self._hot_arguments())
+
+    def test_hot_independent_restore_must_match_complete_create_inventory(self):
+        payload = self._hot_fixture()
+        for field, value in (("fact_count", 99), ("table_row_counts", {"market_facts": 99}),
+                             ("schema_catalog_sha256", "9" * 64),
+                             ("schema_objects_sha256", "9" * 64),
+                             ("sequence_values", {"market_facts_id_seq": {"last_value": 999, "is_called": True}}),
+                             ("cleanup_status", "FAIL")):
+            restored = {**payload["restore_smoke"], field: value}
+            with self.subTest(field=field), \
+                    mock.patch.object(backup, "inspect_source_database", return_value=payload["source_after"]), \
+                    mock.patch.object(backup, "restore_smoke", return_value=restored):
+                with self.assertRaisesRegex(backup.BackupError, "backup_hot_independent_restore_mismatch"):
+                    backup.verify_hot_receipt(**self._hot_arguments())
+
+    def test_hot_env_aba_during_restore_refuses_even_when_mtime_and_bytes_restored(self):
+        payload = self._hot_fixture()
+        original = self.env_file.read_bytes()
+        identity = self.env_file.stat()
+        def restore(*args, **kwargs):
+            self.env_file.write_bytes(original + b"\n")
+            self.env_file.write_bytes(original)
+            os.utime(self.env_file, ns=(identity.st_atime_ns, identity.st_mtime_ns))
+            return deepcopy(payload["restore_smoke"])
+        with mock.patch.object(backup, "inspect_source_database", return_value=payload["source_after"]), \
+                mock.patch.object(backup, "restore_smoke", side_effect=restore):
+            with self.assertRaisesRegex(backup.BackupError, "backup_role_env_drifted"):
+                backup.verify_hot_receipt(**self._hot_arguments())
+
+    def test_hot_artifact_aba_during_restore_refuses(self):
+        payload = self._hot_fixture()
+        artifact = Path(payload["backup"]["path"])
+        original, identity = artifact.read_bytes(), artifact.stat()
+        def restore(*args, **kwargs):
+            artifact.write_bytes(b"alternate-dump")
+            artifact.write_bytes(original)
+            os.utime(artifact, ns=(identity.st_atime_ns, identity.st_mtime_ns))
+            return deepcopy(payload["restore_smoke"])
+        with mock.patch.object(backup, "inspect_source_database", return_value=payload["source_after"]), \
+                mock.patch.object(backup, "restore_smoke", side_effect=restore):
+            with self.assertRaisesRegex(backup.BackupError, "backup_artifact_drifted"):
+                backup.verify_hot_receipt(**self._hot_arguments())
+
+    def test_hot_refuses_create_restore_resource_reuse_before_env(self):
+        self._hot_fixture()
+        resources = json.loads(backup._journal_path(self.backup_dir).read_text())["restore_resources"]
+        with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "not_independent"):
+                backup.verify_hot_receipt(**self._hot_arguments(restore_resource_binding=resources))
+
+    def test_create_refuses_restore_schema_drift_before_complete_publication(self):
+        with self.assertRaisesRegex(backup.BackupError, "backup_restore_reconciliation_mismatch"):
+            self._hot_fixture(restore_changes={"schema_catalog_sha256": "9" * 64})
+        self.assertFalse(self.receipt.exists())
+        self.assertEqual(json.loads(backup._journal_path(self.backup_dir).read_text())["status"], "RESTORE_RUNNING")
+
+    def test_both_current_modes_refuse_stored_restore_schema_drift(self):
+        payload = self._hot_fixture()
+        for mode in ("hot", "quiesced"):
+            broken = deepcopy(payload)
+            broken["backup_mode"] = mode
+            if mode == "quiesced":
+                broken["source_after"] = deepcopy(broken["source"])
+                broken["restore_smoke"].update(backup._invariant_view(broken["source"]))
+            broken["restore_smoke"]["schema_objects_sha256"] = "9" * 64
+            self._write_bound_receipt(broken)
+            with self.subTest(mode=mode), \
+                    mock.patch.object(backup, "inspect_source_database", side_effect=AssertionError("host_probe_started")):
+                with self.assertRaisesRegex(backup.BackupError, "backup_source_restore_metadata_invalid"):
+                    (backup.verify_hot_receipt(**self._hot_arguments()) if mode == "hot" else self._verify())
+
+    def test_hot_artifact_digest_mismatch_prevents_independent_restore(self):
+        payload = self._hot_fixture()
+        artifact = Path(payload["backup"]["path"])
+        artifact.write_bytes(b"x" * artifact.stat().st_size)
+        with mock.patch.object(backup, "inspect_source_database", return_value=payload["source_after"]), \
+                mock.patch.object(backup, "restore_smoke", side_effect=AssertionError("restore_started")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_artifact_drifted"):
+                backup.verify_hot_receipt(**self._hot_arguments())
+
+    def test_hot_control_read_aba_refuses_before_env(self):
+        self._hot_fixture()
+        arguments = self._hot_arguments()
+        original, identity = self.receipt.read_bytes(), self.receipt.stat()
+        pread = os.pread
+        seen = []
+        def read(descriptor, size, offset):
+            raw = pread(descriptor, size, offset)
+            if not seen and os.fstat(descriptor).st_ino == identity.st_ino:
+                self.receipt.write_bytes(original + b" ")
+                self.receipt.write_bytes(original)
+                os.utime(self.receipt, ns=(identity.st_atime_ns, identity.st_mtime_ns))
+                seen.append(True)
+            return raw
+        with mock.patch.object(backup.os, "pread", side_effect=read), \
+                mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_hot_evidence_identity_mismatch"):
+                backup.verify_hot_receipt(**arguments)
+        self.assertEqual(seen, [True])
+
+    def test_hot_never_hashes_or_reopens_env_path(self):
+        payload = self._hot_fixture()
+        arguments = self._hot_arguments()
+        open_path = Path.open
+        def guarded_open(path, *args, **kwargs):
+            self.assertNotEqual(path, self.env_file)
+            return open_path(path, *args, **kwargs)
+        with mock.patch.object(backup, "file_digest", side_effect=AssertionError("separate_path_digest")), \
+                mock.patch.object(Path, "open", guarded_open), \
+                mock.patch.object(backup, "inspect_source_database", return_value=payload["source_after"]), \
+                mock.patch.object(backup, "restore_smoke", return_value=payload["restore_smoke"]):
+            self.assertTrue(backup.verify_hot_receipt(**arguments)["fresh_restore_verified"])
+
+    def test_hot_api_rejects_stale_or_ill_typed_age_before_controls_or_env(self):
+        self._hot_fixture()
+        for age in (None, True, 0, 59, 86401, "3600", []):
+            arguments = self._hot_arguments(maximum_age_seconds=age)
+            with self.subTest(age=age), \
+                    mock.patch.object(backup, "_pinned_control_snapshots", side_effect=AssertionError("controls_opened")), \
+                    mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+                with self.assertRaisesRegex(backup.BackupError, "backup_maximum_age_invalid"):
+                    backup.verify_hot_receipt(**arguments)
+
+    def test_malformed_schema_and_resource_controls_refuse_before_env_or_host(self):
+        self._hot_fixture()
+        journal_path = backup._journal_path(self.backup_dir)
+        originals = {path: path.read_bytes() for path in (self.receipt, journal_path)}
+        cases = [(self.receipt, "schema", [], "backup_hot_evidence_invalid"),
+                 (journal_path, "schema", [], "backup_hot_evidence_invalid"),
+                 (journal_path, "restore_resources", ["malformed"], "backup_journal_resource_binding_invalid"),
+                 (journal_path, "restore_resources", [], "backup_journal_resource_binding_invalid"),
+                 (journal_path, "restore_resources", {"container": [], "volume": "x", "label": "x"}, "backup_journal_resource_binding_invalid")]
+        for path, field, value, reason in cases:
+            for target, raw in originals.items():
+                target.write_bytes(raw)
+            changed = json.loads(path.read_text())
+            changed[field] = value
+            backup._write_receipt(path, changed)
+            arguments = self._hot_arguments()
+            with self.subTest(field=field, value=value), \
+                    mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")), \
+                    mock.patch.object(backup, "_cleanup_owned_restore_resource", side_effect=AssertionError("cleanup_started")):
+                with self.assertRaisesRegex(backup.BackupError, reason):
+                    backup.verify_hot_receipt(**arguments)
+
+    def test_source_schema_versions_and_sizes_require_exact_safe_json_types(self):
+        payload = self._hot_fixture()
+        for field, value in (("schema_versions", [{}]), ("schema_versions", [True]),
+                             ("schema_versions", [[1]]), ("database_size_bytes", []),
+                             ("database_size_bytes", True), ("container_id", 123456789012)):
+            changed = deepcopy(payload)
+            changed["source"][field] = value
+            self._write_bound_receipt(changed)
+            with self.subTest(field=field, value=value), \
+                    mock.patch.object(backup, "inspect_source_database", side_effect=AssertionError("host_probe_started")):
+                with self.assertRaisesRegex(backup.BackupError, "backup_source_restore_metadata_invalid"):
+                    backup.verify_hot_receipt(**self._hot_arguments())
+
+    def test_receipt_and_journal_false_flags_reject_integer_zero(self):
+        payload = self._hot_fixture()
+        for field in ("database_mutated", "services_started", "secrets_disclosed"):
+            changed = deepcopy(payload)
+            changed[field] = 0
+            self._write_bound_receipt(changed)
+            with self.subTest(field=field), \
+                    mock.patch.object(backup, "inspect_source_database", side_effect=AssertionError("host_probe_started")):
+                with self.assertRaisesRegex(backup.BackupError, "backup_receipt_identity_mismatch"):
+                    backup.verify_hot_receipt(**self._hot_arguments())
+        self._write_bound_receipt(deepcopy(payload))
+        journal_path = backup._journal_path(self.backup_dir)
+        changed = json.loads(journal_path.read_text())
+        changed["secrets_disclosed"] = 0
+        backup._write_journal(journal_path, changed)
+        with mock.patch.object(backup, "inspect_source_database", side_effect=AssertionError("host_probe_started")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_journal_identity_mismatch"):
+                backup.verify_hot_receipt(**self._hot_arguments())
+
+    def test_malformed_journal_status_and_artifact_size_refuse_with_static_code(self):
+        payload = self._hot_fixture()
+        journal_path = backup._journal_path(self.backup_dir)
+        changed = json.loads(journal_path.read_text())
+        changed["status"] = ["malformed"]
+        backup._write_journal(journal_path, changed)
+        with mock.patch.object(backup, "inspect_source_database", side_effect=AssertionError("host_probe_started")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_journal_schema_invalid"):
+                backup.verify_hot_receipt(**self._hot_arguments())
+        for value in ([], True, "20", -1):
+            changed = deepcopy(payload)
+            changed["backup"]["size_bytes"] = value
+            self._write_bound_receipt(changed)
+            with self.subTest(size=value), \
+                    mock.patch.object(backup, "inspect_source_database", side_effect=AssertionError("host_probe_started")):
+                with self.assertRaisesRegex(backup.BackupError, "backup_artifact_drifted"):
+                    backup.verify_hot_receipt(**self._hot_arguments())
+
+    def test_pinned_artifact_reads_at_most_advertised_size_plus_one(self):
+        artifact = self.root / "bounded.dump"
+        artifact.write_bytes(b"abcd")
+        artifact.chmod(0o600)
+        expected = {"size_bytes": 4, "sha256": backup.file_digest(artifact)}
+        read = os.read
+        requests = []
+        def growing_read(descriptor, count):
+            requests.append(count)
+            result = read(descriptor, count)
+            if len(requests) == 1:
+                with artifact.open("ab") as stream:
+                    stream.write(b"unbounded-tail")
+            return result
+        with mock.patch.object(backup.os, "read", side_effect=growing_read):
+            with self.assertRaisesRegex(backup.BackupError, "backup_artifact_drifted"):
+                with backup._pinned_backup_artifact(artifact, expected):
+                    self.fail("growing artifact accepted")
+        self.assertEqual(requests, [5, 1])
+        with mock.patch.object(backup.os, "open", side_effect=AssertionError("artifact_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_artifact_drifted"):
+                with backup._pinned_backup_artifact(artifact, {"size_bytes": True}):
+                    self.fail("boolean size accepted")
+
+    def test_hot_requires_actual_source_release_even_under_bluegreen_mode(self):
+        self._hot_fixture()
+        values = {**self.values, "MARKET_PIPELINE_RELEASE_SHA": "0" * 40}
+        _write_env(self.env_file, values)
+        with mock.patch.object(backup, "inspect_source_database", side_effect=AssertionError("host_probe_started")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_hot_source_identity_mismatch"):
+                backup.verify_hot_receipt(**self._hot_arguments(allow_target_identity_mismatch=True))
+
+    def test_v12_hot_verification_refuses_before_env(self):
+        receipt_sha, journal_sha = self._legacy_evidence()
+        with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "backup_mode_migration_required"):
+                backup.verify_hot_receipt(**self._hot_arguments(receipt_sha256=receipt_sha, journal_sha256=journal_sha))
+
+    def test_hot_cli_reports_fresh_current_proof_without_deployment_eligibility(self):
+        payload = self._hot_fixture()
+        pins = self._hot_arguments()
+        output = io.StringIO()
+        with mock.patch.object(backup.sys, "stdout", output), \
+                mock.patch.object(backup, "inspect_source_database", return_value=payload["source_after"]), \
+                mock.patch.object(backup, "restore_smoke", return_value=payload["restore_smoke"]):
+            status = backup.main([
+                "verify-hot", "--env-file", str(self.env_file), "--receipt", str(self.receipt),
+                "--receipt-sha256", pins["receipt_sha256"], "--journal-sha256", pins["journal_sha256"],
+                "--restore-run-id", "0123456789abcdef", "--release-sha", RELEASE_SHA,
+                "--release-tree", RELEASE_TREE, "--image-id", IMAGE_ID,
+                "--image-input-signature", IMAGE_SIGNATURE,
+            ])
+        self.assertEqual(status, 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["backup_mode"], "hot")
+        self.assertTrue(result["current_environment_verified"])
+        self.assertTrue(result["fresh_restore_verified"])
+        self.assertFalse(result["eligible_for_new_deployment"])
+
+    def test_restore_smoke_uses_retained_artifact_descriptor_instead_of_path(self):
+        artifact = self.root / "artifact.dump"
+        artifact.write_bytes(b"pinned-artifact")
+        descriptor = os.open(artifact, os.O_RDONLY)
+        artifact.rename(self.root / "retained.dump")
+        artifact.write_bytes(b"replacement-path-artifact")
+        invariants = {"schema_versions": [1], "table_count": 1, "fact_count": 1,
+                      **_invariants(fact_count=1)}
+        restored = []
+        def run(arguments, **kwargs):
+            if "pg_restore" in arguments:
+                restored.append(kwargs["stdin"].read())
+            return mock.Mock(returncode=0, stdout="1", stderr=b"")
+        def command(arguments, *, label):
+            return "market-pipeline-backup-0123456789abcdef" if label.endswith("_owner") else "unused"
+        resources = {"container": "market_pipeline_restore_0123456789abcdef",
+                     "volume": "market_pipeline_restore_0123456789abcdef_data",
+                     "label": "market-pipeline-backup-0123456789abcdef"}
+        try:
+            with mock.patch.object(backup, "_cleanup_owned_restore_resource"), \
+                    mock.patch.object(backup, "_assert_restore_resource_absent"), \
+                    mock.patch.object(backup, "_database_invariants", return_value=invariants), \
+                    mock.patch.object(backup, "_run_text", side_effect=command), \
+                    mock.patch.object(backup.subprocess, "run", side_effect=run), \
+                    mock.patch.object(backup.time, "sleep"):
+                result = backup.restore_smoke(artifact, invariants, resource_binding=resources,
+                                              artifact_descriptor=descriptor)
+        finally:
+            os.close(descriptor)
+        self.assertEqual(restored, [b"pinned-artifact"])
+        self.assertEqual(result["cleanup_status"], "PASS")
+
+    def test_create_verify_never_hash_or_reopen_env_path(self) -> None:
+        digest = backup.file_digest
+        open_path = Path.open
+        def guarded_digest(path):
+            self.assertNotEqual(path, self.env_file)
+            return digest(path)
+        def guarded_open(path, *args, **kwargs):
+            self.assertNotEqual(path, self.env_file)
+            return open_path(path, *args, **kwargs)
+        with mock.patch.object(backup, "file_digest", side_effect=guarded_digest), \
+                mock.patch.object(Path, "open", guarded_open):
+            payload = self._create_empty()
+            self.assertEqual(self._verify(), payload)
+        self.assertEqual(payload["schema"], "market_pipeline_backup_restore/1.4")
+        self.assertEqual(payload["backup_mode"], "quiesced")
+        self.assertNotIn("role_env_sha256", payload)
+        self.assertEqual(payload["role_env_binding"], self._env_binding())
+        self.assertEqual(set(payload["role_env_binding"]), {
+            "schema", "path", "device", "inode", "uid", "gid", "mode", "nlink",
+            "size_bytes", "mtime_ns", "ctime_ns", "parents",
+        })
+
+    def test_file_identity_replacement_and_in_place_rewrite_fail_closed(self) -> None:
+        for replacement in (False, True):
+            with self.subTest(replacement=replacement):
+                self._create_empty()
+                original = self.env_file.stat()
+                content = self.env_file.read_bytes()
+                if replacement:
+                    candidate = self.root / "replacement"
+                    candidate.write_bytes(content)
+                    candidate.chmod(0o600)
+                    candidate.replace(self.env_file)
+                else:
+                    self.env_file.write_bytes(content)
+                os.utime(self.env_file, ns=(original.st_atime_ns, original.st_mtime_ns))
+                with self.assertRaisesRegex(backup.BackupError, "receipt_identity_mismatch"):
+                    self._verify()
+                self.receipt.unlink()
+                backup._journal_path(self.backup_dir).unlink()
+
+    def test_bound_fd_refuses_path_swaps_symlinks_hardlinks_and_unsafe_modes(self) -> None:
+        with self.assertRaisesRegex(backup.BackupError, "role_env_drifted"):
+            with backup.BoundRoleEnv(self.env_file) as bound:
+                replacement = self.root / "replacement"
+                replacement.write_bytes(self.env_file.read_bytes())
+                replacement.chmod(0o600)
+                replacement.replace(self.env_file)
+                bound.check()
+        link = self.root / "linked-env"
+        os.link(self.env_file, link)
+        with self.assertRaisesRegex(backup.BackupError, "owner_mode_invalid"):
+            with backup.BoundRoleEnv(self.env_file):
+                self.fail("hardlinked Env accepted")
+        link.unlink()
+        link.symlink_to(self.env_file)
+        with self.assertRaisesRegex(backup.BackupError, "path_invalid"):
+            with backup.BoundRoleEnv(link):
+                self.fail("symlink Env accepted")
+        self.env_file.chmod(0o640)
+        with self.assertRaisesRegex(backup.BackupError, "owner_mode_invalid"):
+            with backup.BoundRoleEnv(self.env_file):
+                self.fail("nonprivate Env accepted")
+
+    def _assert_open_failure_closes_descriptors(self, path, reason, *, deny_env_open=False):
+        real_open, real_close = os.open, os.close
+        opened, closed = [], []
+        bound = backup.BoundRoleEnv(path)
+        def tracked_open(target, *args, **kwargs):
+            if deny_env_open and target == path.name:
+                raise PermissionError(errno.EACCES, "private permission detail", str(path))
+            descriptor = real_open(target, *args, **kwargs)
+            opened.append(descriptor)
+            return descriptor
+        def tracked_close(descriptor):
+            closed.append(descriptor)
+            return real_close(descriptor)
+        with mock.patch.object(backup.os, "open", side_effect=tracked_open), \
+                mock.patch.object(backup.os, "close", side_effect=tracked_close), \
+                mock.patch.object(backup.os, "pread", side_effect=AssertionError("unexpected_env_read")):
+            with self.assertRaises(backup.BackupError) as failure:
+                with bound:
+                    self.fail("unavailable Env accepted")
+        self.assertEqual(str(failure.exception), reason)
+        self.assertTrue(failure.exception.__suppress_context__)
+        self.assertNotIn(str(path), str(failure.exception))
+        self.assertNotIn("private", str(failure.exception))
+        self.assertEqual(closed, list(reversed(opened)))
+        self.assertEqual(bound.descriptors, [])
+        for descriptor in opened:
+            with self.assertRaises(OSError) as bad_fd:
+                os.fstat(descriptor)
+            self.assertEqual(bad_fd.exception.errno, errno.EBADF)
+        return opened
+
+    def test_real_symlink_loop_is_content_free_and_leaks_no_descriptors(self) -> None:
+        first, second = self.root / "loop-a", self.root / "loop-b"
+        first.symlink_to(second)
+        second.symlink_to(first)
+        self.assertEqual(self._assert_open_failure_closes_descriptors(
+            first, "backup_role_env_path_invalid"
+        ), [])
+
+    def test_real_enoent_closes_all_opened_parent_descriptors(self) -> None:
+        opened = self._assert_open_failure_closes_descriptors(
+            self.root / "missing-env", "backup_role_env_unavailable"
+        )
+        self.assertGreater(len(opened), 0)
+
+    def test_eacces_at_env_open_closes_real_parent_descriptors(self) -> None:
+        # EACCES is injected at the syscall boundary: root can read mode 000.
+        opened = self._assert_open_failure_closes_descriptors(
+            self.env_file, "backup_role_env_unavailable", deny_env_open=True
+        )
+        self.assertGreater(len(opened), 0)
+
+    def test_canonicalization_runtimeerror_mapping_does_not_mask_logic_errors(self) -> None:
+        with mock.patch.object(backup, "_trusted_env_parent", side_effect=RuntimeError("logic_failure")):
+            with self.assertRaisesRegex(RuntimeError, "logic_failure") as failure:
+                with backup.BoundRoleEnv(self.env_file):
+                    self.fail("logic error swallowed")
+        self.assertNotIsInstance(failure.exception, backup.BackupError)
+
+    def test_current_binding_rejects_json_boolean_for_integer_identity(self) -> None:
+        self._create_empty()
+        payload = json.loads(self.receipt.read_text())
+        # nlink=1 must not compare equal to True in a persisted contract.
+        payload["role_env_binding"]["nlink"] = True
+        backup._write_receipt(self.receipt, payload)
+        with self.assertRaisesRegex(backup.BackupError, "receipt_identity_mismatch"):
+            self._verify()
+
+    def test_bound_env_refuses_special_files_and_oversized_inputs_without_read(self) -> None:
+        special = self.root / "fifo-env"
+        os.mkfifo(special, 0o600)
+        with mock.patch.object(backup.os, "pread", side_effect=AssertionError("special_read")):
+            with self.assertRaisesRegex(backup.BackupError, "owner_mode_invalid"):
+                with backup.BoundRoleEnv(special):
+                    self.fail("FIFO Env accepted")
+        self.env_file.write_bytes(b"X" * (64 * 1024 + 1))
+        with mock.patch.object(backup.os, "pread", side_effect=AssertionError("oversized_read")):
+            with self.assertRaisesRegex(backup.BackupError, "owner_mode_invalid"):
+                with backup.BoundRoleEnv(self.env_file):
+                    self.fail("oversized Env accepted")
+
+    def test_trusted_0755_parent_allowed_but_writable_or_replaced_parent_refused(self) -> None:
+        parent = self.root / "env-parent"
+        parent.mkdir(mode=0o755)
+        env_file = parent / "role.env"
+        _write_env(env_file, self.values)
+        with backup.BoundRoleEnv(env_file) as bound:
+            (parent / "ordinary-sibling").touch()
+            bound.check()  # parent mtime/ctime are intentionally not a binding
+        parent.chmod(0o775)
+        with self.assertRaisesRegex(backup.BackupError, "parent_invalid"):
+            with backup.BoundRoleEnv(env_file):
+                self.fail("writable parent accepted")
+        parent.chmod(0o755)
+        with self.assertRaisesRegex(backup.BackupError, "parent_drifted"):
+            with backup.BoundRoleEnv(env_file) as bound:
+                parent.rename(self.root / "old-parent")
+                parent.mkdir(mode=0o755)
+                bound.check()
+
+    def test_drift_during_external_work_never_publishes_complete_receipt(self) -> None:
+        def drift(project):
+            self.env_file.write_bytes(self.env_file.read_bytes())
+            return []
+        with mock.patch.object(backup, "_running_project_services", side_effect=drift):
+            with self.assertRaisesRegex(backup.BackupError, "role_env_drifted"):
+                backup.create_backup(
+                    env_file=self.env_file, backup_dir=self.backup_dir,
+                    receipt=self.receipt, release_sha=RELEASE_SHA,
+                    release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                    image_input_signature=IMAGE_SIGNATURE,
+                )
+        self.assertFalse(self.receipt.exists())
+        self.assertFalse(backup._journal_path(self.backup_dir).exists())
+
+    def test_legacy_create_verify_refuse_before_any_env_open_or_hash(self) -> None:
+        self._legacy_evidence()
+        self.env_file.unlink()
+        for operation in (self._create_empty, self._verify):
+            with self.subTest(operation=operation.__name__), \
+                    mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")), \
+                    mock.patch.object(backup, "file_digest", side_effect=AssertionError("content_hashed")):
+                with self.assertRaisesRegex(backup.BackupError, "binding_migration_required"):
+                    operation()
+        # A legacy journal alone also refuses before Env access, even for hot
+        # empty PREPARED transactions; no legacy transaction is auto-adopted.
+        self.receipt.unlink()
+        journal_path = backup._journal_path(self.backup_dir)
+        journal = json.loads(journal_path.read_text())
+        journal["status"] = "PREPARED"
+        backup._write_journal(journal_path, journal)
+        with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "binding_migration_required"):
+                self._create_empty()
+        self.assertTrue(journal_path.exists())
+
+    def test_historical_verifier_never_opens_env_and_cannot_prove_current_state(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        self.env_file.unlink()
+        arguments = dict(
+            receipt=self.receipt, receipt_sha256=receipt_sha,
+            journal_sha256=journal_sha, release_sha=RELEASE_SHA,
+            release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+            image_input_signature=IMAGE_SIGNATURE,
+        )
+        with mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            result = backup.verify_historical_receipt(**arguments)
+        self.assertTrue(result["historical_only"])
+        self.assertFalse(result["current_environment_verified"])
+        self.assertFalse(result["eligible_for_new_deployment"])
+        with self.assertRaisesRegex(backup.BackupError, "historical_evidence_identity_mismatch"):
+            backup.verify_historical_receipt(**{**arguments, "journal_sha256": "0" * 64})
+        payload = json.loads(self.receipt.read_text())
+        payload["role_env_sha256"] = "2" * 64
+        backup._write_receipt(self.receipt, payload)
+        with self.assertRaisesRegex(backup.BackupError, "receipt_identity_mismatch"):
+            backup.verify_historical_receipt(**{**arguments, "receipt_sha256": backup.file_digest(self.receipt)})
+
+    def test_historical_pins_and_parses_one_snapshot_under_real_digest_interleaving(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        journal_path = backup._journal_path(self.backup_dir)
+        originals = {path: path.read_bytes() for path in (self.receipt, journal_path)}
+        created_at = json.loads(originals[self.receipt])["created_at_utc"]
+        real_digest = backup.file_digest
+        observed = []
+        def raced_digest(path):
+            digest = real_digest(path)  # never return a fabricated digest
+            observed.append(path)
+            if len(observed) == 2:
+                for target, raw in originals.items():
+                    payload = json.loads(raw)
+                    payload["created_at_utc"] = backup.utc_text(backup.utc_now() - timedelta(seconds=5))
+                    target.write_text(json.dumps(payload))
+            elif len(observed) == 3:
+                for target, raw in originals.items():
+                    target.write_bytes(raw)
+                digest = real_digest(path)
+            return digest
+        with mock.patch.object(backup, "file_digest", side_effect=raced_digest), \
+                mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            result = backup.verify_historical_receipt(
+                receipt=self.receipt, receipt_sha256=receipt_sha,
+                journal_sha256=journal_sha, release_sha=RELEASE_SHA,
+                release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                image_input_signature=IMAGE_SIGNATURE,
+            )
+        self.assertEqual(result["receipt"]["created_at_utc"], created_at)
+        # Control pins use their parsed buffers, never an independent digest
+        # open. The prior implementation returned the raced, unpinned payload.
+        self.assertEqual(observed, [])
+        self.assertEqual(real_digest(self.receipt), receipt_sha)
+        self.assertEqual(real_digest(journal_path), journal_sha)
+
+    def test_historical_read_rewrite_and_restore_is_rejected_by_retained_fd(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        original = self.receipt.read_bytes()
+        identity = self.receipt.stat()
+        real_pread = os.pread
+        mutated = []
+        def raced_pread(descriptor, size, offset):
+            raw = real_pread(descriptor, size, offset)
+            info = os.fstat(descriptor)
+            if not mutated and (info.st_dev, info.st_ino) == (identity.st_dev, identity.st_ino):
+                payload = json.loads(original)
+                payload["created_at_utc"] = backup.utc_text(backup.utc_now() - timedelta(seconds=5))
+                self.receipt.write_text(json.dumps(payload))
+                self.receipt.write_bytes(original)
+                os.utime(self.receipt, ns=(identity.st_atime_ns, identity.st_mtime_ns))
+                mutated.append(True)
+            return raw
+        with mock.patch.object(backup.os, "pread", side_effect=raced_pread), \
+                mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "historical_evidence_identity_mismatch"):
+                backup.verify_historical_receipt(
+                    receipt=self.receipt, receipt_sha256=receipt_sha,
+                    journal_sha256=journal_sha, release_sha=RELEASE_SHA,
+                    release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                    image_input_signature=IMAGE_SIGNATURE,
+                )
+        self.assertEqual(mutated, [True])
+        self.assertEqual(backup.file_digest(self.receipt), receipt_sha)
+
+    def test_historical_controls_stay_bound_until_validation_returns(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        journal_path = backup._journal_path(self.backup_dir)
+        originals = {path: path.read_bytes() for path in (self.receipt, journal_path)}
+        real_evidence = backup._verify_receipt_evidence
+        validated = []
+        def raced_evidence(**arguments):
+            payload = real_evidence(**arguments)
+            validated.append(True)
+            for target, raw in originals.items():
+                changed = json.loads(raw)
+                changed["created_at_utc"] = backup.utc_text(backup.utc_now() - timedelta(seconds=5))
+                target.write_text(json.dumps(changed))
+                target.write_bytes(raw)
+            return payload
+        with mock.patch.object(backup, "_verify_receipt_evidence", side_effect=raced_evidence), \
+                mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            with self.assertRaisesRegex(backup.BackupError, "historical_evidence_identity_mismatch"):
+                backup.verify_historical_receipt(
+                    receipt=self.receipt, receipt_sha256=receipt_sha,
+                    journal_sha256=journal_sha, release_sha=RELEASE_SHA,
+                    release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                    image_input_signature=IMAGE_SIGNATURE,
+                )
+        self.assertEqual(validated, [True])
+        self.assertEqual(backup.file_digest(self.receipt), receipt_sha)
+        self.assertEqual(backup.file_digest(journal_path), journal_sha)
+
+    def test_historical_control_size_is_bounded_before_read_and_fds_close(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        os.truncate(self.receipt, backup.MAX_HISTORICAL_DOCUMENT_BYTES + 1)
+        opened, closed = [], []
+        real_open, real_close = os.open, os.close
+        def tracked_open(*args, **kwargs):
+            descriptor = real_open(*args, **kwargs)
+            opened.append(descriptor)
+            return descriptor
+        def tracked_close(descriptor):
+            closed.append(descriptor)
+            return real_close(descriptor)
+        with mock.patch.object(backup.os, "open", side_effect=tracked_open), \
+                mock.patch.object(backup.os, "close", side_effect=tracked_close), \
+                mock.patch.object(backup.os, "pread", side_effect=AssertionError("oversized_control_read")):
+            with self.assertRaisesRegex(backup.BackupError, "historical_evidence_invalid"):
+                backup.verify_historical_receipt(
+                    receipt=self.receipt, receipt_sha256=receipt_sha,
+                    journal_sha256=journal_sha, release_sha=RELEASE_SHA,
+                    release_tree=RELEASE_TREE, image_id=IMAGE_ID,
+                    image_input_signature=IMAGE_SIGNATURE,
+                )
+        self.assertEqual(closed, list(reversed(opened)))
+        self.assertGreater(len(opened), 1)
+        for descriptor in opened:
+            with self.assertRaises(OSError) as bad_fd:
+                os.fstat(descriptor)
+            self.assertEqual(bad_fd.exception.errno, errno.EBADF)
+
+    def test_historical_cli_requires_no_env_and_reports_no_deployment_eligibility(self) -> None:
+        receipt_sha, journal_sha = self._legacy_evidence()
+        self.env_file.unlink()
+        output = io.StringIO()
+        with mock.patch.object(backup.sys, "stdout", output), \
+                mock.patch.object(backup, "BoundRoleEnv", side_effect=AssertionError("env_opened")):
+            status = backup.main([
+                "verify-historical", "--receipt", str(self.receipt),
+                "--receipt-sha256", receipt_sha, "--journal-sha256", journal_sha,
+                "--release-sha", RELEASE_SHA, "--release-tree", RELEASE_TREE,
+                "--image-id", IMAGE_ID, "--image-input-signature", IMAGE_SIGNATURE,
+            ])
+        self.assertEqual(status, 0)
+        result = json.loads(output.getvalue())
+        self.assertTrue(result["historical_only"])
+        self.assertFalse(result["current_environment_verified"])
+        self.assertFalse(result["eligible_for_new_deployment"])
 
     def test_initial_empty_store_receipt_is_non_mutating_and_fresh(self) -> None:
         with mock.patch.object(backup, "_running_project_services", return_value=[]):
@@ -216,7 +1335,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             "release_tree": RELEASE_TREE,
             "image_id": IMAGE_ID,
             "image_input_signature": IMAGE_SIGNATURE,
-            "role_env_sha256": backup.file_digest(self.env_file),
+            "role_env_binding": self._env_binding(),
             "source": {
                 "container_id": "e" * 64,
                 "database": "market_archive",
@@ -268,7 +1387,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             "release_tree": RELEASE_TREE,
             "image_id": IMAGE_ID,
             "image_input_signature": IMAGE_SIGNATURE,
-            "role_env_sha256": backup.file_digest(self.env_file),
+            "role_env_binding": self._env_binding(),
             "source": {
                 "container_id": "e" * 64,
                 "database": "market_archive",
@@ -346,9 +1465,10 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             if label == "backup_sequence_value":
                 return "99|t"
             if label == "backup_schema_catalogue":
-                return '[{"table_name":"market_facts"}]'
+                self.assertIn("-q", arguments)
+                return 'pg_catalog\n[{"table_name":"market_facts"}]'
             if label == "backup_schema_objects":
-                return '[{"kind":"index","identity":"market_facts_pkey"}]'
+                return 'pg_catalog\n[{"kind":"index","identity":"market_facts_pkey"}]'
             if "string_agg" in sql:
                 return "1,2"
             if "pg_control_system" in sql:
@@ -386,10 +1506,10 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 seen["values"] += 1
                 return "12|false"
             if label == "backup_schema_catalogue":
-                return "[]"
+                return "pg_catalog\n[]"
             if label == "backup_schema_objects":
                 schema_object_sql = sql
-                return "[]"
+                return "pg_catalog\n[]"
             if "string_agg" in sql:
                 return "1,2,3"
             raise AssertionError(label)
@@ -400,8 +1520,44 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             report["sequence_values"],
             {"market_facts_id_seq": {"last_value": 12, "is_called": False}},
         )
-        self.assertIn("set_config('search_path','pg_catalog',true)", schema_object_sql)
-        self.assertIn("CROSS JOIN canonical_search_path", schema_object_sql)
+        self.assertEqual(schema_object_sql.splitlines()[:2], [
+            "SET search_path TO pg_catalog;", "SELECT current_setting('search_path');",
+        ])
+
+    def test_schema_queries_validate_fixed_search_path_and_canonicalize_json(self):
+        seen = []
+        def query(sql, *, label):
+            if label in {"backup_schema_catalogue", "backup_schema_objects"}:
+                # Ordered statements in one call; a CTE or a disconnected
+                # setting query cannot satisfy this connection contract.
+                self.assertEqual(sql.splitlines()[:2], [
+                    "SET search_path TO pg_catalog;", "SELECT current_setting('search_path');",
+                ])
+                seen.append(label)
+                return 'pg_catalog\n[ {"b":2, "a":1} ]'
+            return {"backup_table_names": "market_facts", "backup_table_row_count": "3",
+                    "backup_sequence_names": "", "backup_schema_versions": "1"}[label]
+        first = backup._database_invariants(query)
+        def compact(sql, *, label):
+            raw = query(sql, label=label)
+            return raw.replace('[ {"b":2, "a":1} ]', '[{"a":1,"b":2}]')
+        self.assertEqual(first, backup._database_invariants(compact))
+        self.assertEqual(seen, ["backup_schema_catalogue", "backup_schema_objects"] * 2)
+        with mock.patch.object(backup, "_run_text", return_value="pg_catalog\n[]") as run:
+            backup._restore_query("owned-fixture", "SET search_path TO pg_catalog; SELECT 1")
+        self.assertIn("-q", run.call_args.args[0])
+        self.assertEqual(run.call_args.args[0][-1], "SET search_path TO pg_catalog; SELECT 1")
+
+    def test_schema_search_path_or_json_refusal_cannot_be_hashed_as_schema(self):
+        for raw in ("public\n[]", "SET\npg_catalog\n[]", "[]", "pg_catalog\nnot-json", "pg_catalog\n{}"):
+            def query(sql, *, label):
+                if label.startswith("backup_schema_catalog"):
+                    return raw
+                return {"backup_table_names": "market_facts", "backup_table_row_count": "3",
+                        "backup_sequence_names": ""}[label]
+            with self.subTest(raw=raw), mock.patch.object(backup, "sha256", side_effect=AssertionError("unvalidated_schema_hashed")):
+                with self.assertRaisesRegex(backup.BackupError, "backup_schema_(search_path|catalogue)_invalid"):
+                    backup._database_invariants(query)
 
     def test_database_inventory_rejects_initialized_database_without_archive_schema(self) -> None:
         container_id = "e" * 64
@@ -501,6 +1657,44 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
                 image_id=IMAGE_ID,
             )
 
+    def test_explicit_private_primary_source_keeps_exact_configuration_and_image_checks(self):
+        values = {**self.values, 'MARKET_PIPELINE_FEED_MODE': 'PRIVATE_PRIMARY',
+                  'MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY': '1',
+                  'MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE': 'PRIVATE_PRIMARY'}
+        _write_env(self.env_file, values)
+        with self.assertRaisesRegex(backup.BackupError, 'identity_mismatch'):
+            backup.validate_release_env(self.env_file, release_sha=RELEASE_SHA, image_id=IMAGE_ID)
+        observed = backup.validate_release_env(self.env_file, release_sha=RELEASE_SHA, image_id=IMAGE_ID,
+            allow_target_identity_mismatch=False, allow_private_primary_source=True)
+        self.assertEqual(observed, values)
+        for release, image in (('e' * 40, IMAGE_ID), (RELEASE_SHA, 'sha256:' + 'f' * 64)):
+            with self.subTest(release=release, image=image), self.assertRaisesRegex(backup.BackupError, 'identity_mismatch'):
+                backup.validate_release_env(self.env_file, release_sha=release, image_id=image,
+                    allow_target_identity_mismatch=False, allow_private_primary_source=True)
+        values['MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY'] = '0'
+        _write_env(self.env_file, values)
+        with self.assertRaisesRegex(backup.BackupError, 'identity_mismatch'):
+            backup.validate_release_env(self.env_file, release_sha=RELEASE_SHA, image_id=IMAGE_ID,
+                allow_private_primary_source=True)
+
+    def test_explicit_private_primary_source_permission_requires_boolean(self):
+        for value in (1, 0, 'true', [], None):
+            with self.subTest(permission=value), self.assertRaisesRegex(backup.BackupError, 'primary_source_permission_invalid'):
+                backup.validate_release_env(self.env_file, release_sha=RELEASE_SHA, image_id=IMAGE_ID,
+                    allow_private_primary_source=value)
+
+    def test_explicit_private_primary_source_requires_immutable_identity_even_if_arguments_match(self):
+        for key, value, reason in (('MARKET_PIPELINE_IMAGE', 'source:legacy-tag', 'source_image_identity_invalid'),
+                                   ('MARKET_PIPELINE_RELEASE_SHA', 'legacy-release', 'source_release_sha_invalid')):
+            values = {**self.values, 'MARKET_PIPELINE_FEED_MODE': 'PRIVATE_PRIMARY',
+                      'MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY': '1', 'MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE': 'PRIVATE_PRIMARY',
+                      key: value}
+            _write_env(self.env_file, values)
+            with self.subTest(key=key), self.assertRaisesRegex(backup.BackupError, reason):
+                backup.validate_release_env(self.env_file, release_sha=values['MARKET_PIPELINE_RELEASE_SHA'],
+                    image_id=values['MARKET_PIPELINE_IMAGE'], allow_target_identity_mismatch=False,
+                    allow_private_primary_source=True)
+
     def test_bluegreen_source_env_rejects_incoherent_primary_lane(self) -> None:
         values = dict(self.values)
         values.update(
@@ -513,6 +1707,43 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         _write_env(self.env_file, values)
 
         with self.assertRaisesRegex(backup.BackupError, "identity_mismatch"):
+            backup.validate_release_env(
+                self.env_file,
+                release_sha=RELEASE_SHA,
+                image_id=IMAGE_ID,
+                allow_target_identity_mismatch=True,
+            )
+
+    def test_bluegreen_source_identity_refusals_distinguish_release_and_image_without_relaxing_validation(self) -> None:
+        cases = [
+            ("MARKET_PIPELINE_RELEASE_SHA", "", "backup_source_release_sha_invalid"),
+            ("MARKET_PIPELINE_RELEASE_SHA", "not-a-release", "backup_source_release_sha_invalid"),
+            ("MARKET_PIPELINE_RELEASE_SHA", "e" * 39, "backup_source_release_sha_invalid"),
+            ("MARKET_PIPELINE_IMAGE", "", "backup_source_image_identity_invalid"),
+            ("MARKET_PIPELINE_IMAGE", "market_pipeline_release:synthetic-tag", "backup_source_image_identity_invalid"),
+            ("MARKET_PIPELINE_IMAGE", "sha256:" + "f" * 63, "backup_source_image_identity_invalid"),
+        ]
+        for key, invalid, expected in cases:
+            with self.subTest(field=key, reason=expected):
+                values = dict(self.values)
+                values[key] = invalid
+                _write_env(self.env_file, values)
+                with self.assertRaises(backup.BackupError) as refused:
+                    backup.validate_release_env(
+                        self.env_file,
+                        release_sha=RELEASE_SHA,
+                        image_id=IMAGE_ID,
+                        allow_target_identity_mismatch=True,
+                    )
+                self.assertEqual(str(refused.exception), expected)
+                self.assertNotIn(invalid or "never-disclose", str(refused.exception))
+                self.assertFalse(self.backup_dir.exists())
+
+        values = dict(self.values)
+        values["MARKET_PIPELINE_RELEASE_SHA"] = ""
+        values["MARKET_PIPELINE_IMAGE"] = ""
+        _write_env(self.env_file, values)
+        with self.assertRaisesRegex(backup.BackupError, "^backup_source_release_sha_invalid$"):
             backup.validate_release_env(
                 self.env_file,
                 release_sha=RELEASE_SHA,
@@ -702,7 +1933,7 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
             "release_tree": RELEASE_TREE,
             "image_id": IMAGE_ID,
             "image_input_signature": IMAGE_SIGNATURE,
-            "role_env_sha256": backup.file_digest(self.env_file),
+            "role_env_binding": self._env_binding(),
             "source": source,
             "source_after": source_after,
             "backup": {
@@ -795,8 +2026,8 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
         )
         restore = {
             "schema_versions": [1, 2],
-            "schema_catalog_sha256": "9" * 64,
-            "schema_objects_sha256": "8" * 64,
+            "schema_catalog_sha256": "1" * 64,
+            "schema_objects_sha256": "2" * 64,
             "table_count": 2,
             "fact_count": 11,
             "table_row_counts": {"market_facts": 11, "market_offers": 1},
@@ -860,6 +2091,39 @@ class BackupMarketPipelineArchiveTests(unittest.TestCase):
     def test_production_backup_directory_rejects_tmp(self) -> None:
         with self.assertRaisesRegex(backup.BackupError, "tmp_forbidden"):
             REAL_SECURE_DIRECTORY(self.backup_dir, create=False)
+
+    def test_real_create_cli_reports_source_refusal_without_traceback_or_private_text(self) -> None:
+        args = [
+            "create", "--env-file", str(self.env_file), "--receipt", str(self.receipt),
+            "--release-sha", RELEASE_SHA, "--release-tree", RELEASE_TREE,
+            "--image-id", IMAGE_ID, "--image-input-signature", IMAGE_SIGNATURE,
+            "--bluegreen-source-env", "--backup-dir", str(self.backup_dir),
+            "--allow-running-writers", "--confirm", backup.HOT_CREATE_CONFIRMATION,
+        ]
+        errors = [
+            (backup.ReleaseContractError("source_env_required_keys_missing"), "source_env_required_keys_missing"),
+            (backup.ReleaseContractError("private value /sensitive/path"), "backup_cli_input_or_io_failure"),
+            (OSError("private value /sensitive/path"), "backup_cli_input_or_io_failure"),
+            (ValueError("private value /sensitive/path"), "backup_cli_input_or_io_failure"),
+            (backup.BackupError("backup_database_runtime_identity_mismatch"), "backup_database_runtime_identity_mismatch"),
+            (backup.BackupError("backup_source_release_sha_invalid"), "backup_source_release_sha_invalid"),
+            (backup.BackupError("backup_source_image_identity_invalid"), "backup_source_image_identity_invalid"),
+        ]
+        for error, expected in errors:
+            with self.subTest(error=type(error).__name__, expected=expected):
+                output, diagnostics = io.StringIO(), io.StringIO()
+                with mock.patch.object(backup, "create_backup", side_effect=error) as create, \
+                        mock.patch.object(backup.sys, "stdout", output), \
+                        mock.patch.object(backup.sys, "stderr", diagnostics), \
+                        mock.patch.object(backup.subprocess, "run", side_effect=AssertionError("no host commands")):
+                    self.assertEqual(backup.main(args), 1)
+                self.assertEqual(output.getvalue(), "")
+                self.assertEqual(json.loads(diagnostics.getvalue()), {
+                    "status": "fail", "reason_code": expected, "secrets_disclosed": False,
+                })
+                self.assertTrue(create.call_args.kwargs["allow_running_writers"])
+                self.assertTrue(create.call_args.kwargs["allow_target_identity_mismatch"])
+                self.assertFalse(self.backup_dir.exists())
 
 
 if __name__ == "__main__":

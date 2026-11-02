@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { execFileSync } from 'child_process'
-import { mkdtempSync, writeFileSync } from 'fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
@@ -182,7 +182,7 @@ function createPlaywrightBinaryFile(name: string, mimeType: string, bodyBase64: 
   }
 }
 
-function createPlaywrightTextFilePath(name: string, contents: string) {
+function createPlaywrightTextFilePath(name: string, contents: string | Buffer) {
   const filePath = join(PLAYWRIGHT_TMP_DIR, name)
   writeFileSync(filePath, contents, 'utf8')
   return filePath
@@ -224,7 +224,7 @@ function activeAttachButton(page: Page) {
 }
 
 function activeComposerTextbox(page: Page) {
-  return activeComposerContainer(page).getByRole('textbox', { name: 'پیام...' })
+  return activeComposerContainer(page).getByRole('textbox', { name: 'متن پیام', exact: true })
 }
 
 async function clickVisibleChatBackButton(page: Page) {
@@ -270,12 +270,18 @@ async function navigateFromMessengerToMarket(page: Page) {
     // Ignore when the sheet was never mounted or has already been removed.
   }
 
-  const fabButton = page.locator('.fab-btn').first()
-  await expect(fabButton).toBeVisible({ timeout: 30000 })
-  await fabButton.evaluate((node: HTMLElement) => node.click())
-  const marketLink = page.locator('.fab-item').filter({ hasText: 'بازار' }).first()
+  // Messenger is immersive: use its Back flow, then the dashboard's normal
+  // navigation. Keep the SPA alive so pending uploads continue across routes.
+  const backButton = page.locator('.chat-header .back-btn:visible')
+  await expect(backButton).toBeVisible({ timeout: 30000 })
+  await backButton.click()
+  await expect(page.locator('.chat-header .header-title:visible')).toContainText('پیام‌ها', { timeout: 30000 })
+  await expect(backButton).toBeVisible({ timeout: 30000 })
+  await backButton.click()
+  await expect(page).toHaveURL(/\/$/, { timeout: 30000 })
+  const marketLink = page.getByRole('navigation', { name: 'ناوبری اصلی', exact: true }).getByRole('link', { name: /بازار/ })
   await expect(marketLink).toBeVisible({ timeout: 30000 })
-  await marketLink.evaluate((node: HTMLElement) => node.click())
+  await marketLink.click()
   await expect(page).toHaveURL(/\/market$/, { timeout: 30000 })
 }
 
@@ -510,11 +516,16 @@ async function injectDocument(page: Page, options?: { prefix?: string; sizeBytes
   const suffix = Date.now()
   const prefix = options?.prefix ?? 'pw-direct'
   const requestedSizeBytes = Math.max(0, Number(options?.sizeBytes ?? 0))
-  const baseContent = `Playwright document ${suffix}\n`
+  const fixture = JSON.parse(readFileSync(new URL('../../scripts/npm_security_ci/public_document_fixture.json', import.meta.url), 'utf8')) as { template: string }
+  const baseContent = fixture.template.replace('{seed}', String(suffix))
   const repeatCount = requestedSizeBytes > 0
     ? Math.max(1, Math.ceil(requestedSizeBytes / Buffer.byteLength(baseContent, 'utf8')))
     : 1
-  const filePath = createPlaywrightTextFilePath(`${prefix}-${suffix}.txt`, baseContent.repeat(repeatCount))
+  const contents = Buffer.from(baseContent.repeat(repeatCount), 'utf8')
+  const filePath = createPlaywrightTextFilePath(
+    `${prefix}-${suffix}.txt`,
+    requestedSizeBytes > 0 ? contents.subarray(0, requestedSizeBytes) : contents,
+  )
   await page.locator('input[type="file"][accept="*"]').setInputFiles(filePath)
 }
 
@@ -655,7 +666,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await activeAttachButton(page).click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-    await page.getByRole('button', { name: 'فایل' }).first().click()
+    await page.locator('.attachment-sheet:visible').getByRole('button', { name: 'فایل', exact: true }).click()
     await injectDocument(page)
 
     await expect(page.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 30000 })
@@ -705,7 +716,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
       await activeAttachButton(senderPage).click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-      await senderPage.getByRole('button', { name: 'فایل' }).first().click()
+      await senderPage.locator('.attachment-sheet:visible').getByRole('button', { name: 'فایل', exact: true }).click()
       await injectDocument(senderPage, { sizeBytes: largeDocumentSizeBytes })
 
       await expect(receiverPage.locator('.chat-header:visible').last()).toContainText('در حال ارسال فایل...', { timeout: 30000 })
@@ -776,7 +787,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
       await activeAttachButton(senderPage).click()
       await expect(senderPage.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-      await senderPage.getByRole('button', { name: 'فایل' }).first().click()
+      await senderPage.locator('.attachment-sheet:visible').getByRole('button', { name: 'فایل', exact: true }).click()
       await injectDocument(senderPage)
 
       await heldUploadSeen
@@ -849,7 +860,7 @@ test.describe('Messenger direct-room media/search/viewer regressions', () => {
 
     await activeAttachButton(page).click()
     await expect(page.locator('.attachment-sheet')).toBeVisible({ timeout: 30000 })
-    await page.getByRole('button', { name: 'فایل' }).first().click()
+    await page.locator('.attachment-sheet:visible').getByRole('button', { name: 'فایل', exact: true }).click()
     await injectDocument(page)
 
     await expect(page.locator('.messages-container .msg-document:not(.is-busy)')).toBeVisible({ timeout: 30000 })

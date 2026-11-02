@@ -1,0 +1,147 @@
+name: Trixie ACL and tar vendor candidate only
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: trixie-acl-tar-vendor-candidate
+  cancel-in-progress: false
+jobs:
+  candidate:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/security/remediation-20261023'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      DOCKER_HOST: unix:///var/run/docker.sock
+      TRIVY_CONFIG: /dev/null
+      TRIVY_IGNOREFILE: /dev/null
+      TRIVY_IGNORE_UNFIXED: 'false'
+      TRIVY_SKIP_VERSION_CHECK: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Seal exactly three published vendor build files
+        id: recipe
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,re,stat,subprocess,tempfile
+          os.umask(0o077);assert os.geteuid()==1001
+          parent=pathlib.Path(os.environ['RUNNER_TEMP']).resolve(strict=True)
+          root=pathlib.Path(tempfile.mkdtemp(prefix='trixie-acl-tar-',dir=parent))
+          for name in ('context','public','reports','docker-config'):(root/name).mkdir(mode=0o700)
+          for name in ('vulnerabilities.json','sbom.cdx.json'):
+              fd=os.open(root/'reports'/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600);os.close(fd)
+          recipe={}
+          for name in ('Dockerfile','build.py','verify.py'):
+              path='deploy/maintenance/acl_tar_build/'+name
+              size=subprocess.run(['git','--no-optional-locks','cat-file','-s',os.environ['GITHUB_SHA']+':'+path],check=True,capture_output=True,timeout=10).stdout
+              assert re.fullmatch(rb'[1-9][0-9]{0,4}\n',size) and int(size)<=65536
+              raw=subprocess.run(['git','--no-optional-locks','cat-file','blob',os.environ['GITHUB_SHA']+':'+path],check=True,capture_output=True,timeout=10).stdout
+              assert len(raw)==int(size)
+              fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              try:
+                  before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==1001 and before.st_nlink==1 and not before.st_mode&0o022
+                  assert os.read(fd,65537)==raw
+                  identity=lambda s:(s.st_dev,s.st_ino,s.st_size,s.st_mode,s.st_mtime_ns,s.st_ctime_ns)
+                  assert identity(before)==identity(os.fstat(fd))==identity(pathlib.Path(path).lstat())
+              finally:os.close(fd)
+              with (root/'context'/name).open('xb') as output:output.write(raw)
+              recipe[name]=sha256(raw).hexdigest()
+          (root/'recipe-identity.json').write_text(json.dumps({'source_commit':os.environ['GITHUB_SHA'],'recipe_sha256':recipe},sort_keys=True)+'\n')
+          with pathlib.Path(os.environ['GITHUB_OUTPUT']).open('a') as output:output.write('root='+str(root)+'\n')
+          PY
+      - name: Build ACL, install only its compiler dependencies, then build coherent tar
+        id: build
+        env:
+          CANDIDATE_ROOT: ${{ steps.recipe.outputs.root }}
+        run: python3 -I -B "$CANDIDATE_ROOT/context/build.py" --ci-root "$CANDIDATE_ROOT"
+      - name: Preserve all raw findings without accepting the candidate
+        if: always() && steps.build.outputs.image_id != ''
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        env:
+          DOCKER_CONFIG: ${{ steps.recipe.outputs.root }}/docker-config
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.build.outputs.image_id }}
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: ${{ steps.recipe.outputs.root }}/reports/vulnerabilities.json
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '0' # Evidence only; the final App gate remains unchanged.
+          timeout: 15m
+      - name: Record actual installed runtime candidate inventory
+        if: always() && steps.build.outputs.image_id != ''
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        env:
+          DOCKER_CONFIG: ${{ steps.recipe.outputs.root }}/docker-config
+        with:
+          version: v0.76.1
+          image-ref: ${{ steps.build.outputs.image_id }}
+          format: cyclonedx
+          output: ${{ steps.recipe.outputs.root }}/reports/sbom.cdx.json
+          timeout: 15m
+      - name: Bind raw scanner identity and both installed versions
+        id: reports
+        if: always() && steps.build.outputs.image_id != ''
+        env:
+          CANDIDATE_ROOT: ${{ steps.recipe.outputs.root }}
+        run: |
+          python3 -I -B - <<'PY'
+          from hashlib import sha256
+          import json,os,pathlib,types
+          root=pathlib.Path(os.environ['CANDIDATE_ROOT'])
+          identity=json.loads((root/'recipe-identity.json').read_bytes())
+          raw=(root/'context/build.py').read_bytes();assert 0<len(raw)<=65536 and sha256(raw).hexdigest()==identity['recipe_sha256']['build.py']
+          module=types.ModuleType('sealed_acl_tar');exec(compile(raw,'<sealed-acl-tar>','exec'),module.__dict__)
+          _,receipt=module.checked_receipt(root/'public/build-receipt.json','tar')
+          candidate=json.loads(module.read(root/'reports/candidate-image.json',65536))
+          findings=json.loads(module.read(root/'reports/vulnerabilities.json',32*1024**2))
+          assert findings['SchemaVersion']==2 and findings['ArtifactType']=='container_image'
+          assert findings['Metadata']['ImageID']==candidate['image_id']
+          assert isinstance(findings['Results'],list) and findings['Results'] and all(isinstance(row,dict) for row in findings['Results'])
+          sbom=json.loads(module.read(root/'reports/sbom.cdx.json',8*1024**2))
+          rows=[row for row in receipt['all_family_packages'] if row['name'] in module.RUNTIME]
+          assert len(rows)==2
+          for row in rows:assert {item.get('version') for item in sbom.get('components',[]) if item.get('name')==row['name']}=={row['version']}
+          print(json.dumps({'status':'candidate_evidence_only','security_accepted':False,'production_installed':False,'legacy_file_api_security_assessed':False},sort_keys=True))
+          PY
+      - name: Retain only selected runtime packages and public build proof
+        if: always() && steps.build.outputs.packages_ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trixie-acl-tar-public-candidate
+          path: ${{ steps.recipe.outputs.root }}/public/*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain actual unfiltered candidate reports
+        if: always() && steps.reports.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: trixie-acl-tar-raw-scanner
+          path: ${{ steps.recipe.outputs.root }}/reports/*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Print bounded fixed public failure logs
+        if: failure() && steps.recipe.outputs.root != ''
+        env:
+          CANDIDATE_ROOT: ${{ steps.recipe.outputs.root }}
+        run: |
+          python3 -I -B - <<'PY'
+          import json,os,pathlib,stat
+          root=pathlib.Path(os.environ['CANDIDATE_ROOT']);total=0
+          for name in ('runtime-prepare.log','builder-prepare.log','acl-run.log','toolchain-run.log','tar-run.log','runtime-run.log','acl-work/build.log','tar-work/build.log'):
+              path=root/name
+              try:fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+              except FileNotFoundError:continue
+              try:
+                  before=os.fstat(fd);assert stat.S_ISREG(before.st_mode) and before.st_uid==os.geteuid() and before.st_nlink==1 and not before.st_mode&0o022
+                  os.lseek(fd,max(0,before.st_size-4096),os.SEEK_SET);raw=os.read(fd,4097);assert len(raw)<=4096
+                  line=json.dumps({'name':name,'bytes':before.st_size,'tail':raw.decode(errors='replace')},ensure_ascii=True)
+                  total+=len(line.encode());assert len(line.encode())<=32768 and total<=262144;print(line)
+              finally:os.close(fd)
+          PY

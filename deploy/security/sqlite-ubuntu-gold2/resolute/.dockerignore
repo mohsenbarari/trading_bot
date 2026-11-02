@@ -1,0 +1,16 @@
+**
+!.dockerignore
+!context-manifest.json
+!sourcebuild.py
+!Dockerfile
+!0001-wal-reset-production-only.patch
+!0002-fts5-detail-none-merge-bound.patch
+!0003-fts5-detail-none-upstream-regression.patch
+!verify_positive.py
+!source-signer.asc
+!consumer-profile.json
+!inputs/
+!inputs/sqlite3_3.46.1-9ubuntu0.3.debian.tar.xz
+!inputs/sqlite3_3.46.1-9ubuntu0.3.dsc
+!inputs/sqlite3_3.46.1.orig-www.tar.xz
+!inputs/sqlite3_3.46.1.orig.tar.xz

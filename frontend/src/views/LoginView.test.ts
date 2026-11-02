@@ -1287,6 +1287,27 @@ describe('LoginView.vue', () => {
     wrapper.unmount()
   })
 
+  it.each(['false', '0'])('hides developer quick-login on a production hostname with explicit flag %s', async (flag) => {
+    vi.stubEnv('VITE_STAGING_DEV_LOGIN', flag)
+    vi.resetModules()
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalWindowLocation,
+        hostname: '362514.ir',
+        href: 'https://362514.ir/login',
+      },
+    })
+
+    const LoginViewWithoutDevLogin = (await import('./LoginView.vue')).default
+    const wrapper = mount(LoginViewWithoutDevLogin)
+
+    expect(wrapper.text()).not.toContain('ورود سریع ۱ ساله')
+    expect(findButtonByText(wrapper, 'دریافت کد تأیید').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
   it('shows developer quick-login on staging builds with public hostnames', async () => {
     vi.stubEnv('VITE_STAGING_DEV_LOGIN', 'true')
     vi.resetModules()

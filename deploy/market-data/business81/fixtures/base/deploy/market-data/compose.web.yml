@@ -1,0 +1,334 @@
+services:
+  market-database:
+    extends:
+      file: compose.yml
+      service: market-postgres-base
+    profiles: [web]
+    command:
+      - postgres
+      - -c
+      - max_connections=${MARKET_POSTGRES_MAX_CONNECTIONS:-100}
+      - -c
+      - timezone=UTC
+      - -c
+      - log_timezone=UTC
+    environment:
+      TZ: UTC
+      PGTZ: UTC
+      PGDATA: /var/lib/postgresql/data/pgdata
+      POSTGRES_USER: ${MARKET_POSTGRES_USER:-market_data}
+      POSTGRES_DB: ${MARKET_POSTGRES_DB:-market_archive}
+      POSTGRES_PASSWORD_FILE: /run/secrets/market_postgres_password
+    secrets:
+      - market_postgres_password
+    volumes:
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/postgres
+        target: /var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    networks:
+      - market-backend
+
+  market-migration:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [web]
+    restart: "no"
+    command: [migrate]
+    environment:
+      MARKET_POSTGRES_HOST: market-database
+      MARKET_POSTGRES_USER: ${MARKET_POSTGRES_USER:-market_data}
+      MARKET_POSTGRES_DB: ${MARKET_POSTGRES_DB:-market_archive}
+      MARKET_POSTGRES_PASSWORD_FILE: /run/secrets/market_postgres_password
+    secrets:
+      - market_postgres_password
+    volumes:
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/market-migration
+        target: /var/lib/market-data/state
+    depends_on:
+      market-database:
+        condition: service_healthy
+    networks:
+      - market-backend
+
+  market-capture-account1:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [web]
+    command: [service, --role, market-capture-account1]
+    environment:
+      MARKET_PIPELINE_SESSION_ROOT: /var/lib/market-data/session
+      MARKET_PIPELINE_CAPTURE_ROOT: /var/lib/market-data/capture
+      MARKET_CAPTURE_CONFIG_FILE: /run/secrets/market_capture_account1_config
+      MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC: ${MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC:-}
+      MARKET_CAPTURE_BACKFILL_MAX_MESSAGES: ${MARKET_CAPTURE_BACKFILL_MAX_MESSAGES:-250000}
+      MARKET_CAPTURE_BACKFILL_SOURCE_CODES: ${MARKET_CAPTURE_BACKFILL_SOURCE_CODES:-}
+    secrets:
+      - market_capture_account1_config
+    volumes:
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/market-capture-account1
+        target: /var/lib/market-data/state
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/capture/account1
+        target: /var/lib/market-data/capture
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/sessions/account1
+        target: /var/lib/market-data/session
+    depends_on:
+      market-migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, market-capture-account1]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-backend
+      - market-transport
+
+  market-capture-account2:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [web]
+    command: [service, --role, market-capture-account2]
+    environment:
+      MARKET_PIPELINE_SESSION_ROOT: /var/lib/market-data/session
+      MARKET_PIPELINE_CAPTURE_ROOT: /var/lib/market-data/capture
+      MARKET_CAPTURE_CONFIG_FILE: /run/secrets/market_capture_account2_config
+      MARKET_CAPTURE_HMAC_KEY_FILE: /run/secrets/market_capture_account2_hmac
+      MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC: ${MARKET_CAPTURE_BACKFILL_NOT_BEFORE_UTC:-}
+      MARKET_CAPTURE_BACKFILL_MAX_MESSAGES: ${MARKET_CAPTURE_BACKFILL_MAX_MESSAGES:-250000}
+      MARKET_CAPTURE_BACKFILL_SOURCE_CODES: ${MARKET_CAPTURE_BACKFILL_SOURCE_CODES:-}
+    secrets:
+      - market_capture_account2_config
+      - market_capture_account2_hmac
+    volumes:
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/market-capture-account2
+        target: /var/lib/market-data/state
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/capture/account2
+        target: /var/lib/market-data/capture
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/sessions/account2
+        target: /var/lib/market-data/session
+    depends_on:
+      market-migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, market-capture-account2]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-backend
+      - market-transport
+
+  market-capture-external:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [web]
+    command: [service, --role, market-capture-external]
+    environment:
+      MARKET_EXTERNAL_CAPTURE_ROOT: /var/lib/market-data/capture/external
+      MARKET_EXTERNAL_POLL_SECONDS: ${MARKET_EXTERNAL_POLL_SECONDS:-10}
+    volumes:
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/market-capture-external
+        target: /var/lib/market-data/state
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/capture/external
+        target: /var/lib/market-data/capture/external
+    depends_on:
+      market-migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, market-capture-external]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-backend
+      - market-transport
+
+  market-processor:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [web]
+    command: [service, --role, market-processor]
+    environment:
+      MARKET_PIPELINE_CAPTURE_ROOT: /var/lib/market-data/capture
+      MARKET_PROCESSOR_MARKET_SPOOL_DIR: /var/lib/market-data/capture/account1
+      MARKET_PROCESSOR_COIN_SPOOL_DIR: /var/lib/market-data/capture/account2
+      MARKET_PROCESSOR_EXTERNAL_SPOOL_DIR: /var/lib/market-data/capture/external
+      MARKET_PROCESSOR_FEEDBACK_DB: /var/lib/market-data/calibration/coin-groups/review-decisions.sqlite3
+      MARKET_PROCESSOR_PREDICTION_DB: /var/lib/market-data/calibration/coin-groups/prediction-ledger.sqlite3
+      MARKET_PROCESSOR_INTERVAL_SECONDS: ${MARKET_PROCESSOR_INTERVAL_SECONDS:-1}
+      MARKET_PROCESSOR_ARCHIVE_ENABLED: "1"
+      MARKET_RESEARCH_ARCHIVE_ENABLED: ${MARKET_RESEARCH_ARCHIVE_ENABLED:-1}
+      MARKET_RESEARCH_ENCRYPTION_KEY_FILE: /run/secrets/market_research_encryption_key
+      MARKET_RESEARCH_ENCRYPTION_KEY_ID: ${MARKET_RESEARCH_ENCRYPTION_KEY_ID:-market-research:v1}
+      MARKET_POSTGRES_HOST: market-database
+      MARKET_POSTGRES_USER: ${MARKET_POSTGRES_USER:-market_data}
+      MARKET_POSTGRES_DB: ${MARKET_POSTGRES_DB:-market_archive}
+      MARKET_POSTGRES_PASSWORD_FILE: /run/secrets/market_postgres_password
+    secrets:
+      - market_postgres_password
+      - market_research_encryption_key
+    volumes:
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/market-processor
+        target: /var/lib/market-data/state
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/capture
+        target: /var/lib/market-data/capture
+        read_only: true
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/calibration/coin-groups
+        target: /var/lib/market-data/calibration/coin-groups
+        # prediction-ledger.sqlite3 is updated only for explicitly promoted
+        # PRIVATE_PRIMARY snapshots; Shadow snapshots never feed parser
+        # anchors. The processor needs directory write access only for
+        # SQLite's shared-memory sidecar; both calibration connections remain
+        # mode=ro.
+        read_only: false
+    depends_on:
+      market-migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, market-processor]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-backend
+
+  market-fact-sync-worker:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [web]
+    command: [service, --role, market-fact-sync-worker]
+    environment:
+      MARKET_POSTGRES_HOST: market-database
+      MARKET_POSTGRES_USER: ${MARKET_POSTGRES_USER:-market_data}
+      MARKET_POSTGRES_DB: ${MARKET_POSTGRES_DB:-market_archive}
+      MARKET_POSTGRES_PASSWORD_FILE: /run/secrets/market_postgres_password
+      MARKET_FACT_RECEIVER_HOST: ${MARKET_BOT_PRIVATE_IP:?MARKET_BOT_PRIVATE_IP is required}
+      MARKET_FACT_RECEIVER_PORT: ${MARKET_BOT_FACT_RECEIVER_PORT:-9443}
+      MARKET_FACT_SENDER_INSTANCE_ID: ${MARKET_FACT_SENDER_INSTANCE_ID:-web-market-sync-1}
+    secrets:
+      - market_postgres_password
+      - market_transport_ca
+      - market_web_transport_cert
+      - market_web_transport_key
+      - market_hmac_active
+      - market_hmac_previous
+    volumes:
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/market-fact-sync-worker
+        target: /var/lib/market-data/state
+    depends_on:
+      market-migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, market-fact-sync-worker]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-backend
+      - market-transport
+
+  estimator-snapshot-receiver:
+    extends:
+      file: compose.yml
+      service: market-runtime-base
+    profiles: [web]
+    command: [service, --role, estimator-snapshot-receiver]
+    environment:
+      MARKET_PIPELINE_LISTEN_HOST: 0.0.0.0
+      MARKET_PIPELINE_LISTEN_PORT: "9443"
+      MARKET_PIPELINE_ALLOWED_PEER_IP: ${MARKET_BOT_PRIVATE_IP:?MARKET_BOT_PRIVATE_IP is required}
+      MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY: ${MARKET_PIPELINE_ALLOW_PRIVATE_PRIMARY:-0}
+      MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE: ${MARKET_PIPELINE_EXPECTED_SNAPSHOT_LANE:-PRIVATE_SHADOW}
+      MARKET_PIPELINE_SNAPSHOT_STALE_AFTER_SECONDS: ${MARKET_PIPELINE_SNAPSHOT_STALE_AFTER_SECONDS:-30}
+      MARKET_PIPELINE_SNAPSHOT_ROOT: /var/lib/market-data/snapshots
+      MARKET_PIPELINE_CALIBRATION_ROOT: /var/lib/market-data/calibration/coin-groups
+      SQLITE_TMPDIR: /var/lib/market-data/state/estimator-snapshot-receiver/sqlite-tmp
+    secrets:
+      - market_postgres_password
+      - market_transport_ca
+      - market_web_transport_cert
+      - market_web_transport_key
+      - market_hmac_active
+      - market_hmac_previous
+    volumes:
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/state/estimator-snapshot-receiver
+        target: /var/lib/market-data/state
+      - type: bind
+        source: ${MARKET_PRODUCT_SNAPSHOT_ROOT:?MARKET_PRODUCT_SNAPSHOT_ROOT is required}
+        target: /var/lib/market-data/snapshots
+      - type: bind
+        source: ${MARKET_WEB_DATA_ROOT:?MARKET_WEB_DATA_ROOT is required}/calibration/coin-groups
+        target: /var/lib/market-data/calibration/coin-groups
+    ports:
+      - name: estimator-snapshot-private
+        target: 9443
+        published: ${MARKET_WEB_SNAPSHOT_RECEIVER_PORT:-9443}
+        host_ip: ${MARKET_PRIVATE_BIND_IP:?MARKET_PRIVATE_BIND_IP is required}
+        protocol: tcp
+    depends_on:
+      market-migration:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -m, core.market_intelligence.private_pipeline_foundation, healthcheck, --role, estimator-snapshot-receiver]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - market-backend
+      - market-transport
+
+secrets:
+  market_postgres_password:
+    file: ${MARKET_POSTGRES_PASSWORD_FILE:?MARKET_POSTGRES_PASSWORD_FILE is required}
+  market_capture_account1_config:
+    file: ${MARKET_CAPTURE_ACCOUNT1_CONFIG_FILE:?MARKET_CAPTURE_ACCOUNT1_CONFIG_FILE is required}
+  market_capture_account2_config:
+    file: ${MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE:?MARKET_CAPTURE_ACCOUNT2_CONFIG_FILE is required}
+  market_capture_account2_hmac:
+    file: ${MARKET_CAPTURE_ACCOUNT2_HMAC_FILE:?MARKET_CAPTURE_ACCOUNT2_HMAC_FILE is required}
+  market_research_encryption_key:
+    file: ${MARKET_RESEARCH_ENCRYPTION_KEY_FILE:?MARKET_RESEARCH_ENCRYPTION_KEY_FILE is required}
+  market_transport_ca:
+    file: ${MARKET_TRANSPORT_CA_FILE:?MARKET_TRANSPORT_CA_FILE is required}
+  market_web_transport_cert:
+    file: ${MARKET_WEB_TRANSPORT_CERT_FILE:?MARKET_WEB_TRANSPORT_CERT_FILE is required}
+  market_web_transport_key:
+    file: ${MARKET_WEB_TRANSPORT_KEY_FILE:?MARKET_WEB_TRANSPORT_KEY_FILE is required}
+  market_hmac_active:
+    file: ${MARKET_HMAC_ACTIVE_FILE:?MARKET_HMAC_ACTIVE_FILE is required}
+  market_hmac_previous:
+    file: ${MARKET_HMAC_PREVIOUS_FILE:?MARKET_HMAC_PREVIOUS_FILE is required}

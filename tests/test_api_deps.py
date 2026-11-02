@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
-from jose import JWTError
+from core.jwt_codec import JWTError
 from sqlalchemy.orm.exc import StaleDataError
 
 from api import deps

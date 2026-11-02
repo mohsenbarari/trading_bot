@@ -1,0 +1,22 @@
+{
+  "architecture": "amd64",
+  "config_values_included": false,
+  "export_receipt_sha256": "c5e1e46600771119ad45904ffee872b3df998c1716d53db6237e721a18cb2a64",
+  "image_id": "sha256:98c4c0abd245b4b65178494e4727c69c63a28ed604cfb7dbf74205203a987015",
+  "os": "linux",
+  "profile": "redis",
+  "rootfs": {
+    "Layers": [
+      "sha256:7211d01aba8fa2e9eb71ad34395cd313df5fc51a6b69b92d2dfad32cc37759cb",
+      "sha256:a0caa8bc04fc2a6bc37012dfcb190e6e1711e18bb1bfdf3768bafe736da6001b",
+      "sha256:2898dc82d6a9e325f70948c4da63e430a8a57b5b556024653d4291db83077b58",
+      "sha256:a6f8bf15c6b1bd407aaaeb094b75e619c8a91905c6f4d7f2f6a07cabaf542875",
+      "sha256:fd2bae83d0a7a6d58ed98af0be51b6468c5a989bf457c4bc289bf64a72acfda5",
+      "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+      "sha256:96bf91f53b18ebaf5f197fb649a488a4fc428521cbe86e6e73fe7eefda68a15d",
+      "sha256:eb6c47e3ebae287f79aeb070e14e61d5696acf049b9a71080a9f376ddb7c7b74"
+    ],
+    "Type": "layers"
+  },
+  "run_id": 40142214416
+}
