@@ -13,7 +13,7 @@ import inspect,json,os,re,selectors,subprocess,time
 PROFILES=('base-nonroot','base-root','added-replay')
 OWNER='io.gold-trade.normal-business81-owner'
 PROFILE='io.gold-trade.normal-business81-profile'
-NORMAL_PIN=(151766, '6ed2bd00258a0b4c42632ba7ceb1251b4cdf761e02d1aa5a3f0f4f938b170a78')
+NORMAL_PIN=(152633, 'ba51ea1b3c0a0d66161f64f637f5b2834e6bf145c93d5091b1d479febf2ffb2e')
 APPROVAL_PIN={'bytes': 1031, 'sha256': '3bbc244f4e044975a8f3e9761e8690a4f48f8051454134e66ef26332c3d2627f'}
 PROPOSAL_PIN={'bytes': 771, 'sha256': '18b59cbdf722a15de894f50fca1170072c0b6ac278582575cadb68b6e3446415'}
 PATCH_PIN={'bytes': 333, 'sha256': '88d5b46f2726fb570bb6727fe7955f9b5c399f370bf61fc81601c26c40f8da8c'}

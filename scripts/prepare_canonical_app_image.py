@@ -38,12 +38,26 @@ DOCKER=['/usr/bin/docker','--host=unix:///var/run/docker.sock']
 SUBPHASE='entry'
 COMMAND_RETURN_CODE=None
 CANONICAL3541=False
+APP_PROFILE='web'
+APP_PROFILES={'web':('4df2fed29859c0b82367666521f1a345f269f58a','499e157c3d1d1d2d35f17ff83829477e34849f17'),
+    'native':('ba1f7616ade57558f51bb3a7fbb903243a33aab4','5d2ff35831696a3886372e4388f2a769a3594a8a')}
 BUSINESS_COMMIT='4df2fed29859c0b82367666521f1a345f269f58a'
 BUSINESS_TREE='499e157c3d1d1d2d35f17ff83829477e34849f17'
 APP_RECIPE='deploy/security/Dockerfile.app-sqlite3541'
 APP_RECIPE_PIN=(6342,'2e75562809856f24b1112bac1aaf56c62098f392353982037c098740ac03b74f')
 SECURITY_UPDATES=('scripts/prepare_sqlite_wal_os_cache.py','scripts/verify_sqlite_runtime.py',
     'scripts/sqlite3541_package.py','scripts/sqlite3541_packages.lock.json')
+NATIVE_SECURITY_UPDATES=(
+    'requirements.txt','deploy/production/pip-bootstrap-requirements.txt',
+    'api/deps.py','api/routers/auth.py','api/routers/chat.py','api/routers/commodities.py','api/routers/realtime.py','api/routers/sessions.py',
+    'core/security.py','core/jwt_codec.py','core/frontend_static.py','main.py','core/services/chat_upload_session_service.py',
+    'frontend/package.json','frontend/package-lock.json','frontend/scripts/check-node-security-baseline.mjs',
+    'frontend/src/composables/useWebSocket.ts',
+    'scripts/prepare_psycopg2_source.py','scripts/prepare_app_security_os_cache.py','scripts/app_security_os_packages.lock.json',
+    'scripts/compose_security_os_candidate.py','scripts/sqlite_wal_package.lock.json',
+    'scripts/prepare_tar_acl_os_cache.py','scripts/tar_acl_package.lock.json',
+    'scripts/prepare_coreutils_acl_os_cache.py','scripts/coreutils_acl_package.lock.json',
+    'scripts/verify_image_trust.py','scripts/probe_python_micro_release.py','scripts/verify_psycopg2_runtime.py','scripts/remove_runtime_pip.py')
 GLIBC_ROOT='deploy/maintenance/glibc_backport_two_profiles/Root-TrixieSelected01-qualification.json'
 GLIBC_ROOT_PIN={'bytes':23392,'sha256':'7cacf5aaf2c03759343c4a355fe9e8f0e414412fae22ccce0d17eb22c7a2073d'}
 GLIBC_HELPERS={'scripts/prepare_glibc_security_os_cache.py':{'bytes':29419,'sha256':'ec8cfbf83dc1edb96fb4e6604d3e86fdbf2c7b7a0bec648550c897651a8d79f3'},
@@ -76,9 +90,19 @@ CODES=frozenset(('hosted_only','root_scope','path','metadata','source_changed','
     'git_dirty','command_failed','command_timeout','command_output_bound','cleanup_unproven','input_bound',
     'input_inventory','input_changed','source_fd_budget','state','image_identity','image_config','image_labels','archive_bound',
     'archive_shape','archive_config','report_identity','report_shape','raw_findings','output_exists','io_refusal','refused'))
+CODES=CODES|frozenset(('artifact_download_failed','artifact_size','artifact_digest','download_exists',
+    'vendor_release_source','vendor_release_token','vendor_release_metadata','vendor_asset_metadata','vendor_asset_pin','app_profile'))
 
 def need(ok,code):
     if not ok:raise RuntimeError(code)
+
+def select_app_profile(value):
+    global APP_PROFILE,BUSINESS_COMMIT,BUSINESS_TREE
+    need(type(value)is str and value in APP_PROFILES,'app_profile')
+    APP_PROFILE=value;BUSINESS_COMMIT,BUSINESS_TREE=APP_PROFILES[value]
+
+def security_updates():
+    return SECURITY_UPDATES+(NATIVE_SECURITY_UPDATES if APP_PROFILE=='native' else ())
 
 def encode(value):return (json.dumps(value,sort_keys=True,separators=(',',':'),allow_nan=False)+'\n').encode()
 
@@ -209,7 +233,7 @@ def write_context_file(root,name,raw,mode=0o644):
     return path
 
 def frozen_context(root,release):
-    """Exact old Git business inputs plus four explicitly enumerated security files.
+    """One closed Git business base plus the profile's enumerated security files.
 
     Neither Main product paths nor a moving business ref can enter the context.
     The ordinary Dockerfile input signature still covers the resulting bytes.
@@ -236,11 +260,11 @@ def frozen_context(root,release):
             stream=incoming.extractfile(member)
             with stream:raw=stream.read(size+1)
             need(len(raw)==size and sha1(b'blob '+str(size).encode()+b'\0'+raw).hexdigest()==oid,'source_changed')
-            if name=='Dockerfile' or name in SECURITY_UPDATES:continue
+            if name=='Dockerfile' or name in security_updates():continue
             write_context_file(context,name,raw,0o755 if mode=='100755' else 0o644)
             origins[name]={'commit':BUSINESS_COMMIT,'source_path':name,'git_blob':oid,'git_mode':mode}
     need(seen==set(expected),'source_inventory')
-    for name in (*SECURITY_UPDATES,APP_RECIPE):
+    for name in (*security_updates(),APP_RECIPE):
         target='Dockerfile' if name==APP_RECIPE else name
         raw,_=read_file(release/name,MAX_FILE)
         oid=git(release,'rev-parse',os.environ['GITHUB_SHA']+':'+name,maximum=128).decode().strip()
@@ -286,18 +310,44 @@ def canonical_glibc(root,release,context,*,check_only=False):
     for name,pin in GLIBC_FILES.items():need(file_digest(root/'glibc-capsule'/name,32*1024**2)==pin,'input_changed')
     return named
 
-def canonical_vendor_originals(root,context):
-    """Download the same three admitted ZIPs once; installer and assessor share them."""
-    raw,_=read_file(context/'scripts/compose_security_os_candidate.py',131072)
-    need(sha256(raw).hexdigest()=='a7ba6515937e7ae8193be4d550547651fe5b313399ec3a1f7634efe513e151c1','source_changed')
-    fetcher=source_module(raw,context/'scripts/compose_security_os_candidate.py')
+def canonical_vendor_originals(root,context,release):
+    """Use the existing retained release contract; original CI ZIPs have expired."""
+    global SUBPHASE
+    name='scripts/prepare_ci_security_caches.py';raw,_=read_file(release/name,131072)
+    policy=source_module(raw,release/name)
+    need(policy.REPO=='mohsenbarari/trading_bot'and policy.RELEASE_ID==430404133
+        and policy.RELEASE_TAG=='security-app-os-cache-20261101'
+        and policy.RELEASE_TARGET=='48c9706b10d7db802e0a7552e26aea6ab4921299'
+        and {key:policy.ASSET_IDS[key]for key in('util','ncurses','acl-tar')}==
+        {'util':697537730,'ncurses':697537733,'acl-tar':697537734},'vendor_release_source')
+    need(bool(os.environ.get('GH_TOKEN')),'vendor_release_token')
+    def api(endpoint,maximum,accept='application/vnd.github+json'):
+        return command(['/usr/bin/gh','api','--method','GET','-H','Accept: '+accept,
+            'repos/'+policy.REPO+'/'+endpoint],environment={**env(root),'GH_TOKEN':os.environ['GH_TOKEN']},
+            maximum=maximum,seconds=120)
     lock=document(read_file(context/'scripts/app_security_os_packages.lock.json',65536)[0])
+    SUBPHASE='vendor_release_metadata';metadata=document(api('releases/'+str(policy.RELEASE_ID),65536))
+    need(type(metadata)is dict and type(metadata.get('id'))is int and metadata.get('id')==policy.RELEASE_ID and metadata.get('tag_name')==policy.RELEASE_TAG
+        and metadata.get('target_commitish')==policy.RELEASE_TARGET and metadata.get('draft')is False
+        and metadata.get('prerelease')is True and metadata.get('html_url')=='https://github.com/'+policy.REPO+'/releases/tag/'+policy.RELEASE_TAG,
+        'vendor_release_metadata')
+    assets=metadata.get('assets');need(type(assets)is list and len(assets)==len(policy.ASSET_IDS)and all(type(row.get('id'))is int for row in assets)
+        and {row.get('id')for row in assets}==set(policy.ASSET_IDS.values())
+        and len({row.get('name')for row in assets})==len(assets),'vendor_asset_metadata')
     originals=root/'security-originals';originals.mkdir(mode=0o700);arguments=[]
     for group in ('util','ncurses','acl-tar'):
-        spec=lock['artifacts'][group];path=originals/(group+'.zip')
-        fetcher.fetch_artifact(spec['artifact_id'],path,spec['bytes'],spec['sha256'])
-        need(file_digest(path,32*1024**2)=={key:spec[key]for key in('bytes','sha256')},'input_changed')
+        spec=lock['artifacts'][group];path=originals/(group+'.zip');identifier=policy.ASSET_IDS[group]
+        asset=next(row for row in assets if row['id']==identifier)
+        need(type(asset.get('id'))is int and type(asset.get('size'))is int and asset.get('name')=='app-os-'+group+'.zip'
+            and asset.get('size')==spec['bytes']and asset.get('digest')=='sha256:'+spec['sha256']
+            and asset.get('state')=='uploaded'and asset.get('url')=='https://api.github.com/repos/'+policy.REPO+'/releases/assets/'+str(identifier),
+            'vendor_asset_metadata')
+        SUBPHASE='vendor_release_download_'+group
+        raw=api('releases/assets/'+str(identifier),spec['bytes'],'application/octet-stream')
+        need(len(raw)==spec['bytes']and sha256(raw).hexdigest()==spec['sha256'],'vendor_asset_pin')
+        write_new(path,raw)
         arguments+=['--'+group+'-zip',str(path)]
+    SUBPHASE='vendor_cache_prepare'
     return arguments
 
 def canonical_external_rows(root):
@@ -341,6 +391,46 @@ def canonical_smoke(root):
             ctx.checks.extend((lambda:unchanged(root,repo,source,held),external.check,
                 lambda:inspect(root,image,source,record['input_signature'])))
             result=adapter.run_smoke(ctx,old,image,{'image_id':image})
+            SUBPHASE='actual_copied_source_parity'
+            inputs=document(read_file(root/'input-manifest.json',MAX_COMMAND)[0])
+            directories={'api','bot','core','src','migrations','models','templates','fonts','scripts','mini_app_dist'}
+            leaves={'requirements.txt','alembic.ini','main.py','manage.py','run_bot.py','schemas.py','seed_fake_data.py','trading_settings.json'}
+            vector=[{'path':'/app/'+row['path'],'bytes':row['bytes'],'sha256':row['sha256']}for row in inputs['files']
+                if row['path'] in leaves or row['path'].split('/')[0] in directories]
+            need(vector and any(row['path']=='/app/mini_app_dist/index.html'for row in vector),'input_inventory')
+            vector_raw=encode(vector);need(len(vector_raw)<=2*1024**2,'input_bound')
+            ctx.C.write(proofroot/'proof/source-inputs.json',vector_raw,0o444)
+            capsule='''import hashlib,json,os,stat
+raw=open('/proof/source-inputs.json','rb').read(2097153)
+assert len(raw)<=2097152
+rows=json.loads(raw);assert type(rows)is list and 0<len(rows)<=20000
+total=0
+for row in rows:
+ path=row['path'];assert type(path)is str and path.startswith('/app/')and '..'not in path.split('/')
+ fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK|os.O_CLOEXEC)
+ try:
+  before=os.fstat(fd);assert stat.S_ISREG(before.st_mode)and before.st_size==row['bytes']and before.st_size<=67108864
+  total+=before.st_size;assert total<=536870912
+  digest=hashlib.sha256();count=0
+  while True:
+   block=os.read(fd,65536)
+   if not block:break
+   count+=len(block);assert count<=before.st_size;digest.update(block)
+  after=os.fstat(fd);named=os.lstat(path)
+  frame=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
+  assert count==before.st_size and digest.hexdigest()==row['sha256']and frame(before)==frame(after)==frame(named)
+ finally:os.close(fd)
+print(json.dumps({'status':'PASS','verified_files':len(rows),'vector_sha256':hashlib.sha256(raw).hexdigest(),'production_data_or_mounts_used':False}))
+'''
+            cid=old.create(ctx,'app-ci-source-'+old.owner(),image,['/usr/local/bin/python3','-I','-S','-B','-c',capsule],
+                proof=proofroot/'proof',output_limit=True,tmpfs=('/tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777',))
+            source_result=document(ctx.docker(['start','--attach',cid],seconds=120,maximum=65536))
+            need(ctx.docker(['inspect','--format','{{.State.ExitCode}}',cid],maximum=64).strip()==b'0'
+                and source_result=={'status':'PASS','verified_files':len(vector),'vector_sha256':sha256(vector_raw).hexdigest(),
+                    'production_data_or_mounts_used':False},'source_changed')
+            write_new(root/'reports/source-parity.json',{'schema':'canonical_app_actual_copied_source_parity/1','image_id':image,
+                'app_profile':APP_PROFILE,'business_commit':BUSINESS_COMMIT,'business_tree':BUSINESS_TREE,
+                'input_signature':record['input_signature'],'security_overrides':list(security_updates()),'actual':source_result,'security_accepted':False})
             SUBPHASE='actual_canonical_sqlite_probe'
             cid=old.create(ctx,'app-ci-sqlite-'+old.owner(),image,
                 ['/usr/local/bin/python3','-I','-B','/app/scripts/verify_sqlite_runtime.py','--require-libmagic'],
@@ -352,7 +442,8 @@ def canonical_smoke(root):
                 and runtime.get('legacy_cast15_verified')is True,'state')
             write_new(root/'reports/sqlite-runtime.json',{'image_id':image,'actual':runtime,'security_accepted':False})
             write_new(root/'reports/app32.json',{'schema':'canonical_app_actual_unchanged32/1','image_id':image,
-                'business_commit':BUSINESS_COMMIT,'business_tree':BUSINESS_TREE,
+                'app_profile':APP_PROFILE,'business_commit':BUSINESS_COMMIT,'business_tree':BUSINESS_TREE,
+                'source_parity':file_digest(root/'reports/source-parity.json',65536),
                 'driver':{'bytes':SMOKE_PIN[0],'sha256':SMOKE_PIN[1]},
                 'adapter':{'bytes':SMOKE_ADAPTER_PIN[0],'sha256':SMOKE_ADAPTER_PIN[1]},
                 'assertions_changed':False,'actual':result,'security_accepted':False})
@@ -602,7 +693,7 @@ def state(root):
     git_identity(repo,(value['source_commit'],value['source_tree']))
     need(value.get('canonical3541',False) is CANONICAL3541,'state')
     if CANONICAL3541:
-        need(value.get('business_commit')==BUSINESS_COMMIT and value.get('business_tree')==BUSINESS_TREE
+        need(value.get('app_profile','web')==APP_PROFILE and value.get('business_commit')==BUSINESS_COMMIT and value.get('business_tree')==BUSINESS_TREE
             and value.get('context_repo')==str(root/'app-context'),'state')
         return canonical(root/'app-context'),value
     return repo,value
@@ -629,7 +720,7 @@ def prepare(root,repo):
     if CANONICAL3541:
         release=repo;repo,context_rows=frozen_context(root,release)
         value.update(canonical3541=True,context_repo=str(repo),business_commit=BUSINESS_COMMIT,business_tree=BUSINESS_TREE,
-            release_files=rows,files=context_rows)
+            app_profile=APP_PROFILE,security_overrides=list(security_updates()),release_files=rows,files=context_rows)
         rows=context_rows
     write_new(root/'source-identity.json',value)
     with ExitStack() as stack:
@@ -637,7 +728,7 @@ def prepare(root,repo):
         child_env={**env(root)}
         if os.environ.get('GH_TOKEN'):child_env['GH_TOKEN']=os.environ['GH_TOKEN']
         SUBPHASE='vendor_cache_prepare'
-        vendor_arguments=canonical_vendor_originals(root,repo) if CANONICAL3541 else []
+        vendor_arguments=canonical_vendor_originals(root,repo,release) if CANONICAL3541 else []
         command([sys.executable,'-I','-B',str(repo/'scripts/prepare_app_security_os_cache.py'),
             '--cache-dir',str(repo/'pip_packages/security-os-capsule'),*vendor_arguments],seconds=600,environment=child_env)
         SUBPHASE='sqlite_cache_prepare'
@@ -667,6 +758,7 @@ def inspect(root,image,source,signature):
     if CANONICAL3541:
         named={'schema':'glibc84243_exact_runtime_named_context/1','files':GLIBC_FILES,'security_accepted':False}
         labels.update({'io.gold-trade.business.commit':BUSINESS_COMMIT,'io.gold-trade.business.tree':BUSINESS_TREE,
+            'io.gold-trade.app.business-profile':APP_PROFILE,
             'io.gold-trade.sqlite.family':'canonical3541','io.gold-trade.glibc.named-context':sha256(encode(named)).hexdigest(),
             'io.gold-trade.glibc.Root-qualification':GLIBC_ROOT_PIN['sha256']})
     need(type(config.get('Labels')) is dict and all(config['Labels'].get(k)==v for k,v in labels.items()),'image_labels')
@@ -732,6 +824,7 @@ def build(root):
                 '--label','io.gold-trade.glibc.Root-qualification='+GLIBC_ROOT_PIN['sha256'],
                 '--label','io.gold-trade.business.commit='+BUSINESS_COMMIT,
                 '--label','io.gold-trade.business.tree='+BUSINESS_TREE,
+                '--label','io.gold-trade.app.business-profile='+APP_PROFILE,
                 '--label','io.gold-trade.sqlite.family=canonical3541']
         for key,item in {'org.opencontainers.image.revision':value['source_commit'],'io.gold-trade.release.tree':value['source_tree'],
                 'io.gold-trade.release.input-signature':signature}.items():argv+=['--label',key+'='+item]
@@ -749,6 +842,7 @@ def build(root):
             'activation_performed':False,'market_roles_built':False,'security_accepted':False}
         if CANONICAL3541:
             record.update(sqlite_family='canonical3541',business_commit=BUSINESS_COMMIT,business_tree=BUSINESS_TREE,
+                app_profile=APP_PROFILE,security_overrides=list(security_updates()),
                 recipe={'path':APP_RECIPE,'bytes':APP_RECIPE_PIN[0],'sha256':APP_RECIPE_PIN[1]},
                 glibc_named_context=named,glibc_context_signature=sha256(encode(named)).hexdigest(),
                 glibc_external_inputs=canonical_external_rows(root))
@@ -815,9 +909,14 @@ def finalize(root):
             external=HeldSource(stack,root,external_rows)
             proof=document(read_file(root/'reports/app32.json',MAX_COMMAND)[0]);cleanup=document(read_file(root/'reports/app32-cleanup.json',65536)[0])
             runtime=document(read_file(root/'reports/sqlite-runtime.json',65536)[0])
+            source_parity=document(read_file(root/'reports/source-parity.json',65536)[0])
             need(proof['image_id']==runtime['image_id']==image and proof['assertions_changed']is False
                 and proof['actual']['status']=='passed' and cleanup['owned_cleanup_complete']is True
                 and cleanup['closed_causes']==[] and cleanup['primary_failure_retained']is False,'state')
+            need(source_parity['image_id']==image and source_parity['app_profile']==APP_PROFILE
+                and source_parity['business_commit']==BUSINESS_COMMIT and source_parity['business_tree']==BUSINESS_TREE
+                and source_parity['input_signature']==signature and source_parity['security_overrides']==list(security_updates())
+                and source_parity['actual']['status']=='PASS'and proof['source_parity']==file_digest(root/'reports/source-parity.json',65536),'source_changed')
         allowed=public_input_names(repo,source)
         need(input_files(repo,allowed)==inputs['files'] and empty_inputs(repo,inputs['files'])==inputs['empty_directories'],'input_changed');before=inspect(root,image,source,signature)
         SUBPHASE='scan_report_binding';counts,bound_reports=reports(root,image)
@@ -854,9 +953,10 @@ def finalize(root):
             'signatures_verified':False,'activation_performed':False,'security_accepted':False}
         if CANONICAL3541:
             receipt.update(sqlite_family='canonical3541',business_commit=BUSINESS_COMMIT,business_tree=BUSINESS_TREE,
+                app_profile=APP_PROFILE,security_overrides=list(security_updates()),
                 glibc_named_context=record['glibc_named_context'],glibc_context_signature=record['glibc_context_signature'],
                 actual_app32_and_sqlite={name:file_digest(root/'reports'/name,MAX_COMMAND)
-                    for name in('app32.json','app32-cleanup.json','sqlite-runtime.json')})
+                    for name in('app32.json','app32-cleanup.json','sqlite-runtime.json','source-parity.json')})
         write_new(root/'image-export.json',receipt);write_new(root/'finalize.json',{'schema':'canonical_app_finalize/1','status':'exported_not_accepted','security_accepted':False})
     emit('export_complete','true');return {'status':'exported_not_accepted','image_id':image,'security_accepted':False}
 
@@ -871,9 +971,12 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('phase',choices=('prepare','build','app32','finalize','gate'))
     parser.add_argument('--root',type=Path,required=True);parser.add_argument('--repo',type=Path)
     parser.add_argument('--canonical3541',action='store_true')
+    parser.add_argument('--app-profile',choices=tuple(APP_PROFILES),default='web')
     parser.error=lambda _:need(False,'state')
     try:
-        args=parser.parse_args(argv);CANONICAL3541=args.canonical3541;root=canonical(args.root);hosted(root);trusted=True
+        args=parser.parse_args(argv);CANONICAL3541=args.canonical3541;select_app_profile(args.app_profile)
+        need(CANONICAL3541 or APP_PROFILE=='web','app_profile')
+        root=canonical(args.root);hosted(root);trusted=True
         need((args.phase=='prepare')==(args.repo is not None),'state')
         need(args.phase!='app32' or CANONICAL3541,'state')
         value=prepare(root,canonical(args.repo)) if args.phase=='prepare' else {'build':build,'app32':canonical_smoke,'finalize':finalize,'gate':gate}[args.phase](root)
@@ -883,7 +986,7 @@ def main(argv=None):
     except BaseException as error:
         code=error.args[0] if type(error) is RuntimeError and len(error.args)==1 and type(error.args[0]) is str and error.args[0] in CODES else 'io_refusal' if isinstance(error,OSError) else 'refused'
         value={'schema':'canonical_app_failure/1','status':'refused','subphase':SUBPHASE,'code':code,
-            'command_return_code':COMMAND_RETURN_CODE if type(COMMAND_RETURN_CODE) is int and -255<=COMMAND_RETURN_CODE<=255 else None,
+            'command_return_code':COMMAND_RETURN_CODE if code in ('command_failed','command_timeout','command_output_bound') and type(COMMAND_RETURN_CODE) is int and -255<=COMMAND_RETURN_CODE<=255 else None,
             'os_errno':errno.errorcode.get(error.errno,'unclassified_errno') if isinstance(error,OSError) else None,
             'exception_class':type(error).__name__ if type(error) in {RuntimeError,OSError,PermissionError,ValueError,TypeError,KeyError} else 'unclassified','security_accepted':False}
         if trusted:
