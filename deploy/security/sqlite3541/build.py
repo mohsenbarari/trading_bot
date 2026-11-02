@@ -159,7 +159,7 @@ def build(variant):
  vendor_source=vendor_source_copy(source,work/'vendor-source')
  run([str(vendor_source/'configure'),*configure],out/'vendor-configure.log',cwd=vendor,user=True,extra_env={'CFLAGS':common_flags})
  production=work/'production';production.mkdir();os.chown(production,10001,10001)
- flags=common_flags+' -DSQLITE_EXTRA_INIT_MUTEXED=sqlite3_trading_legacy_fp_init'
+ flags=common_flags+' -DSQLITE_EXTRA_AUTOEXT=sqlite3_trading_legacy_fp_init'
  run([str(source/'configure'),*configure],out/'production-configure.log',cwd=production,user=True,extra_env={'CFLAGS':flags})
  run(['/usr/bin/make','-j2','libsqlite3.so','EXTRA_SRC=/recipe/legacy_fp.c','LDFLAGS.rpath=',
   'LDFLAGS.configure=-Wl,--as-needed,-z,relro,-z,now'],out/'production-build.log',cwd=production,user=True,seconds=900,maximum=8*1024**2)
@@ -188,11 +188,11 @@ def build(variant):
  run(['/usr/bin/dpkg-deb','--root-owner-group','--build',str(package),str(deb)],out/'package-build.log')
  dpkg=['/usr/bin/dpkg','--path-include=/usr/share/doc/libsqlite3-0','--path-include=/usr/share/doc/libsqlite3-0/*','--install']
  run([*dpkg,str(deb)],out/'candidate-install.log')
+ run(['/usr/bin/gcc','-O2','-pthread','-I'+str(production),str(recipe/'lifecycle.c'),'-Wl,-l:libsqlite3.so.0','-o',str(work/'lifecycle')],out/'lifecycle-build.log')
+ run([str(work/'lifecycle')],out/'lifecycle.log',user=True,seconds=60)
  run([python,'-I','-B',str(recipe/'verify.py'),'candidate',str(compat),version],out/'candidate.log',user=True)
  candidate=json.loads((compat/'candidate.json').read_bytes());need(set(baseline['compile_options'])-{s for s in baseline['compile_options']if s.startswith('COMPILER=')}<=set(candidate['compile_options']),'feature_limit_parity')
  need(candidate['library']==pin(LIBRARY)==pin(library)and candidate['stdlib_extension']==baseline['stdlib_extension'],'installed_python_binding')
- run(['/usr/bin/gcc','-O2','-pthread','-I'+str(production),str(recipe/'lifecycle.c'),'-Wl,-l:libsqlite3.so.0','-o',str(work/'lifecycle')],out/'lifecycle-build.log')
- run([str(work/'lifecycle')],out/'lifecycle.log',user=True,seconds=60)
  # Fresh process checks must reproduce15 digits without Python-side hooks.
  for number in range(3):
   run([python,'-I','-B',str(recipe/'verify.py'),'fresh',str(compat),version],out/('fresh-'+str(number)+'.log'),user=True)

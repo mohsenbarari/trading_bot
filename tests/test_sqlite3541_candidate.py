@@ -41,11 +41,13 @@ class CandidateSourceTests(unittest.TestCase):
   for kind in('RPATH','RUNPATH'):
    bad=dynamic+(' ('+kind+') Library path: [/UNADMITTED]\n').encode()
    with patch.object(B,'run',side_effect=[bad,symbols]),self.assertRaisesRegex(RuntimeError,'no_loader_override'):B.elf(Path('/OWNED-PUBLIC-NOT-OPENED'),ROOT,'owned')
- def test_legacy_initializer_uses_official_connection_API_and_mutexed_hook_only(self):
+ def test_legacy_initializer_uses_official_per_connection_builtin_hook(self):
   raw=(AREA/'legacy_fp.c').read_text();builder=(AREA/'build.py').read_text()
   self.assertIn('sqlite3_db_config(db, SQLITE_DBCONFIG_FP_DIGITS, 15, &digits)',raw)
   self.assertIn('rc == SQLITE_OK && digits == 15 ? SQLITE_OK : SQLITE_ERROR',raw)
-  self.assertIn('sqlite3_auto_extension',raw);self.assertIn('SQLITE_EXTRA_INIT_MUTEXED=sqlite3_trading_legacy_fp_init',builder)
+  self.assertNotIn('sqlite3_auto_extension',raw);self.assertIn('SQLITE_EXTRA_AUTOEXT=sqlite3_trading_legacy_fp_init',builder)
+  self.assertNotIn('SQLITE_EXTRA_INIT_MUTEXED=',builder)
+  self.assertLess(builder.index("out/'lifecycle.log'"),builder.index("out/'candidate.log'"))
   self.assertNotIn('db->nFpDigit',raw);self.assertNotIn('LD_LIBRARY_PATH=',builder)
  def test_owned_wrong_source_and_unsafe_ZIP_members_are_rejected(self):
   with tempfile.TemporaryDirectory(prefix='sqlite3541-public-',dir=ROOT/'tests')as folder:

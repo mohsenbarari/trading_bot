@@ -25,10 +25,12 @@ included. Native runtime dependencies come from dpkg-shlibdeps.
 
 SQLite changed default REAL-to-text precision from 15 to 17 digits. There is no
 compile-time FP_DIGITS default in this canonical source. A small static extension
-uses the upstream SQLITE_EXTRA_INIT_MUTEXED hook to register an automatic
-connection initializer, then the official SQLITE_DBCONFIG_FP_DIGITS API sets 15
-on every new connection. A failed API call refuses the connection. The mutexed
-hook avoids a race between concurrent first opens; SQLite core stays unmodified.
+uses upstream SQLITE_EXTRA_AUTOEXT to run the official
+`sqlite3_db_config(SQLITE_DBCONFIG_FP_DIGITS, 15)` API for every new connection,
+before that connection is returned. A failed API call refuses the connection.
+The per-connection callback does not call global initialization or register an
+automatic extension while initialization is in progress. Concurrent first opens
+and repeated shutdown/reinitialization are exercised before Python probes.
 
 The unmodified upstream `make test` suite runs in a separate default-17 build.
 Its result is explicitly not claimed as a production-15 test result. Production
