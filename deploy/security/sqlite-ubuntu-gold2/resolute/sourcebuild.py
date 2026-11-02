@@ -338,15 +338,36 @@ def elf(path):
  versions=metadata(['/usr/bin/readelf','--version-info','--wide',str(path)]).decode('ascii')
  required=sorted(set(re.findall(r'Name:\s+(GLIBC_[0-9.]+)',versions)))
  require(exports and required,'elf_contract');return {'soname':names[0],'needed':needed,'exports':exports,'glibc_versions':required}
-# LOCAL generated testfixture link correction; not an upstream security fix.
+# LOCAL generated testfixture full-core linkage; not a production SQLite change.
 TESTFIXTURE_ASSIGNMENT_BEFORE = b'TESTFIXTURE_SRC += $(TESTFIXTURE_SRC$(USE_AMALGAMATION))\n'
 TESTFIXTURE_ASSIGNMENT_AFTER = b'TESTFIXTURE_SRC += $(filter-out $(TOP)/ext/fts3/fts3_term.c,$(TESTFIXTURE_SRC$(USE_AMALGAMATION)))\n'
+TESTFIXTURE_CORE_BEFORE = b'TESTFIXTURE_SRC0 = $(TESTSRC2) libsqlite3.la\n'
+TESTFIXTURE_CORE_AFTER = b'TESTFIXTURE_SRC0 = sqlite3.c\n'
+TESTFIXTURE_TARGET_BEFORE = b'testfixture$(TEXE):\thas_tclsh85 $(TESTFIXTURE_SRC)\n'
+TESTFIXTURE_TARGET_AFTER = b'testfixture$(TEXE):\thas_tclsh85 $(TESTFIXTURE_SRC) Makefile\n'
+TESTFIXTURE_LINK_TAIL = b'\t$(LTLINK) -DSQLITE_NO_SYNC=1 $(TEMP_STORE) $(TESTFIXTURE_FLAGS) \\\n\t\t-o $@ $(TESTFIXTURE_SRC) $(LIBTCL) $(TLIBS)\n'
 TESTFIXTURE_STANZAS_PIN = (4168, '23f87aeb0603b9dda4a5576b0c17d31072fb9948c8d58e515e86f4505f8cf754')
 TESTFIXTURE_OLD_WORDS_PIN = {'0': (4398, 'e3efd692e435d97e67c8699b850aaf76c3c301102372a1809d24774dbd4c877c'), '1': (2932, 'e706bd54cf697a8e2738334973faf8caf91cdeae31f9c042f56944ee5c7b9ed3')}
-TESTFIXTURE_LOCAL_PATCH = (b'Description: LOCAL generated test-harness source-list correction only\n'
+TESTFIXTURE_LOCAL_PATCH = (b'Description: LOCAL generated testfixture full-core linkage and rebuild dependency only\n'
     b'Origin: local; not an upstream or production CVE patch\n\n'
-    b'--- a/Makefile\n+++ b/Makefile\n@@ -1 +1 @@\n-'
-    + TESTFIXTURE_ASSIGNMENT_BEFORE + b'+' + TESTFIXTURE_ASSIGNMENT_AFTER)
+    b'--- a/Makefile\n+++ b/Makefile\n@@ -1,4 +1,4 @@\n-'
+    + TESTFIXTURE_CORE_BEFORE + b'+' + TESTFIXTURE_CORE_AFTER
+    + b' TESTFIXTURE_SRC1 = sqlite3.c\n TESTFIXTURE_SRC = $(TESTSRC) $(TOP)/src/tclsqlite.c\n-'
+    + TESTFIXTURE_ASSIGNMENT_BEFORE + b'+' + TESTFIXTURE_ASSIGNMENT_AFTER
+    + b'@@ -6 +6 @@\n-' + TESTFIXTURE_TARGET_BEFORE + b'+' + TESTFIXTURE_TARGET_AFTER)
+
+def testfixture_after(raw):
+    """Only the local generated test target changes, after package compilation."""
+    require(raw.count(TESTFIXTURE_TARGET_BEFORE + TESTFIXTURE_LINK_TAIL) == 1, 'testfixture_authentic_link_rule')
+    pairs = ((TESTFIXTURE_CORE_BEFORE, TESTFIXTURE_CORE_AFTER),
+        (TESTFIXTURE_ASSIGNMENT_BEFORE, TESTFIXTURE_ASSIGNMENT_AFTER),
+        (TESTFIXTURE_TARGET_BEFORE, TESTFIXTURE_TARGET_AFTER))
+    for old, new in pairs:
+        require(raw.count(old) == 1 and new not in raw, 'testfixture_exact_local_delta')
+    for old, new in pairs:
+        raw = raw.replace(old, new)
+    return raw
+
 
 def testfixture_stanzas(raw):
     require(type(raw) is bytes and 0 < len(raw) <= 131072, 'testfixture_makefile_bound')
@@ -410,7 +431,7 @@ def testfixture_decode(value, maximum):
 def testfixture_harness_contract(receipt):
     require(type(receipt) is dict and set(receipt) == {'schema', 'phase', 'local_patch', 'vendor_makefile_in',
         'generated_before', 'generated_after', 'gnu_make', 'official_or_production_fix', 'test_selection_changed', 'security_accepted'}, 'testfixture_receipt_shape')
-    require(receipt['schema'] == 'LOCAL_generated_testfixture_single_source/2'
+    require(receipt['schema'] == 'LOCAL_generated_testfixture_full_core/3'
         and receipt['phase'] == 'AFTER_SUCCESSFUL_PACKAGE_BUILD_BEFORE_VENDOR_TESTS'
         and receipt['official_or_production_fix'] is receipt['test_selection_changed'] is receipt['security_accepted'] is False,
         'testfixture_receipt_scope')
@@ -418,11 +439,11 @@ def testfixture_harness_contract(receipt):
         and receipt['vendor_makefile_in'] == {'bytes': VENDOR_HELPERS['Makefile.in'][0], 'sha256': VENDOR_HELPERS['Makefile.in'][1]}, 'testfixture_vendor_binding')
     before = testfixture_decode(receipt['generated_before'], 131072)
     after = testfixture_decode(receipt['generated_after'], 131072)
-    require(before.count(TESTFIXTURE_ASSIGNMENT_BEFORE) == 1 and TESTFIXTURE_ASSIGNMENT_AFTER not in before
-        and after == before.replace(TESTFIXTURE_ASSIGNMENT_BEFORE, TESTFIXTURE_ASSIGNMENT_AFTER), 'testfixture_exact_one_line')
+    require(after == testfixture_after(before), 'testfixture_exact_local_delta')
     old_stanzas, new_stanzas = testfixture_stanzas(before), testfixture_stanzas(after)
     require((len(old_stanzas), sha256(old_stanzas).hexdigest()) == TESTFIXTURE_STANZAS_PIN
-        and new_stanzas == old_stanzas.replace(TESTFIXTURE_ASSIGNMENT_BEFORE, TESTFIXTURE_ASSIGNMENT_AFTER), 'testfixture_vendor_stanzas')
+        and new_stanzas == old_stanzas.replace(TESTFIXTURE_CORE_BEFORE, TESTFIXTURE_CORE_AFTER)
+            .replace(TESTFIXTURE_ASSIGNMENT_BEFORE, TESTFIXTURE_ASSIGNMENT_AFTER), 'testfixture_vendor_stanzas')
     require(type(receipt['gnu_make']) is dict and set(receipt['gnu_make']) == {'0', '1'}, 'testfixture_modes')
     term = b'/OWNED_SOURCE/ext/fts3/fts3_term.c'
     for mode in (0, 1):
@@ -440,25 +461,26 @@ def testfixture_harness_contract(receipt):
         old_words, new_words = expanded
         canonical = b'\n'.join(old_words) + b'\n'
         require((len(canonical), sha256(canonical).hexdigest()) == TESTFIXTURE_OLD_WORDS_PIN[str(mode)], 'testfixture_original_word_inventory')
+        complete = b'\n'.join(new_words) + b'\n'
+        require((len(complete), sha256(complete).hexdigest()) == TESTFIXTURE_OLD_WORDS_PIN['1']
+            and new_words.count(b'sqlite3.c') == 1 and new_words.count(term) == 1
+            and b'libsqlite3.la' not in new_words, 'testfixture_complete_core_inventory')
         if mode == 0:
-            duplicates = {word for word in old_words if old_words.count(word) > 1}
-            unique = [word for index, word in enumerate(old_words) if word not in old_words[:index]]
-            require(duplicates == {term} and old_words.count(term) == 2 and new_words == unique
-                and new_words.count(term) == 1 and len(new_words) + 1 == len(old_words), 'testfixture_mode0_not_single_duplicate')
+            require(old_words.count(term) == 2 and b'libsqlite3.la' in old_words
+                and b'/OWNED_SOURCE/src/btree.c' in old_words, 'testfixture_original_partial_core')
         else:
-            require(old_words == new_words and old_words.count(term) == 1, 'testfixture_mode1_changed')
+            require(old_words == new_words, 'testfixture_mode1_changed')
     return receipt
 
 def prepare_vendor_testfixture(src):
-    """One LOCAL generated test source correction after the production package build."""
+    """Use one complete core only in the generated test target after package build."""
     path = src / 'Makefile'
     before = bytes_at(path, maximum=131072)
-    require(before.count(TESTFIXTURE_ASSIGNMENT_BEFORE) == 1 and TESTFIXTURE_ASSIGNMENT_AFTER not in before, 'testfixture_exact_one_line')
+    expected = testfixture_after(before)
     vendor_pin = VENDOR_HELPERS['Makefile.in']
     digest(src / 'Makefile.in', vendor_pin, maximum=131072)
     old_stanzas = testfixture_stanzas(before)
     require((len(old_stanzas), sha256(old_stanzas).hexdigest()) == TESTFIXTURE_STANZAS_PIN, 'testfixture_vendor_stanzas')
-    expected = before.replace(TESTFIXTURE_ASSIGNMENT_BEFORE, TESTFIXTURE_ASSIGNMENT_AFTER)
     probe_root = WORK / 'testfixture-source-list-probes'
     require(not probe_root.exists(), 'testfixture_probe_once')
     probe_root.mkdir(mode=0o700)
@@ -470,7 +492,7 @@ def prepare_vendor_testfixture(src):
             publish(patch_path, TESTFIXTURE_LOCAL_PATCH)
             command(['/usr/bin/patch', '--batch', '--forward', '--fuzz=0', '--no-backup-if-mismatch',
                 '--reject-file=-', '-p1', '--directory', str(src), '--input', str(patch_path)], timeout=30)
-            require(bytes_at(path, maximum=131072) == expected, 'testfixture_exact_one_line')
+            require(bytes_at(path, maximum=131072) == expected, 'testfixture_exact_local_delta')
             digest(patch_path, (len(TESTFIXTURE_LOCAL_PATCH), sha256(TESTFIXTURE_LOCAL_PATCH).hexdigest()))
         for mode in (0, 1):
             program = testfixture_probe_program(testfixture_stanzas(raw), mode)
@@ -480,7 +502,7 @@ def prepare_vendor_testfixture(src):
             probes[str(mode)][label] = {'argv': testfixture_probe_argv(label, mode), 'actual_returncode': 0,
                 'program': {'bytes': len(program), 'sha256': sha256(program).hexdigest()}, 'stdout': testfixture_blob(output)}
     digest(src / 'Makefile.in', vendor_pin, maximum=131072)
-    receipt = {'schema': 'LOCAL_generated_testfixture_single_source/2',
+    receipt = {'schema': 'LOCAL_generated_testfixture_full_core/3',
         'phase': 'AFTER_SUCCESSFUL_PACKAGE_BUILD_BEFORE_VENDOR_TESTS',
         'local_patch': {'bytes': len(TESTFIXTURE_LOCAL_PATCH), 'sha256': sha256(TESTFIXTURE_LOCAL_PATCH).hexdigest()},
         'vendor_makefile_in': {'bytes': vendor_pin[0], 'sha256': vendor_pin[1]},
