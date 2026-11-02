@@ -12,15 +12,16 @@ import argparse,ctypes,errno,fcntl,io,json,os,platform,re,resource,selectors,shu
 
 ROOT=Path(__file__).resolve().parent
 LOCK_NAME='sqlite_wal_package.lock.json'
-LOCK_SHA='26b14975e21b51587bd39b9749c658ac37acdb861407745639e9913f6fed03eb'
-BASE_VERSION='3.46.1-7+deb13u2';VERSION=BASE_VERSION+'+gold1'
+LOCK_SHA='384102147c9289d4f1d57c199c9c40fa57bc179c833ff9c9d5ba55f6b69876d0'
+BASE_VERSION='3.46.1-7+deb13u2';VERSION=BASE_VERSION+'+gold2'
 PACKAGE='libsqlite3-0_'+VERSION+'_amd64.deb'
 CAPSULE=Path('/sqlite-capsule')
 FETCHER=('compose_security_os_candidate.py',54258,'a7ba6515937e7ae8193be4d550547651fe5b313399ec3a1f7634efe513e151c1')
 DOC_INCLUDES=('--path-include=/usr/share/doc/libsqlite3-0','--path-include=/usr/share/doc/libsqlite3-0/*')
 OUTPUT_LIMITS={PACKAGE:32*1024**2,'sqlite3_'+VERSION+'_amd64.changes':4*1024**2,
  'sqlite3_'+VERSION+'_amd64.buildinfo':4*1024**2,'provenance.json':4*1024**2,
- 'positive-baseline.json':65536,'positive-candidate.json':65536,'abi-contract.json':4*1024**2}
+ 'positive-baseline.json':65536,'positive-candidate.json':65536,'abi-contract.json':4*1024**2,
+ 'vendor-standard.log':32*1024**2,'vendor-fts5-regression.log':4*1024**2}
 MAX_ZIP=64*1024**2;MAX_OUTPUT=2*1024**2
 INVENTORY=('/usr/bin/dpkg-query','-W','-f=${binary:Package}\t${Version}\t${db:Status-Status}\n')
 CODES=frozenset(('lock_unarmed','lock_contract','path','parent','parent_changed','file_metadata','file_bound','file_pin',

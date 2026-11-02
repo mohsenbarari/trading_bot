@@ -3,9 +3,13 @@ from contextlib import ExitStack
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
-import errno,json,os,signal,stat,subprocess,tempfile,time,unittest
-import test_sqlite_vendor_privileges as P
-import test_prepare_sqlite_wal_ci_context as F
+import errno,json,os,selectors,signal,stat,subprocess,tempfile,time,unittest
+if __package__:
+ from . import test_sqlite_vendor_privileges as P
+ from . import test_prepare_sqlite_wal_ci_context as F
+else:
+ import test_sqlite_vendor_privileges as P
+ import test_prepare_sqlite_wal_ci_context as F
 R=P.R;A=P.A;REAL_OPEN=os.open;REAL_CLOSE=os.close
 def leaves(error):
  return sum((leaves(e)for e in error.exceptions),[])if isinstance(error,BaseExceptionGroup)else[error]
@@ -27,7 +31,7 @@ def dispose_fixture_scope(r):
     finally:REAL_CLOSE(fd)
   r.vendor_process_empty();r.vendor_subreaper(0)
  r.VENDOR_PROCESS_SCOPE=None;r.VENDOR_RETIREMENT_UNPROVEN=False
-def fork_program(*,escape=False,code=0,timeout=False,exited=False):
+def fork_program(*,escape=False,code=0,timeout=False,exited=False,ready=None):
  # Child closes inherited pipes, keeps an actual writable source FD, and would
  # modify it after the leader exit unless the entire owned process tree retires.
  return '''import os,time
@@ -37,10 +41,9 @@ pid=os.fork()
 if pid==0:
  '''+('os.setsid()'if escape else'pass')+'''
  os.close(0);os.close(1);os.close(2)
- '''+('os.close(fd);os._exit(0)'if exited else"time.sleep(.25);os.write(fd,b'UNSAFE RETAINED WRITE');os.close(fd);os._exit(0)")+'''
+ '''+('os.close(fd);os._exit(0)'if exited else ("with open('descendant.pid','w')as output:output.write(str(os.getpid()))\n os.write("+str(ready[0])+",str(os.getpid()).encode()+b'\\n');os.close("+str(ready[0])+")\n os.read("+str(ready[1])+",1);os.close("+str(ready[1])+")\n os.write(fd,b'UNSAFE RETAINED WRITE');os.close(fd);os._exit(0)"if ready is not None else"time.sleep(.25);os.write(fd,b'UNSAFE RETAINED WRITE');os.close(fd);os._exit(0)"))+'''
 os.close(fd)
-with open('descendant.pid','w')as output:output.write(str(pid))
-'''+('time.sleep(.06)\n'if exited else'')+('time.sleep(2)\n'if timeout else'')+"print('0 errors out of 1 tests on OWNED FORK UNIT ONLY',flush=True)\nraise SystemExit("+str(code)+')\n'
+'''+("os.close("+str(ready[0])+");os.close("+str(ready[1])+")\n"if ready is not None else"with open('descendant.pid','w')as output:output.write(str(pid))\n")+('time.sleep(.06)\n'if exited else'')+('time.sleep(2)\n'if timeout else'')+"print('0 errors out of 1 tests on OWNED FORK UNIT ONLY',flush=True)\nraise SystemExit("+str(code)+')\n'
 
 @unittest.skipUnless(P.real_uid_namespace(),'actual fork/UID scope requires mapped Root')
 class ProcessTreeTests(unittest.TestCase):
@@ -51,12 +54,43 @@ class ProcessTreeTests(unittest.TestCase):
   for r in R.values():dispose_fixture_scope(r)
   P.VendorPrivilegeTests.tearDown(self)
  def vector(self,*,escape=False,code=0,timeout=False):
-  r=R['debian'];self.configured(r,fork_program(escape=escape,code=code,timeout=timeout));rows=[];original=r.vendor_process_retire;bound=r.bounded_command
+  r=R['debian'];ready=None;readiness=[]
+  if timeout:
+   ready_read,ready_write=os.pipe2(os.O_CLOEXEC|os.O_NONBLOCK)
+   release_read,release_write=os.pipe2(os.O_CLOEXEC)
+   for fd in(ready_read,ready_write,release_read,release_write):self.stack.callback(REAL_CLOSE,fd)
+   ready=(ready_write,release_read)
+  self.configured(r,fork_program(escape=escape,code=code,timeout=timeout,ready=ready));rows=[];original=r.vendor_process_retire;bound=r.bounded_command
+  launch=r.subprocess.Popen
+  def ready_launch(argv,**kw):
+   if not timeout or argv!=r.VENDOR_COMMANDS['vendor-standard.log']:return launch(argv,**kw)
+   self.assertNotIn('pass_fds',kw);kw['pass_fds']=ready
+   child=launch(argv,**kw)
+   try:
+    # Popen's owned-fixture startup handoff is bounded separately, INSIDE
+    # the existing phase deadline. The production command timer has not
+    # started yet; neither it nor the enclosing phase clock is reset.
+    end=min(time.monotonic()+3,r.VENDOR_PROCESS_SCOPE['retire_end']);raw=b''
+    with selectors.DefaultSelector()as selector:
+     selector.register(ready_read,selectors.EVENT_READ)
+     while not raw.endswith(b'\n'):
+      left=end-time.monotonic();self.assertGreater(left,0,'owned descendant readiness deadline')
+      self.assertTrue(selector.select(left),'owned descendant did not become ready')
+      part=os.read(ready_read,33-len(raw));self.assertTrue(part);raw+=part
+      self.assertLessEqual(len(raw),32)
+    self.assertLess(time.monotonic(),end,'owned descendant readiness deadline')
+    self.assertTrue(raw[:-1].isdigit());pid=int(raw[:-1]);self.assertGreater(pid,1)
+    self.assertEqual((self.src/'descendant.pid').read_text(),str(pid))
+    self.assertIsNone(child.poll());readiness.append(pid);return child
+   except BaseException:
+    # Startup failure cannot loan an untracked Popen: retire the leader,
+    # then the unchanged production scope retires any adopted descendant.
+    child.kill();child.wait(timeout=3);child.stdout.close();raise
   def capture(*args):row=original(*args);rows.append(row);return row
   def short(argv,**kw):
    if timeout and argv==r.VENDOR_COMMANDS['vendor-standard.log']:kw['timeout']=.05
    return bound(argv,**kw)
-  with patch.object(r,'vendor_process_retire',side_effect=capture),patch.object(r,'bounded_command',side_effect=short):
+  with patch.object(r,'vendor_process_retire',side_effect=capture),patch.object(r,'bounded_command',side_effect=short),patch.object(r.subprocess,'Popen',side_effect=ready_launch):
    with self.assertRaises(BaseException)as caught:r.vendor_unprivileged_commands(self.src)
   self.assertTrue(any(isinstance(e,RuntimeError)for e in leaves(caught.exception)))
   if code:self.assertTrue(any('vendor_test_command_refused'in str(e)for e in leaves(caught.exception)))
@@ -64,6 +98,7 @@ class ProcessTreeTests(unittest.TestCase):
   self.restored();self.assertIsNone(r.VENDOR_PROCESS_SCOPE);self.assertFalse(r.VENDOR_RETIREMENT_UNPROVEN);self.assertEqual(r.vendor_subreaper(),0)
   r.vendor_process_empty();events=[e for row in rows for e in row['retired']];self.assertTrue(events)
   child=int((self.src/'descendant.pid').read_text());self.assertIn(child,[e['pid']for e in events]);self.assertTrue(all(e['pidfd_closed']for e in events))
+  if timeout:self.assertEqual(readiness,[child])
   time.sleep(.3);self.assertEqual(self.input.read_bytes(),b'OWNED PUBLIC SOURCE')
   self.assertTrue(all(c.returncode is not None and c.stdout.closed for c in P.CHILDREN))
  def test_closed_pipes_retained_source_FD_after_success_cannot_outlive_restore(self):self.vector()

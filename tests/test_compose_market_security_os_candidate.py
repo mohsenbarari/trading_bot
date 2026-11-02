@@ -24,12 +24,17 @@ def fenced(stack):
         stack.enter_context(patch(target,side_effect=AssertionError('ambient_host_network_forbidden')))
     return stack
 ROOT=Path(__file__).resolve().parents[1]
+if __package__:
+ from .test_historical_security_helper_fixture import historical_helper_bytes, historical_helper_module
+else:
+ from test_historical_security_helper_fixture import historical_helper_bytes, historical_helper_module
+
 def load(name,path):
     spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
 with ExitStack() as _import_fence:
     fenced(_import_fence)
     M=load('market_os_recipe',ROOT/'scripts/compose_market_security_os_candidate.py')
-    C=load('market_os_common',ROOT/'scripts/compose_security_os_candidate.py')
+    C=historical_helper_module()
     P=load('market_os_payload',ROOT/'scripts/prepare_market_security_payload.py')
 
 
@@ -91,7 +96,7 @@ class MarketCompositionTests(unittest.TestCase):
         self.assertEqual(M.EVIDENCE_ARTIFACT[0],12578306625);self.assertEqual(M.RUN,40140063747)
         self.assertEqual(M.SOURCE,'88299eb42bfa05361f8b8ed82358873336a6480e')
         self.assertEqual(M.IMAGE,'sha256:c22d9d459ab4ca0586066d87e2b2456958309fa12e47dfaac2651a1743e0fde4')
-        for name,digest in M.HELPERS.items():self.assertEqual(sha256((ROOT/'scripts'/name).read_bytes()).hexdigest(),digest)
+        for name,digest in M.HELPERS.items():self.assertEqual(sha256(historical_helper_bytes() if name=='compose_security_os_candidate.py' else (ROOT/'scripts'/name).read_bytes()).hexdigest(),digest)
         self.assertEqual(len(C.PACKAGES),15);self.assertEqual(set(C.GROUPS),{'util','ncurses','acl-tar'})
 
     def test_host_refusal_has_no_commands_or_failure_writes(self):
@@ -110,7 +115,7 @@ class MarketCompositionTests(unittest.TestCase):
     def test_sources_are_checked_first_buffer_and_retained_through_work(self):
         source=self.root/'source';source.mkdir();records={}
         for name in {Path(M.__file__).name,*M.HELPERS}:
-            raw=(ROOT/'scripts'/name).read_bytes();self.write(source/name,raw);records[name]={'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
+            raw=historical_helper_bytes() if name=='compose_security_os_candidate.py' else (ROOT/'scripts'/name).read_bytes();self.write(source/name,raw);records[name]={'bytes':len(raw),'sha256':sha256(raw).hexdigest()}
         self.write(source/'identity.json',M.encoded({'recipe_commit':'a'*40,'files':records}))
         with patch.object(M,'__file__',str(source/'compose_market_security_os_candidate.py')):
             with self.assertRaisesRegex(RuntimeError,'input_changed'):

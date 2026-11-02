@@ -43,11 +43,12 @@ class Gold2SourceTests(unittest.TestCase):
   for name,pin in A.PINS.items():
    raw=(ROOT/'deploy/security/sqlite-wal-backport'/name).read_bytes()
    self.assertEqual((len(raw),sha256(raw).hexdigest()),pin)
- def test_active_gold1_cache_and_lock_are_not_replaced(self):
+ def test_active_gold2_lock_matches_accepted_producer_and_binds_both_vendor_logs(self):
   lock=json.loads((ROOT/'scripts/sqlite_wal_package.lock.json').read_bytes())
-  self.assertEqual(lock['package']['version'],'3.46.1-7+deb13u2+gold1')
-  self.assertTrue(lock['armed']);self.assertEqual(A.VERSION,'3.46.1-7+deb13u2+gold2')
-  self.assertNotEqual(A.VERSION,lock['package']['version'])
+  self.assertEqual(lock['package']['version'],'3.46.1-7+deb13u2+gold2')
+  self.assertTrue(lock['armed']);self.assertEqual(A.VERSION,lock['package']['version'])
+  self.assertEqual(lock['source']['recipe_sha256'],A.PINS['sourcebuild.py'][1])
+  self.assertEqual(set(lock['outputs']),set(A.OUTPUTS));self.assertEqual(lock['artifact']['members'],9)
  def test_original_WAL_patch_and_ABI_verifier_stay_pinned(self):
   self.assertEqual(R.PATCH_PIN,(6746,'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85'))
   self.assertEqual(R.VERIFY_PIN,(16402, '53a1a5f9b2742910ef7bad0ccd5c5199d1b66fbeb83252e9e8dcc3d1583eec24'))

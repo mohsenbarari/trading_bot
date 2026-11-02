@@ -20,13 +20,18 @@ FENCE_TARGETS=('subprocess.Popen','subprocess.run','os.system','os.kill','os.kil
     'socket.create_connection','socket.getaddrinfo','urllib.request.urlopen','urllib.request.OpenerDirector.open',
     'ctypes.CDLL','ctypes.PyDLL','signal.signal','signal.alarm','resource.setrlimit')
 ROOT=Path(__file__).resolve().parents[1]
+if __package__:
+ from .test_historical_security_helper_fixture import historical_helper_bytes, historical_helper_module
+else:
+ from test_historical_security_helper_fixture import historical_helper_bytes, historical_helper_module
+
 def load(name,path):
     spec=importlib.util.spec_from_file_location(name,path);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
 with ExitStack() as _import_fence:
     for target in FENCE_TARGETS:
         _import_fence.enter_context(patch(target,side_effect=AssertionError('ambient_host_network_forbidden')))
     M=load('profile_composition',ROOT/'scripts/compose_market_security_profile.py')
-    C=load('profile_common',ROOT/'scripts/compose_security_os_candidate.py')
+    C=historical_helper_module()
     O=load('profile_prior',ROOT/'scripts/compose_market_security_os_candidate.py')
     P=load('profile_original',ROOT/'scripts/prepare_market_security_payload.py')
     Q=load('profile_preparer_again',ROOT/'scripts/prepare_market_security_profile.py')

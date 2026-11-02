@@ -187,8 +187,8 @@ def public_input_names(repo,source):
     sqlite=document(sqlite_raw)
     need(type(sqlite) is dict and sqlite.get('schema')=='sqlite_wal_image_package_lock/1'
         and type(sqlite.get('package')) is dict and sqlite['package'].get('name')=='libsqlite3-0'
-        and sqlite['package'].get('version')=='3.46.1-7+deb13u2+gold1'
-        and sqlite['package'].get('path')=='libsqlite3-0_3.46.1-7+deb13u2+gold1_amd64.deb','input_inventory')
+        and sqlite['package'].get('version')=='3.46.1-7+deb13u2+gold2'
+        and sqlite['package'].get('path')=='libsqlite3-0_3.46.1-7+deb13u2+gold2_amd64.deb','input_inventory')
     names|={'pip_packages/.sqlite-wal-capsule.lock','pip_packages/sqlite-wal-capsule/manifest.json',
         'pip_packages/sqlite-wal-capsule/'+sqlite['package']['path']}
     tar_expected=next(row for row in source['files'] if row['path']=='scripts/tar_acl_package.lock.json')

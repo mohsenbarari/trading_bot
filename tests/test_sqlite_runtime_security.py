@@ -65,22 +65,27 @@ class SQLiteRuntimeSecurityTests(unittest.TestCase):
             return release if str(path) == '/etc/os-release' else real(path, **kwargs)
         with patch.object(Path, 'resolve', resolve), patch.object(G.sqlite3, 'sqlite_version', '3.46.1'), \
              patch.object(G.sqlite3, 'sqlite_version_info', (3, 46, 1)), \
-             patch.object(G, 'command', side_effect=['3.46.1-7+deb13u2+gold1', '', '']) as command:
-            self.assertEqual(G.platform_package(), '3.46.1-7+deb13u2+gold1')
+             patch.object(G, 'command', side_effect=['3.46.1-7+deb13u2+gold2', '', '']) as command:
+            self.assertEqual(G.platform_package(), '3.46.1-7+deb13u2+gold2')
         self.assertEqual(command.call_args_list[1].args[0],
-                         ['/usr/bin/dpkg', '--compare-versions', '3.46.1-7+deb13u2+gold1', 'ge', '3.46.1-7+deb13u2+gold1'])
+                         ['/usr/bin/dpkg', '--compare-versions', '3.46.1-7+deb13u2+gold2', 'ge', '3.46.1-7+deb13u2+gold2'])
         with patch.object(Path, 'resolve', resolve), patch.object(G, 'command',
                 side_effect=['3.46.1-7+deb13u1', G.subprocess.CalledProcessError(1, 'dpkg')]), \
              self.assertRaises(G.subprocess.CalledProcessError):
             G.platform_package()
         with patch.object(Path, 'resolve', resolve), patch.object(G.sqlite3, 'sqlite_version', '3.40.1'), \
-             patch.object(G, 'command', side_effect=['3.46.1-7+deb13u2+gold1', '', '']), \
+             patch.object(G, 'command', side_effect=['3.46.1-7+deb13u2+gold2', '', '']), \
              self.assertRaisesRegex(ValueError, 'sqlite_runtime_package_mismatch'):
             G.platform_package()
         with patch.object(Path, 'resolve', resolve), patch.object(G, 'command',
                 side_effect=['3.46.1-7+deb13u3', '']), \
              self.assertRaisesRegex(ValueError, 'wal_reset_package_not_admitted'):
             G.platform_package()
+        for version in ('3.46.1-7+deb13u2+gold1', '3.46.1-7+deb13u2+gold3'):
+            with self.subTest(version=version), patch.object(Path, 'resolve', resolve), \
+                 patch.object(G, 'command', side_effect=[version, '']), \
+                 self.assertRaisesRegex(ValueError, 'wal_reset_package_not_admitted'):
+                G.platform_package()
         release.write_text('ID=debian\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\n')
         with patch.object(Path, 'resolve', resolve), patch.object(G, 'command') as command, \
              self.assertRaisesRegex(ValueError, 'trixie_required'):
@@ -120,7 +125,7 @@ class SQLiteRuntimeSecurityTests(unittest.TestCase):
     def test_app_gate_checks_magic_and_both_system_libraries_without_claiming_all_cves(self):
         fake_magic = SimpleNamespace(from_buffer=lambda body, **kwargs: 'text/plain')
         with patch.object(G.sys, 'version_info', (3, 11, 18)), \
-             patch.object(G, 'platform_package', return_value='3.46.1-7+deb13u2+gold1'), \
+             patch.object(G, 'platform_package', return_value='3.46.1-7+deb13u2+gold2'), \
              patch.object(G, 'loader_identity', return_value={'path':'PUBLIC_STDLIB_EXTENSION'}), \
              patch.object(G, 'installed_sqlite_identity', return_value={'path':'PUBLIC_SYSTEM_LIBRARY'}) as installed, \
              patch.dict('sys.modules', {'magic': fake_magic}), \

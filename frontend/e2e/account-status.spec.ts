@@ -338,8 +338,10 @@ test.describe('Account status browser regression', () => {
       expect(lockResult.blocked).toBeGreaterThanOrEqual(1)
 
       await userPage.reload({ waitUntil: 'domcontentloaded' })
-      await userPage.waitForURL(/\/login$/)
-      await expect(userPage.getByRole('heading', { name: 'ورود به بازار' })).toBeVisible()
+      // Session revocation can replace the document more than once; assert the
+      // final route, then genuine login readiness, without waiting on an aborted load.
+      await expect(userPage).toHaveURL(/\/login$/)
+      await expect(userPage.getByRole('heading', { name: 'ورود به سامانه' })).toBeVisible()
 
       await toggleAccountStatusFromAdminProfile(adminPage)
 

@@ -6,7 +6,10 @@ from pathlib import Path
 from unittest.mock import patch
 import ast, base64, json, tempfile, unittest
 
-import test_prepare_sqlite_wal_ci_context as F
+if __package__:
+    from . import test_prepare_sqlite_wal_ci_context as F
+else:
+    import test_prepare_sqlite_wal_ci_context as F
 
 R, A = F.R, F.A
 ROOT = F.MAIN

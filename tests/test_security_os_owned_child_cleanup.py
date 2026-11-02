@@ -130,5 +130,5 @@ class BindingTests(unittest.TestCase):
   self.assertEqual(sha256((json.dumps(lock,sort_keys=True,separators=(',',':'))+'\n').encode()).hexdigest(),'86d3fc5098a24320dfd7aad67a1df7d671e2bf1bdec2e5c0a66a308eb638f9f9')
  def test_sqlite_fetcher_truthfully_points_to_the_new_source(self):
   self.assertEqual(Q.FETCHER,('compose_security_os_candidate.py',54258,'a7ba6515937e7ae8193be4d550547651fe5b313399ec3a1f7634efe513e151c1'))
-  self.assertEqual(Q.LOCK_SHA,'26b14975e21b51587bd39b9749c658ac37acdb861407745639e9913f6fed03eb')
+  self.assertEqual(Q.LOCK_SHA,'384102147c9289d4f1d57c199c9c40fa57bc179c833ff9c9d5ba55f6b69876d0')
 if __name__=='__main__':unittest.main()

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Offline candidate gate; uses only new synthetic SQLite files, never app data.
 
-The vendor package floor covers the three identified SQLite findings. It is not
-an all-CVE attestation and does not replace scanning the actual built image.
+The exact package binds the reviewed WAL and FTS5 backports. It is not an
+all-CVE attestation and does not replace scanning the actual built image.
 """
 import argparse
 from hashlib import sha256
@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 
-MINIMUM_PACKAGE = '3.46.1-7+deb13u2+gold1'
+MINIMUM_PACKAGE = '3.46.1-7+deb13u2+gold2'
 WAL_RESET_PACKAGE = MINIMUM_PACKAGE
 QUERY = ('SELECT source,event_id,commodity,price FROM quotes WHERE commodity=? '
          'ORDER BY seen_at DESC,event_id DESC,source')

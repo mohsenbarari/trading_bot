@@ -160,7 +160,7 @@ jobs:
           DATABASE_URL=postgresql+asyncpg://admin:strongpassword@db:5432/trading_bot_db
           SYNC_DATABASE_URL=postgresql+psycopg2://admin:strongpassword@db:5432/trading_bot_db
           REDIS_URL=redis://redis:6379/0
-          FRONTEND_URL=http://127.0.0.1:4173
+          FRONTEND_URL=https://127.0.0.1:4173
           PUBLIC_WEBAPP_URL=https://ci-iran.invalid
           IRAN_SERVER_DOMAIN=ci-iran.invalid
           DEV_API_KEY=REDACTED_DEV_API_KEY
@@ -171,6 +171,21 @@ jobs:
           VITE_STAGING_DEV_LOGIN=true
           EOF
           mkdir -p "$CERTS_HOST_PATH" "$PRODUCTION_COIN_INFERENCE_SNAPSHOT_HOST_DIR" "$PRODUCTION_PRODUCT_ESTIMATOR_APP_SNAPSHOT_HOST_DIR"
+      - name: Prepare ephemeral isolated loopback browser TLS
+        id: browser_tls
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CI" = true
+          test "$NPM_SECURITY_ISOLATED_BROWSER_FIXTURE" = 1
+          umask 077
+          tls_dir="$RUNNER_TEMP/npm-isolated-browser-tls"
+          mkdir -m 700 "$tls_dir"
+          echo 'created=true' >> "$GITHUB_OUTPUT"
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -subj '/CN=127.0.0.1' -addext 'subjectAltName=IP:127.0.0.1' \
+            -keyout "$tls_dir/key.pem" -out "$tls_dir/cert.pem" >/dev/null 2>&1
+          chmod 600 "$tls_dir/key.pem" "$tls_dir/cert.pem"
       - name: Admit exact retained security release assets before expensive browser setup
         env:
           GH_TOKEN: ${{ github.token }}
@@ -231,9 +246,9 @@ jobs:
             -H 'Content-Type: application/json'
           curl -fsS -o /dev/null -D /tmp/browser-ci-cors.headers \
             -X OPTIONS http://127.0.0.1:8000/api/auth/dev-login \
-            -H 'Origin: http://127.0.0.1:4173' \
+            -H 'Origin: https://127.0.0.1:4173' \
             -H 'Access-Control-Request-Method: POST'
-          grep -qi '^access-control-allow-origin: http://127.0.0.1:4173' /tmp/browser-ci-cors.headers
+          grep -qi '^access-control-allow-origin: https://127.0.0.1:4173' /tmp/browser-ci-cors.headers
       - name: Collect complete browser identities without executing tests
         working-directory: frontend
         env:
@@ -280,6 +295,15 @@ jobs:
             webkit) npm run test:e2e:webkit -- --shard="$SHARD/4" --max-failures=6 --reporter=github,json,html ;;
             *) exit 2 ;;
           esac
+      - name: Remove only this job's ephemeral browser TLS material
+        if: always() && steps.browser_tls.outputs.created == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tls_dir="$RUNNER_TEMP/npm-isolated-browser-tls"
+          rm -f -- "$tls_dir/key.pem" "$tls_dir/cert.pem"
+          rmdir -- "$tls_dir"
+          test ! -e "$tls_dir"
       - name: Observe public backend state after browser gate
         if: always()
         env:

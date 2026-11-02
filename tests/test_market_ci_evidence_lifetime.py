@@ -4,7 +4,10 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 import ast,gzip,io,json,os,tarfile,tempfile,unittest
-import test_market_ci_controller_integration as fixtures
+if __package__:
+ from . import test_market_ci_controller_integration as fixtures
+else:
+ import test_market_ci_controller_integration as fixtures
 ROOT=Path(__file__).resolve().parents[1]
 M=fixtures.M
 class EvidenceLifetimeTests(unittest.TestCase):
@@ -12,6 +15,14 @@ class EvidenceLifetimeTests(unittest.TestCase):
   tmp=tempfile.TemporaryDirectory(dir=Path(__file__).parent);self.addCleanup(tmp.cleanup);return Path(tmp.name)
  def fixture_case(self):
   case=fixtures.IntegrationTests();self.addCleanup(case.doCleanups);return case
+ def controller_parcel(self,case,root,receipt,controllers,cache,**resources):
+  # The current integration fixture owns all five inert glibc files and
+  # serializes their real original-FD custody. Validate the complete schema
+  # before any archive writer, then forward this context on every vector.
+  runtime=case.runtime
+  self.assertIs(M.glibc_runtime_record(runtime,root),runtime)
+  return M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None,
+   glibc_runtime=runtime,**resources)
  def source(self,root):
   p=root/'owned-source';p.write_bytes(b'OWNED SOURCE');p.chmod(0o600);return M.Held(p)
  def late_source_close(self,resources,source,target):
@@ -42,7 +53,7 @@ class EvidenceLifetimeTests(unittest.TestCase):
   self.late_source_close(rows,self.source(root),root/'reports/vulnerabilities.json')
  def test_parcel_archive_and_receipt_survive_later_build_source_closes(self):
   case=self.fixture_case();root,receipt,controllers,cache=case.fixture();rows=[];checks=[]
-  M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None,retained=rows,final_checks=checks)
+  self.controller_parcel(case,root,receipt,controllers,cache,retained=rows,final_checks=checks)
   self.assertEqual({row.path.name for row in rows},{'controller-sources.tar.gz','controller-sources.json'})
   self.assertTrue(all(row.fd is not None for row in rows))
   self.late_source_close(rows,self.source(root),root/'controller-sources.tar.gz')
@@ -54,7 +65,7 @@ class EvidenceLifetimeTests(unittest.TestCase):
     changed.append(True)
     with archive.open('ab')as stream:stream.write(b'OWNED LATE ARCHIVE MUTATION')
   with patch.object(M.os,'close',side_effect=close),self.assertRaisesRegex(RuntimeError,'source_changed'):
-   M.controller_parcel(root,receipt,controllers,cache,'e'*64,'f'*64,1792972800,lambda:None)
+   self.controller_parcel(case,root,receipt,controllers,cache)
   self.assertTrue(changed)
  def tar_bytes(self):
   buf=io.BytesIO()
@@ -119,4 +130,24 @@ class EvidenceLifetimeTests(unittest.TestCase):
   text=(ROOT/'.github/workflows/market-capture2-image.yml').read_text()
   self.assertEqual(text.count("namespace['outer_main']"),4);self.assertEqual(text.count("'__name__':'_sealed_normal_market_driver'"),4)
   self.assertEqual(text.count('close_driver=close_driver,driver_named=driver_named'),4);self.assertNotIn("{'__name__':'__main__','__file__':str(path)}",text)
+ def test_parcel_fixture_missing_or_wrong_runtime_refuses_before_output(self):
+  case=self.fixture_case();root,receipt,controllers,cache=case.fixture();runtime=case.runtime
+  bad_schema=dict(runtime);bad_schema['schema']='OWNED_WRONG_RUNTIME'
+  wrong_root=dict(runtime);wrong_root['custody']={**runtime['custody'],'root':str(root/'OWNED_WRONG_CAPSULE')}
+  for label,value,code in(('missing',None,'glibc_runtime_record'),('schema',bad_schema,'glibc_runtime_record'),
+   ('custody-root',wrong_root,'glibc_runtime_custody')):
+   with self.subTest(case=label):
+    case.runtime=value
+    with self.assertRaisesRegex(RuntimeError,code):self.controller_parcel(case,root,receipt,controllers,cache)
+    self.assertFalse((root/'controller-sources.tar.gz').exists());self.assertFalse((root/'controller-sources.json').exists())
+  case.runtime=runtime;self.assertIs(M.glibc_runtime_record(case.runtime,root),runtime)
+ def test_all_parcel_vectors_forward_current_runtime_through_one_schema_checked_helper(self):
+  tree=ast.parse(Path(__file__).read_bytes());calls=[]
+  for node in ast.walk(tree):
+   if isinstance(node,ast.FunctionDef):
+    for call in ast.walk(node):
+     if isinstance(call,ast.Call)and isinstance(call.func,ast.Attribute)and isinstance(call.func.value,ast.Name)and call.func.value.id=='M'and call.func.attr=='controller_parcel':calls.append((node.name,call))
+  self.assertEqual([name for name,call in calls],['controller_parcel'])
+  self.assertEqual([k.arg for k in calls[0][1].keywords],['glibc_runtime',None])
+  self.assertIsInstance(calls[0][1].keywords[0].value,ast.Name);self.assertEqual(calls[0][1].keywords[0].value.id,'runtime')
 if __name__=='__main__':unittest.main()

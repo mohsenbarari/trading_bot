@@ -11,12 +11,27 @@ exec(compile(SOURCE,K.__file__,'exec'),K.__dict__)
 UNCHANGED_COMMAND_AST_SHA256='77e35861be950e8762f24ab5f25f8006169d9a28daeed3d79236e70373aad2bf'
 EXPECTED_FINALIZER="clean = True\nif child is not None and child.returncode is None:\n    try:\n        os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)\n        try:\n            os.killpg(child.pid, signal.SIGKILL)\n        except ProcessLookupError:\n            pass\n        child.wait(timeout=3)\n    except BaseException:\n        clean = False\nif target is None:\n    try:\n        os.close(private)\n    except OSError:\n        clean = False\nif not clean and (not primary):\n    raise RuntimeError('cleanup_unproven')"
 
-def admitted_command():
- node=next(n for n in ast.parse(SOURCE).body if isinstance(n,ast.FunctionDef)and n.name=='command')
+def admitted_command(source=SOURCE):
+ node=next(n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef)and n.name=='command')
  blocks=[n for n in node.body if isinstance(n,ast.Try)]
  if len(blocks)!=1:raise AssertionError('command structure differs from reviewed baseline')
  block=blocks[0];actual=ast.dump(ast.Module(body=block.finalbody,type_ignores=[]),include_attributes=False)
  if actual!=ast.dump(ast.parse(EXPECTED_FINALIZER),include_attributes=False):raise AssertionError('cleanup differs from reviewed owned-child finalizer')
+ # Exact reviewed d5c4ffb43 additions. Check them before normalizing only
+ # their AST back to the existing pre-change lifecycle/limits digest.
+ args=node.args
+ if not(args.kwonlyargs[-1].arg=='combine_stderr'and args.kwonlyargs[-1].annotation is None
+  and isinstance(args.kw_defaults[-1],ast.Constant)and args.kw_defaults[-1].value is False):
+  raise AssertionError('unreviewed stderr option/default')
+ calls=[n for n in ast.walk(node)if isinstance(n,ast.Call)and isinstance(n.func,ast.Attribute)
+  and isinstance(n.func.value,ast.Name)and n.func.value.id=='subprocess'and n.func.attr=='Popen']
+ if len(calls)!=1:raise AssertionError('unreviewed command spawn count')
+ stderr=[k for k in calls[0].keywords if k.arg=='stderr']
+ expected=ast.parse('subprocess.STDOUT if combine_stderr else subprocess.DEVNULL',mode='eval').body
+ if len(stderr)!=1 or ast.dump(stderr[0].value,include_attributes=False)!=ast.dump(expected,include_attributes=False):
+  raise AssertionError('unreviewed stderr routing')
+ args.kwonlyargs.pop();args.kw_defaults.pop()
+ stderr[0].value=ast.parse('subprocess.DEVNULL',mode='eval').body
  block.finalbody=[]
  for item in ast.walk(node):
   # Empty type_params was added to FunctionDef in Python3.12. Normalize
@@ -69,4 +84,25 @@ class CleanupTests(unittest.TestCase):
   admitted_command()
   self.assertIn('child.wait(timeout=3)',SOURCE.decode())
   self.assertIn('resource.RLIMIT_FSIZE,(maximum+1,maximum+1)',SOURCE.decode())
+ def test_reviewed_stderr_option_retains_true_exit_and_default_private_stderr(self):
+  argv=[sys.executable,'-I','-S','-B','-c',"import os;os.write(1,b'PUBLIC OUT\\n');os.write(2,b'PUBLIC ERR\\n')"]
+  with patch.object(K.os,'killpg',side_effect=AssertionError('postreap signal forbidden')):
+   self.assertEqual(K.command(argv,environment={'PATH':os.defpath},seconds=5,maximum=128),b'PUBLIC OUT\n')
+   self.assertEqual(K.COMMAND_RETURN_CODE,0)
+   self.assertEqual(K.command(argv,environment={'PATH':os.defpath},seconds=5,maximum=128,combine_stderr=True),b'PUBLIC OUT\nPUBLIC ERR\n')
+   with self.assertRaisesRegex(RuntimeError,'command_failed'):
+    self.command("raise SystemExit(7)")
+   self.assertEqual(K.COMMAND_RETURN_CODE,7)
+ def test_reviewed_contract_rejects_option_limits_exit_and_finalizer_mutations(self):
+  changes=[('combine_stderr=False','combine_stderr=True'),
+   ('subprocess.STDOUT if combine_stderr else subprocess.DEVNULL','subprocess.DEVNULL'),
+   ('COMMAND_RETURN_CODE=None','COMMAND_RETURN_CODE=99'),
+   ('(maximum+1,maximum+1)','(maximum+9,maximum+9)'),
+   ('COMMAND_RETURN_CODE=child.wait(timeout=1)','COMMAND_RETURN_CODE=0'),
+   ('os.WEXITED|os.WNOHANG|os.WNOWAIT','os.WEXITED|os.WNOHANG'),
+   ('child.wait(timeout=3)','child.wait(timeout=30)')]
+  for before,after in changes:
+   with self.subTest(change=before):
+    self.assertIn(before,SOURCE.decode())
+    with self.assertRaises(AssertionError):admitted_command(SOURCE.decode().replace(before,after))
 if __name__=='__main__':unittest.main()

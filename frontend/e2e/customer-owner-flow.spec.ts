@@ -913,6 +913,21 @@ async function waitForActiveOwnerCustomerRelation(
   return relation
 }
 
+// Customer public visibility deliberately has no unrelated super-admin exception.
+async function openDeniedCustomerPublicProfile(page: Page, customerUserId: number) {
+  const response = page.waitForResponse((item) =>
+    new URL(item.url()).pathname === `/api/users-public/${customerUserId}`
+    && item.request().method() === 'GET',
+  )
+  await page.goto(`/users/${customerUserId}`)
+  expect((await response).status()).toBe(404)
+  await expectIdOnlyPublicProfileUrl(page, customerUserId)
+  const profile = page.locator('.public-profile-view:visible').last()
+  await expect(profile.locator('.error-state')).toBeVisible({ timeout: 30000 })
+  await expect(profile.locator('.profile-content')).toHaveCount(0)
+  return profile
+}
+
 test.describe('customer owner lifecycle', () => {
   test('owner can create update and delete an active customer account, and super-admin can follow the customer handoff', async ({
     page,
@@ -1025,14 +1040,14 @@ test.describe('customer owner lifecycle', () => {
     const invitation = await lookup.json() as { token?: string }
     expect(typeof invitation.token).toBe('string')
     expect(invitation.token?.length).toBeGreaterThan(0)
-    seedRegistrationOtpDelivery(requireValue(invitation.token, 'Pending invitation lookup has no token'))
-
     await page.goto(toRelativeRegistrationPath(registrationLink))
     await page.getByRole('button', { name: /^(ثبت‌نام از طریق وب|ادامه ثبت‌نام در وب‌اپ)$/ }).click()
     await expect(page).toHaveURL((url) => url.pathname === '/register' && !url.search && !url.hash)
     await expect(page.getByText(customerAccountName)).toBeVisible()
     await expect(page.getByText(`${mobileNumber.slice(0, 4)}****${mobileNumber.slice(-3)}`).first()).toBeVisible()
 
+    // Seed only after initial context loading, so it remains at context_ready.
+    seedRegistrationOtpDelivery(requireValue(invitation.token, 'Pending invitation lookup has no token'))
     await page.getByRole('button', { name: 'دریافت کد تأیید', exact: true }).click()
     await page.getByLabel('کد تأیید پنج‌رقمی').fill('12345')
     await page.getByRole('button', { name: 'تأیید و ادامه', exact: true }).click()
@@ -1118,7 +1133,7 @@ test.describe('customer owner lifecycle', () => {
       page
         .locator('.public-profile-view:visible')
         .last()
-        .getByRole('heading', { name: new RegExp(managementName) }),
+        .getByRole('heading', { name: customerAccountName, exact: true }),
     ).toBeVisible({ timeout: 30000 })
 
     await setAuthTokens(page, superAdmin)
@@ -1132,24 +1147,21 @@ test.describe('customer owner lifecycle', () => {
     await expect(superAdminOwnerProfileView.locator('.history-section-card')).toHaveCount(0)
     await expect(superAdminOwnerProfileView).not.toContainText(managementName)
 
-    await page.goto(`/users/${activatedCustomerUserId}`)
-    await expectIdOnlyPublicProfileUrl(page, activatedCustomerUserId)
+    const superAdminCustomerProfileView = await openDeniedCustomerPublicProfile(page, activatedCustomerUserId)
+    // A super-admin has no blanket customer-public-profile visibility exception.
+    await expect(superAdminCustomerProfileView.locator('.error-state')).toBeVisible({ timeout: 30000 })
+    await expect(superAdminCustomerProfileView.locator('.profile-content')).toHaveCount(0)
+    await expect(superAdminCustomerProfileView).not.toContainText(managementName)
 
-    const superAdminCustomerProfileView = page.locator('.public-profile-view:visible').last()
-    await expect(superAdminCustomerProfileView.locator('.profile-content')).toBeVisible({
-      timeout: 30000,
-    })
-    await superAdminCustomerProfileView
-      .locator('.owner-profile-section .settings-btn:visible')
-      .filter({ hasText: 'تنظیمات کاربر' })
-      .click()
-    const adminModal = page.locator('.admin-user-modal:visible')
-    await expect(adminModal).toBeVisible({ timeout: 30000 })
-    await expect(adminModal.locator('.customer-context-box')).toContainText(managementName)
-    await expect(adminModal.locator('.customer-context-box')).toContainText(owner.accountName)
-    await expect(adminModal.locator('.customer-context-box')).toContainText('سطح 2')
-    await adminModal.getByRole('button', { name: 'بستن' }).click()
-    await expect(adminModal).toBeHidden({ timeout: 30000 })
+    // Management metadata remains positively verified on the authorized admin surface.
+    await page.goto(`/admin/users/${activatedCustomerUserId}`)
+    const adminProfile = page.locator('.admin-user-profile')
+    await expect(adminProfile).toBeVisible({ timeout: 30000 })
+    await expect(adminProfile.locator('.profile-details')).toContainText(managementName)
+    await expect(adminProfile.locator('.profile-details')).toContainText(owner.accountName)
+    await expect(adminProfile.locator('.profile-details')).toContainText('سطح 2')
+    await adminProfile.getByRole('button', { name: 'بازگشت به لیست کاربران', exact: true }).click()
+    await expect(adminProfile).toBeHidden({ timeout: 30000 })
 
     await setAuthTokens(page, owner)
     await page.goto(`/operations/customers/${pendingRelationId}?tab=danger`)
@@ -1248,13 +1260,10 @@ test.describe('customer owner lifecycle', () => {
     await expect(ownerProfileView.locator('.history-section-card')).toHaveCount(0)
     await expect(ownerProfileView).not.toContainText(fixture.customerManagementName)
 
-    await page.goto(`/users/${fixture.customerUserId}`)
-    await expectIdOnlyPublicProfileUrl(page, fixture.customerUserId)
-    const customerProfileView = page.locator('.public-profile-view:visible').last()
-    await expect(customerProfileView.locator('.profile-content')).toBeVisible({ timeout: 30000 })
-    await expect(
-      customerProfileView.getByRole('heading', { name: fixture.customerAccountName }),
-    ).toBeVisible({ timeout: 30000 })
+    const customerProfileView = await openDeniedCustomerPublicProfile(page, fixture.customerUserId)
+    await expect(customerProfileView.locator('.error-state')).toBeVisible({ timeout: 30000 })
+    await expect(customerProfileView.locator('.profile-content')).toHaveCount(0)
+    await expect(customerProfileView.getByRole('heading', { name: fixture.customerAccountName })).toHaveCount(0)
     await expect(customerProfileView.locator('.customer-relations-section')).toHaveCount(0)
     await expect(customerProfileView.locator('.customer-context-banner')).toHaveCount(0)
     await expect(customerProfileView.locator('.history-section-card')).toHaveCount(0)

@@ -15,7 +15,10 @@ from urllib.parse import urlparse,urlsplit
 import unittest
 from unittest.mock import patch
 import yaml
-import test_npm_backend_collector_failure_diagnostics as C
+if __package__:
+ from . import test_npm_backend_collector_failure_diagnostics as C
+else:
+ import test_npm_backend_collector_failure_diagnostics as C
 
 ROOT=Path(__file__).absolute().parents[1]
 WORKFLOW='.github/workflows/npm-security-backports.yml'
@@ -97,7 +100,7 @@ def run_preflight(values,*,function=None,fixture_bytes=None,mime_type='text/plai
 class BrowserFixtureContractTests(unittest.TestCase):
  def test_exact_CI_staging_Iran_https_origin_passes_actual_validator_and_preflight(self):
   env=fixture_env();self.assertEqual(env['ENVIRONMENT'],'staging');self.assertEqual(env['SERVER_MODE'],'iran')
-  self.assertEqual(env['FRONTEND_URL'],'http://127.0.0.1:4173');self.assertEqual(env['PUBLIC_WEBAPP_URL'],EXPECTED)
+  self.assertEqual(env['FRONTEND_URL'],'https://127.0.0.1:4173');self.assertEqual(env['PUBLIC_WEBAPP_URL'],EXPECTED)
   self.assertEqual(env['IRAN_SERVER_DOMAIN'],'ci-iran.invalid');ns=run_preflight(env)
   self.assertEqual(ns['public_origin'],EXPECTED);self.assertEqual(ns['EXPECTED_CI_PUBLIC_WEBAPP_ORIGIN'],EXPECTED)
  def test_missing_HTTP_foreign_and_unconfigured_origins_fail_without_values(self):

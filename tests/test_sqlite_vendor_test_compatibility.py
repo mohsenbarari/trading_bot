@@ -6,7 +6,10 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
 import ast,base64,io,json,os,tempfile,unittest
-import test_prepare_sqlite_wal_ci_context as F
+if __package__:
+ from . import test_prepare_sqlite_wal_ci_context as F
+else:
+ import test_prepare_sqlite_wal_ci_context as F
 
 ROOT=Path(__file__).absolute().parent.parent
 FIX=json.loads((ROOT/'tests/fixtures/sqlite_vendor_test_compatibility.json').read_bytes())

@@ -17,6 +17,11 @@ from unittest.mock import patch
 from zipfile import ZipFile, ZIP_STORED
 
 ROOT = Path(__file__).resolve().parents[1]
+if __package__:
+ from .test_historical_security_helper_fixture import historical_helper_bytes, historical_helper_module
+else:
+ from test_historical_security_helper_fixture import historical_helper_bytes, historical_helper_module
+
 
 
 def load():
@@ -285,7 +290,7 @@ class AppMountpointImageTests(unittest.TestCase):
     def test_fixed_parent_artifacts_and_helpers_are_source_pinned(self):
         self.assertEqual(M.IMAGE_ARTIFACT[0], 12573279010)
         for name, expected in M.HELPERS.items():
-            self.assertEqual(sha256((ROOT / 'scripts' / name).read_bytes()).hexdigest(), expected)
+            self.assertEqual(sha256(historical_helper_bytes() if name=='compose_security_os_candidate.py' else (ROOT / 'scripts' / name).read_bytes()).hexdigest(), expected)
         self.assertEqual(sha256((ROOT / 'deploy/maintenance/app_mountpoint_image/Dockerfile').read_bytes()).hexdigest(), M.RECIPE_SHA)
         manifest = (ROOT / 'tests/fixtures/security_app_mountpoint_payload.json').read_bytes()
         self.assertEqual(len(manifest), 330066)
@@ -561,7 +566,7 @@ class AppMountpointAdmissionTests(unittest.TestCase):
 
     def test_all_sealed_sources_are_executed_from_first_verified_buffers(self):
         (self.root / 'source').mkdir(mode=0o700)
-        files = {name: (ROOT / 'scripts' / name).read_bytes() for name in M.HELPERS}
+        files = {name: historical_helper_bytes() if name=='compose_security_os_candidate.py' else (ROOT / 'scripts' / name).read_bytes() for name in M.HELPERS}
         files['compose_app_mountpoint_image.py'] = (ROOT / 'scripts/compose_app_mountpoint_image.py').read_bytes()
         files['Dockerfile'] = (ROOT / 'deploy/maintenance/app_mountpoint_image/Dockerfile').read_bytes()
         files['payload_manifest.json'] = (ROOT / 'tests/fixtures/security_app_mountpoint_payload.json').read_bytes()

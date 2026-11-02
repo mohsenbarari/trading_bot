@@ -186,11 +186,6 @@ async function createInvitation(request: APIRequestContext): Promise<InvitationF
   const payload = (await lookupResponse.json()) as { token: string }
   expect(payload.token).toMatch(/^(?:INV|ACCT|CUST)-/)
 
-  execFileSync(
-    'docker',
-    ['exec', 'trading_bot_redis', 'redis-cli', 'SETEX', `reg_otp:${payload.token}`, '300', otpCode],
-    { encoding: 'utf8' },
-  )
   return {
     accountName,
     mobileNumber,
@@ -250,14 +245,22 @@ test.describe('Mandatory channel smoke', () => {
       ),
     ).toBeVisible()
 
+    // Initial context must load before supplying the isolated SMS challenge.
+    // No verified marker or context proof is seeded; genuine request/verify remain required.
+    execFileSync(
+      'docker',
+      ['exec', 'trading_bot_redis', 'redis-cli', 'SETEX', `reg_otp:${invitation.token}`, '300', invitation.otpCode],
+      { encoding: 'utf8' },
+    )
+
     const otpResponse = page.waitForResponse(
       (response) =>
         response.url().includes('/api/auth/registration-context/otp/request') &&
         response.status() === 200,
     )
-    await page.getByRole('button', { name: 'ارسال کد تایید' }).click()
+    await page.getByRole('button', { name: 'دریافت کد تأیید', exact: true }).click()
     await otpResponse
-    await expect(page.getByText('کد تأیید ۵ رقمی را وارد کنید')).toBeVisible({ timeout: 10000 })
+    await expect(page.getByLabel('کد تأیید پنج‌رقمی')).toBeVisible({ timeout: 10000 })
 
     const verifyResponse = page.waitForResponse(
       (response) =>
@@ -265,7 +268,7 @@ test.describe('Mandatory channel smoke', () => {
         response.status() === 200,
     )
     await page.locator('input[autocomplete="one-time-code"]').fill(invitation.otpCode)
-    await page.getByRole('button', { name: 'تأیید کد' }).click()
+    await page.getByRole('button', { name: 'تأیید و ادامه', exact: true }).click()
     await verifyResponse
     await expect(page.locator('textarea[autocomplete="street-address"]')).toBeVisible({
       timeout: 10000,

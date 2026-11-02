@@ -644,8 +644,18 @@ test.describe('accountant owner lifecycle', () => {
     await expect(page.locator('.public-profile-view .profile-content')).toBeVisible({
       timeout: 30000,
     })
-    await expect(page.locator('.accountant-relations-section')).toContainText(relationDisplayName)
-    await expect(page.locator('.accountant-relations-section')).toContainText(dutyDescription)
+    // The public contact projection excludes relations even on a self URL.
+    // Keep the positive business proof on the authorized owner endpoint/workspace.
+    const activeOwnerRelation = (await fetchOwnerRelations(request, owner.accessToken))
+      .find((relation) => relation.id === pendingRelation?.id)
+    expect(activeOwnerRelation).toMatchObject({
+      relation_display_name: relationDisplayName,
+      duty_description: dutyDescription,
+      status: 'active',
+    })
+    await expect(page.locator('.accountant-relations-section')).toHaveCount(0)
+    await expect(page.locator('.public-profile-view')).not.toContainText(relationDisplayName)
+    await expect(page.locator('.public-profile-view')).not.toContainText(dutyDescription)
 
     await page
       .locator('.owner-profile-section .settings-btn')

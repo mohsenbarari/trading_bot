@@ -41,33 +41,40 @@ class BrowserCIBootstrapContractTests(unittest.TestCase):
                 self.assertEqual(token_steps[0]['name'], 'Bootstrap backend stack')
                 self.assertEqual(token_steps[0]['env'], {'GH_TOKEN': '${{ github.token }}'})
 
-    def test_security_os_bootstrap_prepares_before_build_and_refuses_without_cache(self):
-        source = (ROOT / 'scripts/bootstrap_ci_backend.sh').read_bytes()
-        for failure in ('0', '17', '19', '23'):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory(prefix='owned-ci-bootstrap-') as directory:
-                project = Path(directory)
-                scripts = project / 'scripts'; scripts.mkdir()
-                target = scripts / 'bootstrap_ci_backend.sh'; target.write_bytes(source)
-                binary = project / 'bin'; binary.mkdir()
-                python = binary / 'python3'
-                python.write_text('''#!/bin/sh
+    def run_owned_bootstrap(self, source, failure='0'):
+        with tempfile.TemporaryDirectory(prefix='owned-ci-bootstrap-') as directory:
+            project = Path(directory)
+            scripts = project / 'scripts'; scripts.mkdir()
+            target = scripts / 'bootstrap_ci_backend.sh'; target.write_bytes(source)
+            binary = project / 'bin'; binary.mkdir()
+            python = binary / 'python3'
+            python.write_text('''#!/bin/sh
 set -eu
-[ "$1" = -I ] && [ "$2" = -B ]
-[ "$4" = --cache-dir ]
+[ "$#" -ge 3 ] || exit 97
+[ "$1" = -I ] && [ "$2" = -B ] || exit 97
+[ "$3" = "$CASE_ROOT/scripts/${3##*/}" ] || exit 97
 case "${3##*/}" in
+  prepare_ci_security_caches.py)
+    [ "$#" -eq 3 ] || exit 97
+    kind=ci; failure=13 ;;
   prepare_app_security_os_cache.py) kind=os; directory=security-os-capsule; failure=17 ;;
   prepare_sqlite_wal_os_cache.py) kind=sqlite; directory=sqlite-wal-capsule; failure=19 ;;
   prepare_tar_acl_os_cache.py) kind=tar; directory=tar-acl-capsule; failure=23 ;;
+  prepare_coreutils_acl_os_cache.py) kind=coreutils; directory=coreutils-acl-capsule; failure=29 ;;
   *) exit 97 ;;
 esac
-[ "$5" = "$CASE_ROOT/pip_packages/$directory" ]
-[ -d "${5%/*}" ]
+if [ "$kind" != ci ]; then
+  [ "$#" -eq 5 ] || exit 97
+  [ "$4" = --cache-dir ] || exit 97
+  [ "$5" = "$CASE_ROOT/pip_packages/$directory" ] || exit 97
+  [ -d "${5%/*}" ] || exit 97
+fi
 printf 'cache-%s\\n' "$kind" >> "$TRACE_FILE"
 if [ "$CACHE_FAILURE" = "$failure" ]; then exit "$failure"; fi
 exit 0
 ''')
-                docker = binary / 'docker'
-                docker.write_text('''#!/bin/sh
+            docker = binary / 'docker'
+            docker.write_text('''#!/bin/sh
 set -eu
 case "$1 $2" in
   'build -t') printf 'build\\n' >> "$TRACE_FILE" ;;
@@ -78,34 +85,78 @@ case "$1 $2" in
   *) exit 97 ;;
 esac
 ''')
-                python.chmod(0o755); docker.chmod(0o755)
-                environment = {
-                    'PATH': str(binary) + os.pathsep + os.defpath,
-                    'APP_ENV_FILE': str(ROOT / 'config/unit-test.env.example'),
-                    'CASE_ROOT': str(project), 'TRACE_FILE': str(project / 'trace'),
-                    'CACHE_FAILURE': failure,
-                }
-                with patch('socket.socket', side_effect=AssertionError('network denied')), \
-                     patch('socket.getaddrinfo', side_effect=AssertionError('network denied')), \
-                     patch('urllib.request.urlopen', side_effect=AssertionError('network denied')), \
-                     patch('os.system', side_effect=AssertionError('ambient shell denied')):
-                    result = subprocess.run(
-                        ['bash', '--noprofile', '--norc', str(target)],
-                        cwd=project, env=environment, capture_output=True, text=True, timeout=10,
-                    )
-                events = (project / 'trace').read_text().splitlines()
-                caches=['cache-os','cache-sqlite','cache-tar']
-                length={'0':3,'17':1,'19':2,'23':3}[failure]
-                self.assertEqual(events[:1+length], ['version', *caches[:length]])
-                if failure == '0':
-                    self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
-                    self.assertLess(events.index('cache-tar'), events.index('build'))
-                    self.assertLess(events.index('build'), events.index('up'))
-                    self.assertIn('ready', events)
-                else:
-                    self.assertEqual(result.returncode, int(failure), result.stderr + result.stdout)
-                    self.assertNotIn('build', events)
-                    self.assertNotIn('up', events)
+            python.chmod(0o755); docker.chmod(0o755)
+            environment = {
+                'PATH': str(binary) + os.pathsep + os.defpath,
+                'APP_ENV_FILE': str(ROOT / 'config/unit-test.env.example'),
+                'CASE_ROOT': str(project), 'TRACE_FILE': str(project / 'trace'),
+                'CACHE_FAILURE': failure,
+            }
+            with patch('socket.socket', side_effect=AssertionError('network denied')), \
+                 patch('socket.getaddrinfo', side_effect=AssertionError('network denied')), \
+                 patch('urllib.request.urlopen', side_effect=AssertionError('network denied')), \
+                 patch('os.system', side_effect=AssertionError('ambient shell denied')):
+                result = subprocess.run(
+                    ['bash', '--noprofile', '--norc', str(target)],
+                    cwd=project, env=environment, capture_output=True, text=True, timeout=10,
+                )
+            return result, (project / 'trace').read_text().splitlines()
+
+    def assert_cache_trace(self, result, events, failure):
+        caches=['cache-ci','cache-os','cache-sqlite','cache-tar','cache-coreutils']
+        length={'0':5,'13':1,'17':2,'19':3,'23':4,'29':5}[failure]
+        self.assertEqual(events[:1+length], ['version', *caches[:length]])
+        if failure == '0':
+            self.assertEqual([event for event in events if event.startswith('cache-')],caches)
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertLess(events.index('cache-tar'), events.index('build'))
+            self.assertLess(events.index('cache-coreutils'), events.index('build'))
+            self.assertLess(events.index('build'), events.index('up'))
+            self.assertIn('ready', events)
+        else:
+            self.assertEqual(events,['version',*caches[:length]])
+            self.assertEqual(result.returncode, int(failure), result.stderr + result.stdout)
+            self.assertNotIn('build', events)
+            self.assertNotIn('up', events)
+
+    def test_security_os_bootstrap_prepares_before_build_and_refuses_without_cache(self):
+        source = (ROOT / 'scripts/bootstrap_ci_backend.sh').read_bytes()
+        for failure in ('0','13','17','19','23','29'):
+            with self.subTest(failure=failure):
+                result,events=self.run_owned_bootstrap(source,failure)
+                self.assert_cache_trace(result,events,failure)
+
+    def test_owned_cache_fake_refuses_missing_extra_unknown_and_foreign_argv(self):
+        source=(ROOT/'scripts/bootstrap_ci_backend.sh').read_bytes()
+        prefetch=b'python3 -I -B "$repo_root/scripts/prepare_ci_security_caches.py"'
+        mutations={
+            'extra_prefetch_argument': source.replace(prefetch,prefetch+b' UNDECLARED',1),
+            'missing_individual_option': source.replace(b'--cache-dir "$repo_root/pip_packages/security-os-capsule"',b'',1),
+            'unknown_cache': source.replace(b'prepare_app_security_os_cache.py',b'prepare_unknown_cache.py',1),
+            'foreign_script_path': source.replace(b'$repo_root/scripts/prepare_app_security_os_cache.py',b'$repo_root/other/prepare_app_security_os_cache.py',1),
+            'foreign_cache_path': source.replace(b'pip_packages/security-os-capsule',b'pip_packages/foreign-capsule',1),
+        }
+        for name,mutant in mutations.items():
+            with self.subTest(name=name):
+                self.assertNotEqual(mutant,source)
+                result,events=self.run_owned_bootstrap(mutant)
+                self.assertEqual(result.returncode,97)
+                self.assertNotIn('build',events);self.assertNotIn('up',events)
+
+    def test_cache_trace_assertions_reject_omitted_or_reordered_stages(self):
+        source=(ROOT/'scripts/bootstrap_ci_backend.sh').read_bytes()
+        prefetch=b'python3 -I -B "$repo_root/scripts/prepare_ci_security_caches.py"'
+        osline=b'python3 -I -B "$repo_root/scripts/prepare_app_security_os_cache.py" \\\n  --cache-dir "$repo_root/pip_packages/security-os-capsule"'
+        sqliteline=b'python3 -I -B "$repo_root/scripts/prepare_sqlite_wal_os_cache.py" \\\n  --cache-dir "$repo_root/pip_packages/sqlite-wal-capsule"'
+        self.assertIn(osline,source);self.assertIn(sqliteline,source)
+        mutants={'missing_prefetch':source.replace(prefetch+b'\n',b'',1),
+                 'duplicate_prefetch':source.replace(b'docker build -t trading_bot_base .',prefetch+b'\ndocker build -t trading_bot_base .',1),
+                 'reordered':source.replace(osline,b'OWNED_SWAP',1).replace(sqliteline,osline,1).replace(b'OWNED_SWAP',sqliteline,1)}
+        for name,mutant in mutants.items():
+            with self.subTest(name=name):
+                result,events=self.run_owned_bootstrap(mutant)
+                self.assertEqual(result.returncode,0)
+                with self.assertRaises(AssertionError):self.assert_cache_trace(result,events,'0')
 
     def test_all_bootstrapped_host_binds_use_prepared_ci_paths(self):
         compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text())

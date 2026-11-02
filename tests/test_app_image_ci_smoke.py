@@ -20,6 +20,11 @@ from unittest.mock import Mock,patch
 import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
+if __package__:
+ from .test_historical_security_helper_fixture import historical_helper_bytes, historical_helper_module
+else:
+ from test_historical_security_helper_fixture import historical_helper_bytes, historical_helper_module
+
 TARGETS=('subprocess.Popen','subprocess.run','subprocess.call','subprocess.check_call','subprocess.check_output',
     'os.system','os.popen','os.kill','os.killpg','socket.socket','socket.create_connection','socket.getaddrinfo',
     'urllib.request.urlopen','ctypes.CDLL','ctypes.PyDLL','signal.signal','signal.alarm','resource.setrlimit')
@@ -647,14 +652,14 @@ class AppImageCISmokeTests(unittest.TestCase):
         self.assertNotIn('test_chat_upload_image_security.py',M.SELECTORS);self.assertNotIn('test_jwt_codec_security.py',M.SELECTORS)
 
     def test_sealed_helper_pins_match_published_read_only_admission_sources(self):
-        for name,(path,pin) in M.HELPERS.items():self.assertEqual(sha256((ROOT/path).read_bytes()).hexdigest(),pin,name)
+        for name,(path,pin) in M.HELPERS.items():self.assertEqual(sha256(historical_helper_bytes() if name=='compose_security_os_candidate.py' else (ROOT/path).read_bytes()).hexdigest(),pin,name)
 
     def controller(self):
         parent=self.root/'public-ci-parent';parent.mkdir(mode=0o700)
         root=parent/'security-app-ci-smoke-fixture';root.mkdir(mode=0o700)
         for name in ('source','reports','docker-config'):(root/name).mkdir(mode=0o700)
         for name,(relative,_) in M.HELPERS.items():
-            target=root/'source'/name;target.write_bytes((ROOT/relative).read_bytes());target.chmod(0o600)
+            target=root/'source'/name;target.write_bytes(historical_helper_bytes() if name=='compose_security_os_candidate.py' else (ROOT/relative).read_bytes());target.chmod(0o600)
         self.assertEqual(os.geteuid(),1001,'run hosted ownership fixtures as the real UID1001 in a public scratch copy')
         self.stack.enter_context(patch.dict(os.environ,{'GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted',
             'GITHUB_REPOSITORY':'mohsenbarari/trading_bot','RUNNER_TEMP':str(parent),'GITHUB_SHA':'a'*40,

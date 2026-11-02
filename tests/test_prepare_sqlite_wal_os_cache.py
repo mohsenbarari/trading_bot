@@ -45,10 +45,30 @@ class CacheSourceTests(unittest.TestCase):
  def test_duplicate_or_nonfinite_document_refuses(self):
   for raw in (b'{"a":1,"a":2}',b'{"a":NaN}'):
    with self.assertRaises(RuntimeError):M.document(raw)
- def test_archive_exact_seven_public_outputs_and_all_pins(self):
+ def test_archive_exact_nine_public_outputs_and_all_pins(self):
   lock,raw,contents=fixture();self.assertEqual(M.admit_archive(raw,lock),contents[M.PACKAGE])
   wrong=deepcopy(lock);wrong['outputs']['abi-contract.json']['sha256']='0'*64
   with self.assertRaisesRegex(RuntimeError,'archive_pin'):M.admit_archive(raw,wrong)
+ def test_both_vendor_logs_are_required_and_hash_checked_before_cache_use(self):
+  lock,raw,contents=fixture();self.assertEqual(len(contents),9)
+  for member in ('vendor-standard.log','vendor-fts5-regression.log'):
+   missing=deepcopy(lock);del missing['outputs'][member]
+   with self.subTest(member=member),self.assertRaisesRegex(RuntimeError,'lock_contract'):M.validate_lock(missing)
+   out=io.BytesIO()
+   with ZipFile(out,'w',compression=ZIP_DEFLATED)as archive:
+    for name,body in contents.items():archive.writestr(name,(bytes([body[0]^1])+body[1:])if name==member else body)
+   changed=out.getvalue();wrong=deepcopy(lock);wrong['artifact'].update(bytes=len(changed),sha256=sha256(changed).hexdigest())
+   with self.subTest(member=member),self.assertRaisesRegex(RuntimeError,'archive_pin'):M.admit_archive(changed,wrong)
+ def test_gold1_unknown_version_and_old_cache_cannot_be_adopted_or_deleted(self):
+  lock,_,_=fixture()
+  for version in ('3.46.1-7+deb13u2+gold1','3.46.1-7+deb13u2+gold3'):
+   wrong=deepcopy(lock);wrong['package']['version']=version
+   with self.subTest(version=version),self.assertRaisesRegex(RuntimeError,'lock_contract'):M.validate_lock(wrong)
+  cache=self.root/'sqlite-wal-capsule';cache.mkdir(mode=0o755)
+  old=cache/'libsqlite3-0_3.46.1-7+deb13u2+gold1_amd64.deb';old.write_bytes(b'OWNED OLD CACHE');(cache/'manifest.json').write_bytes(b'OWNED OLD MANIFEST')
+  before={p.name:p.read_bytes()for p in cache.iterdir()}
+  with patch.object(M,'load_lock',return_value=lock),patch.object(M,'download',side_effect=AssertionError('network denied')),self.assertRaisesRegex(RuntimeError,'cache_inventory'):M.prepare(cache)
+  self.assertEqual({p.name:p.read_bytes()for p in cache.iterdir()},before);self.assertFalse((cache/M.PACKAGE).exists())
  def test_zip_symlink_duplicate_or_unexpected_member_refuses(self):
   lock,_,contents=fixture()
   for edit in ('symlink','extra','duplicate'):
