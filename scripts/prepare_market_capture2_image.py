@@ -102,7 +102,7 @@ CONTROLLER_FILES=(SELF,SEALER,READER,WORKFLOW,BUSINESS,OUTER,*(BUSINESS_DIR+'/'+
 DOCKER=['/usr/bin/docker','--host=unix:///var/run/docker.sock']
 MANIFEST_SHA='fef6305b1d7e6db851d1d0b77f3aa9910aad535e83f64f012790165a3d62c81b'
 ROWS_SHA='75d7d2cfb2c20fd036501e7aac198cb5567fb82c53301fb3972f8c81b935e57f'
-MAX_SOURCE=131072;MAX_CONTROLLER_SOURCE=262144;MAX_JSON=4*1024**2;MAX_FILE=64*1024**2;MAX_CONTEXT=128*1024**2
+MAX_SOURCE=131072;MAX_DRIVER_SOURCE=163840;MAX_CONTROLLER_SOURCE=262144;MAX_JSON=4*1024**2;MAX_FILE=64*1024**2;MAX_CONTEXT=128*1024**2
 MAX_LOG=64*1024**2;RESERVE=2*1024**3;PHASE='bootstrap'
 OUTER_PHYSICAL_FINALIZERS_COMPLETED=False
 OUTER_FAILURE=None
@@ -1182,7 +1182,7 @@ def normal_build(root,repo,*,retained=None,final_checks=None,role=None):
  save(root/'empty-trivy.yaml',b'{}\n')
  PHASE='controller_source';controllers,raws=controller_sources(repo,release,root,role=role)
  sealer=module(raws[SEALER],root/'controller-source'/SEALER)
- original=Held(Path(__file__),maximum=MAX_SOURCE,binding={'bytes':len(raws[SELF]),'sha256':sha256(raws[SELF]).hexdigest()})
+ original=Held(Path(__file__),maximum=MAX_DRIVER_SOURCE,binding={'bytes':len(raws[SELF]),'sha256':sha256(raws[SELF]).hexdigest()})
  controller_hold=None;snapshots=[];published=None;business_hold=None;evidence=[];evidence_checks=[]
  try:
   controller_hold=Inputs([(root/'controller-source'/row['path'],{k:row[k]for k in ('bytes','sha256')},False)for row in controllers])
@@ -1548,15 +1548,38 @@ def main(argv=None,*,retained=None,final_checks=None):
 CODES=frozenset(('archive_bound', 'archive_config', 'archive_shape', 'arguments', 'build_contract', 'build_not_completed', 'build_receipt', 'buildx_driver', 'cache_binding', 'cache_inventory', 'clean_main_required', 'command_bound', 'command_contract', 'command_failed', 'command_timeout', 'context_bound', 'context_changed', 'context_directory', 'context_inventory', 'controller_inventory', 'controller_signature', 'controller_source', 'controller_source_bound', 'disk_reserve', 'export_not_completed', 'historical81_business_producer_not_integrated', 'hosted_main_only', 'image_config', 'image_identity', 'image_labels', 'image_layers', 'json_bound', 'json_duplicate', 'json_nonfinite', 'live_main_changed', 'live_main_scope', 'normal_main_integration_unarmed', 'normal_workflow_token_required', 'output_bound', 'output_write', 'probe_cleanup', 'probe_exit', 'probe_isolation', 'probe_mounts', 'probe_owner', 'probe_resources', 'probe_scope', 'raw_high_critical_findings', 'release_commit', 'report_changed', 'report_identity', 'report_shape', 'repository_identity', 'root_scope', 'source93_probe', 'source_binding', 'source_bound', 'source_changed', 'source_contract', 'source_epoch', 'source_file', 'source_parent', 'sqlite_lock', 'sqlite_probe', 'two_git_signature', 'vendor_lock'))
 CODES=CODES|frozenset(('separate_role_fixture_review_required','role_fixture_helper_pin','role_fixture_contract_pin','coreutils_lock','role_component','role_catalog','role_manifest','role_receipt','role_candidate','reader_role_source_pin','reader_source_pin','reader_source_contract','probe_diagnostic','evidence_ownership','actual_profile_exit', 'actual_test_completion', 'actual_test_selection', 'baseline_pin', 'business81_actual', 'business81_assertion_approval', 'business81_assertion_approval_pin', 'business81_assertion_paths', 'business81_assertion_scope', 'business81_bundle', 'business81_cleanup', 'business81_deadline', 'business81_exit', 'business81_fixture_pin', 'business81_helper_pin', 'business81_image', 'business81_image_changed', 'business81_isolation', 'business81_mounts', 'business81_network', 'business81_output_bound', 'business81_output_finalizers', 'business81_output_write', 'business81_owner', 'business81_plans', 'business81_resources', 'business81_source', 'business81_start', 'business81_start_timeout', 'business81_two_git', 'candidate_scope', 'combined_actual_selection', 'container_plan', 'controller_parcel_binding', 'controller_parcel_bound', 'controller_parcel_deadline', 'controller_parcel_inventory', 'fixture_inventory', 'fixture_original', 'helper_inventory', 'helper_pin', 'historical_inventory', 'physical_finalizer', 'profile_identity', 'profile_result', 'profile_results', 'profile_selection', 'release_recipe_source', 'replay_original', 'replay_selection', 'security_assertion_delta', 'security_assertion_original', 'security_assertion_scope', 'selection', 'separate_security_assertion_review_required', 'source_changed', 'source_closed_changed', 'source_metadata', 'source_open', 'source_parent', 'source_pin', 'tar_lock', 'test_id_duplicate'))
 CODES=CODES|frozenset(('glibc_runtime_binding', 'glibc_runtime_source', 'glibc_runtime_record', 'glibc_runtime_custody', 'glibc_runtime_inventory', 'glibc_runtime_OFD', 'glibc_runtime_original_custody_changed', 'glibc_runtime_changed', 'glibc_runtime_closed', 'glibc_runtime_close_unknown', 'glibc_runtime_foreign_FD', 'glibc_runtime_artifact', 'glibc_runtime_prepare', 'glibc_runtime_subject', 'glibc_runtime_argv', 'glibc_runtime_recipe'))
+def failure_diagnostic(error):
+ # Only public exception type/code locations; never args, locals or absolute paths.
+ def one(exc):
+  name=type(exc).__name__;kind=name if re.fullmatch('[A-Za-z_][A-Za-z0-9_]{0,63}',name)else'unclassified'
+  rows=[];seen=0;current=exc.__traceback__
+  while current is not None and seen<64:
+   seen+=1;code=current.tb_frame.f_code;filename=code.co_filename;relative=None
+   if filename==str(Path(__file__).absolute())or filename.endswith('/source/prepare_market_capture2_image.py'):relative=SELF
+   elif filename.endswith('/source/market_sqlite_component_probe.py'):relative=CLOCK_SOURCE
+   elif filename.endswith('/source/source_io.py'):relative='scripts/security_age132_tool/source_io.py'
+   else:
+    for admitted in CONTROLLER_FILES:
+     if filename==admitted or filename.endswith('/'+admitted):relative=admitted;break
+   if relative is not None and re.fullmatch('[A-Za-z_][A-Za-z0-9_<>]{0,95}',code.co_name):
+    rows.append({'source':relative,'line':current.tb_lineno,'function':code.co_name});rows=rows[-8:]
+   current=current.tb_next
+  return{'exception_class':kind,'project_frames':rows}
+ try:
+  value=one(error)
+  if type(error)in(BaseExceptionGroup,ExceptionGroup):value['group_children']=[one(e)for e in error.exceptions[:4]]
+  return value
+ except BaseException:return{'exception_class':'unclassified','project_frames':[]}
+
 def closed_failure(error):
  def fields(exc):
   code=exc.args[0]if type(exc)is RuntimeError and len(exc.args)==1 and type(exc.args[0])is str and exc.args[0]in CODES else'unclassified'
-  kind=type(exc).__name__ if type(exc)in (RuntimeError,OSError,FileNotFoundError,PermissionError,ValueError,TypeError,KeyError)else'unclassified'
+  kind=failure_diagnostic(exc)['exception_class']
   return code,kind
  code,kind=fields(error)
  history=OUTER_FAILURE if OUTER_FAILURE is not None and OUTER_FAILURE[0]is error else None
  return {'schema':'normal_market_two_source_ci_failure/1','status':'refused','phase':PHASE if PHASE in ('bootstrap','controller_source','business81_source_preflight','git_product_seal','glibc_runtime_prepare','normal_cache_prepare','normal_cache_check','context_restamp','ordinary_build','actual_image','actual_source93','actual_source_role','actual_sqlite','actual_historical81','controller_sources_parcel','build_finalization','raw_report_binding','ordinary_image_export','ordinary_image_compression','export_finalization','complete_ci_gate')else'bootstrap',
-  'code':code,'exception_class':kind,'outer_physical_finalizers_completed':bool(history is not None and OUTER_PHYSICAL_FINALIZERS_COMPLETED),
+  'code':code,'exception_class':kind,'diagnostic':failure_diagnostic(error),'original_diagnostic':failure_diagnostic(history[1])if history is not None and history[1]is not None else None,'outer_physical_finalizers_completed':bool(history is not None and OUTER_PHYSICAL_FINALIZERS_COMPLETED),
   'original_failure_code':fields(history[1])[0]if history is not None and history[1]is not None else None,
   'physical_finalizer_failures':[{'stage':stage,'code':fields(exc)[0],'exception_class':fields(exc)[1]}for stage,exc in history[2]]if history is not None else[],
   'runtime_secondary_codes':[c if type(c)is str and c in CODES and c.startswith('glibc_runtime_')else'glibc_runtime_close_unknown'for c in getattr(error,'glibc_runtime_secondary_codes',[])],

@@ -7,7 +7,7 @@ from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
 from types import ModuleType
-import json,os,tempfile,unittest
+import io,json,os,tempfile,unittest,zipfile
 HERE=Path(__file__).resolve().parent
 ROOT=HERE.parent
 A=ModuleType('_owned_assessor');exec(compile((ROOT/'scripts/assess_image_security_evidence.py').read_bytes(),str(ROOT/'scripts/assess_image_security_evidence.py'),'exec'),A.__dict__)
@@ -142,6 +142,35 @@ class Packet:
   self.lock['scan']=pin(scan);self.lock['sbom']=pin(sbom);self.lock['inputs']={name:pin(raw)for name,raw in self.inputs.items()}
   return object_bytes(self.lock),scan,sbom,dict(self.inputs)
  def run(self,finalizer=lambda:None,**kwargs):return A.assess(*self.buffers(),now=kwargs.get('now',NOW),finalizer=finalizer)
+
+def install_sqlite_fts5(p):
+ # Real public f88 backport bytes support an obviously synthetic image scope.
+ # No fixture is itself a real-image acceptance or an authenticated Root lock.
+ fixture=(HERE/'fixtures/sqlite_fts5_f88/public-fixed-evidence.zip').read_bytes()
+ assert(len(fixture),sha256(fixture).hexdigest())==(63697,'b6e741df92f385dc0ab73a6863be95607919b888726d57c6bae207e3ecbe8ec6')
+ with zipfile.ZipFile(io.BytesIO(fixture))as archive:
+  for entry in archive.infolist():
+   assert 0<entry.file_size<=262144 and '/'not in entry.filename
+   with archive.open(entry)as stream:raw=stream.read(entry.file_size+1);assert len(raw)==entry.file_size and stream.read(1)==b''
+   p.inputs['fts5-'+entry.filename]=raw
+ version='3.46.1-7+deb13u2+gold2';purl='pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u2%2Bgold2?arch=amd64&distro=debian-13.7'
+ component={'name':'libsqlite3-0','version':version,'purl':purl,'bom-ref':purl,
+  'properties':[{'name':'aquasecurity:trivy:'+k,'value':v}for k,v in {'SrcName':'sqlite3','SrcVersion':'3.46.1','SrcRelease':'7+deb13u2+gold2','PkgType':'debian','LayerDiffID':'sha256:'+'e'*64}.items()]}
+ p.sbom['components'].append(component)
+ p.scan['Results'][0]['Vulnerabilities'].append({'VulnerabilityID':'CVE-2026-119373','PkgName':'libsqlite3-0','InstalledVersion':version,
+  'PkgIdentifier':{'PURL':purl},'Severity':'HIGH','Status':'affected','Layer':{'DiffID':'sha256:'+'e'*64}})
+ file={'path':'/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6','bytes':1571096,'sha256':'d115380cd2790ee09d493eb0af788745f26a18dcef03ad62a543feff363ba86b','mode':0o100644,'uid':0,'gid':0}
+ package={'package':'libsqlite3-0','installed_version':version,'source_package':'sqlite3','source_version':'3.46.1','source_release':'7+deb13u2+gold2',
+  'deb_sha256':'e869f04105dc2c35d32351c771387da1e4a6bca745284312738b2762f2adde4b','expected_files':[file],'actual_files':[deepcopy(file)]}
+ p.proofs['payload.json']['observations']['packages'].append(package)
+ p.proofs['advisories.json']['observations']['advisory_ids'].append('CVE-2026-119373')
+ p.proof('sqlite-fts5.json','source_backport',{'advisory_ids':['CVE-2026-119373'],'source_package':'sqlite3','source_version':'3.46.1','source_release':'7+deb13u2+gold2',
+  'source_verified':True,'build_abi_verified':True,'packages':[{k:package[k]for k in('package','installed_version','deb_sha256')}]})
+ for name in [n for n in p.inputs if n.startswith('fts5-')]:
+  p.descriptors['sqlite-fts5.json']['original_inputs'].append(name);p.proofs['sqlite-fts5.json']['original_inputs'][name]=pin(p.inputs[name])
+ row=next(row for row in A.findings(p.scan,p.sbom,p.scope)[0]if row['advisory']=='CVE-2026-119373')
+ p.lock['findings'].append({'row':row,'disposition':'fixed','proofs':['payload.json','sqlite-fts5.json']})
+ return package,component
 
 class AssessorTests(unittest.TestCase):
  def rejects(self,packet,code=None):
@@ -369,5 +398,56 @@ class ProductProfileTests(unittest.TestCase):
    with self.subTest(name=key),self.assertRaisesRegex(A.Refused,'input_binding'):
     A.assess(lock,scan,sbom,changed,now=NOW,finalizer=lambda:calls.append('should-not-close'))
   self.assertFalse(calls)
+
+class SQLiteFts5Tests(unittest.TestCase):
+ rejects=AssessorTests.rejects
+ def test_exact_f88_FTS_backport_resolves_45_raw_rows_without_global_acceptance(self):
+  p=Packet();install_sqlite_fts5(p);before=object_bytes(p.scan);calls=[];value=p.run(lambda:calls.append(True))
+  self.assertEqual(calls,[True]);self.assertEqual(value['status'],'PASS');self.assertEqual(value['unresolved_count'],0)
+  self.assertEqual(len(value['resolutions']),45);self.assertEqual(value['raw_counts']['HIGH'],45);self.assertFalse(value['raw_gate_passed'])
+  self.assertFalse(value['security_accepted']);self.assertEqual(object_bytes(p.scan),before)
+ def test_FTS_proof_wrong_image_or_stale_source_scope_refuses(self):
+  for edit in ('image','stale','source'):
+   p=Packet();install_sqlite_fts5(p);proof=p.proofs['sqlite-fts5.json']
+   if edit=='image':proof['scope']['image_id']='sha256:'+'f'*64
+   elif edit=='stale':proof['completed_at']=NOW-86401
+   else:proof['scope']['source_commit']='f'*40
+   with self.subTest(edit=edit):self.rejects(p,'proof_binding')
+ def test_FTS_wrong_same_image_library_hash_or_DEB_refuses_even_equal_payload_lists(self):
+  for edit in ('library','deb'):
+   p=Packet();package,_=install_sqlite_fts5(p)
+   if edit=='library':
+    for key in('expected_files','actual_files'):package[key][0]['sha256']='f'*64
+   else:
+    package['deb_sha256']='f'*64;p.proofs['sqlite-fts5.json']['observations']['packages'][0]['deb_sha256']='f'*64
+   with self.subTest(edit=edit):self.rejects(p,'sqlite_fts5_(payload|package)')
+ def test_FTS_missing_or_substituted_original_patch_vendor_or_provenance_refuses(self):
+  for name in ('fts5-fts5-fix.patch','fts5-provenance.json','fts5-vendor-standard.log','fts5-vendor-fts5-regression.log'):
+   p=Packet();install_sqlite_fts5(p);p.descriptors['sqlite-fts5.json']['original_inputs'].remove(name);p.proofs['sqlite-fts5.json']['original_inputs'].pop(name)
+   with self.subTest(missing=name):self.rejects(p,'sqlite_fts5_originals')
+  p=Packet();install_sqlite_fts5(p);name='fts5-fts5-fix.patch';p.inputs[name]+=b'UNREVIEWED';p.proofs['sqlite-fts5.json']['original_inputs'][name]=pin(p.inputs[name]);self.rejects(p,'sqlite_fts5_originals')
+ def test_FTS_unmapped_missing_duplicate_or_wrong_native_probe_refuses(self):
+  for edit in ('unmapped','missing','duplicate','wrong_hash'):
+   p=Packet();install_sqlite_fts5(p);name='fts5-native-probe.json';proof=p.proofs['sqlite-fts5.json'];descriptor=p.descriptors['sqlite-fts5.json']
+   if edit=='missing':descriptor['original_inputs'].remove(name);proof['original_inputs'].pop(name)
+   elif edit=='duplicate':
+    name2='duplicate-native.json';p.inputs[name2]=p.inputs[name];descriptor['original_inputs'].append(name2);proof['original_inputs'][name2]=pin(p.inputs[name2])
+   else:
+    probe=json.loads(p.inputs[name]);probe['sqlite_system_library']['mapped_inode_verified']=False if edit=='unmapped'else True
+    if edit=='wrong_hash':probe['sqlite_system_library']['sha256']='f'*64
+    p.inputs[name]=object_bytes(probe);proof['original_inputs'][name]=pin(p.inputs[name])
+   with self.subTest(edit=edit):self.rejects(p,'sqlite_fts5_probe')
+  for name in PRODUCT_NAMES.values():
+   p=Packet();install_sqlite_fts5(p);p.descriptors['sqlite-fts5.json']['original_inputs'].remove(name);p.proofs['sqlite-fts5.json']['original_inputs'].pop(name)
+   with self.subTest(missing_product_original=name):self.rejects(p,'sqlite_fts5_probe_originals')
+ def test_FTS_gold1_cannot_borrow_gold2_fix_even_when_all_version_joins_match(self):
+  p=Packet();package,component=install_sqlite_fts5(p);version='3.46.1-7+deb13u2+gold1';package['installed_version']=version;package['source_release']='7+deb13u2+gold1'
+  component['version']=version;component['purl']=component['bom-ref']=component['purl'].replace('gold2','gold1')
+  next(r for r in component['properties']if r['name']=='aquasecurity:trivy:SrcRelease')['value']=package['source_release']
+  raw=p.scan['Results'][0]['Vulnerabilities'][-1];raw['InstalledVersion']=version;raw['PkgIdentifier']['PURL']=component['purl']
+  facts=p.proofs['sqlite-fts5.json']['observations'];facts['source_release']=package['source_release'];facts['packages'][0]['installed_version']=version
+  p.lock['findings'][-1]['row']=A.findings(p.scan,p.sbom,p.scope)[0][-1];self.rejects(p,'sqlite_fts5_package')
+ def test_duplicate_FTS_raw_finding_is_not_deduplicated_or_accepted(self):
+  p=Packet();install_sqlite_fts5(p);p.scan['Results'][0]['Vulnerabilities'].append(deepcopy(p.scan['Results'][0]['Vulnerabilities'][-1]));self.rejects(p,'duplicate_finding')
 
 if __name__=='__main__':unittest.main()

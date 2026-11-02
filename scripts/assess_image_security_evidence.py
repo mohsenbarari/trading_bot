@@ -16,7 +16,8 @@ ROW={'advisory','package','installed_version','source_package','source_version',
 KINDS={'source_backport','runtime_payload','component_absence','caller_fix','mandatory_gate','advisory_review'}
 HEX=re.compile('[a-f0-9]{64}');NAME=re.compile('[A-Za-z0-9_.-]{1,128}')
 SOURCES={'CVE-2026-76642':'util-linux','CVE-2026-78408':'util-linux','CVE-2026-78409':'util-linux',
- 'CVE-2026-78410':'util-linux','CVE-2025-69720':'ncurses','CVE-2026-54369':'acl','CVE-2026-16742':'systemd','CVE-2026-9538':'perl'}
+ 'CVE-2026-78410':'util-linux','CVE-2025-69720':'ncurses','CVE-2026-54369':'acl','CVE-2026-16742':'systemd','CVE-2026-9538':'perl',
+ 'CVE-2026-119373':'sqlite3'}
 ABSENCE={'CVE-2026-16742':('systemd_homed','known_vendor_paths_names_and_actual_perl_inc'),
  'CVE-2026-9538':('archive_tar','known_vendor_paths_names_and_actual_perl_inc'),
  'CVE-2026-78409':('restricted_user_detached_tree_fast_path','stable_source_vulnerable_path_absent')}
@@ -262,6 +263,39 @@ def product_profile(lock,inputs):
  return {'profile':profile,'recipe':recipe,'role':role,'input_names':frozenset(names.values()),
   'original_inputs':{key:lock['inputs'][name]for key,name in names.items()}}
 
+def sqlite_fts5_fixed(package,selected,inputs,product_inputs):
+ """Only the already authenticated f88 FTS5 backport and mapped image DSO.
+
+ The four original bindings pin the official e1c9934f fix, its signed-source
+ build provenance, 389991 standard tests and 30 upstream FTS regression tests.
+ Root still authenticates these originals and the same-image probe producer.
+ """
+ need(all(package[k]==v for k,v in {'package':'libsqlite3-0','installed_version':'3.46.1-7+deb13u2+gold2',
+  'source_package':'sqlite3','source_version':'3.46.1','source_release':'7+deb13u2+gold2',
+  'deb_sha256':'e869f04105dc2c35d32351c771387da1e4a6bca745284312738b2762f2adde4b'}.items()),'sqlite_fts5_package')
+ library={'path':'/usr/lib/x86_64-linux-gnu/libsqlite3.so.0.8.6','bytes':1571096,
+  'sha256':'d115380cd2790ee09d493eb0af788745f26a18dcef03ad62a543feff363ba86b'}
+ need(sum(all(file[k]==v for k,v in library.items())for file in package['actual_files'])==1,'sqlite_fts5_payload')
+ proofs=[p for p in selected.values()if p['kind']=='source_backport'and 'CVE-2026-119373'in p['observations']['advisory_ids']]
+ need(len(proofs)==1,'sqlite_fts5_source')
+ originals=proofs[0]['original_inputs'];need(product_inputs<=set(originals),'sqlite_fts5_probe_originals')
+ pins={(p['bytes'],p['sha256'])for p in originals.values()}
+ required={(1240,'90258813c142898908fe16bdb027688249e9353289bc42fc3f7bac15d64507e8'),
+  (178798,'a43db5c82318d1fd5a52eb6881917d859df4531228e1300a41809c4e6bc20da7'),
+  (90645,'8272643dc2c6904151219d921e8c6c0ee9fdb8c09f712e5ffe71cc197c988f02'),
+  (1261,'6ec762782583f941ab6a588ba51a6401729701e2bab4a5e3c95d0aec057e0b15')}
+ need(required<=pins,'sqlite_fts5_originals')
+ probes=[]
+ for name in originals:
+  raw=inputs[name]
+  if raw.lstrip().startswith(b'{')and b'"sqlite_system_library"'in raw:
+   value=document(raw)
+   if type(value)is dict and 'sqlite_system_library'in value:probes.append(value)
+ need(len(probes)==1,'sqlite_fts5_probe');probe=probes[0]
+ need(probe.get('status')=='PASS'and probe.get('sqlite_package')==package['installed_version']
+  and probe.get('production_data_accessed')is False and probe.get('all_cves_attested')is False
+  and same(probe.get('sqlite_system_library'),{**library,'mapped_inode_verified':True}),'sqlite_fts5_probe')
+
 
 def assess(lock_raw,scan_raw,sbom_raw,inputs,*,now,finalizer):
  """Return only after all byte bindings, row proofs and caller finals pass."""
@@ -336,6 +370,7 @@ def assess(lock_raw,scan_raw,sbom_raw,inputs,*,now,finalizer):
     if (row['advisory']in facts['advisory_ids']and all(facts[k]==row[k]for k in ('source_package','source_version','source_release'))
      and {'package':row['package'],'installed_version':row['installed_version'],'deb_sha256':native[0]['deb_sha256']}in facts['packages']):valid+=1
    need(valid==1,'source_fix_missing_or_ambiguous')
+   if row['advisory']=='CVE-2026-119373':sqlite_fts5_fixed(native[0],selected,inputs,product['input_names'])
    if row['advisory']=='CVE-2026-54369':
     callers=[p['observations']for p in selected.values()if p['kind']=='caller_fix'];need(len(callers)==1,'acl_caller_fix_missing');facts=callers[0]
     keys(facts,{'whole_image_inventory_complete','all_callers_bound_to_reviewed_source','unresolved_legacy_callers','ordinary_compatibility_passed','callers'},'caller_shape')

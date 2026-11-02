@@ -13,7 +13,7 @@ import inspect,json,os,re,selectors,subprocess,time
 PROFILES=('base-nonroot','base-root','added-replay')
 OWNER='io.gold-trade.normal-business81-owner'
 PROFILE='io.gold-trade.normal-business81-profile'
-NORMAL_PIN=(130802, '8935fa47191a018cd0e0434f6b86110be39b6a8ee864c0313f292669b5dae923')
+NORMAL_PIN=(132255, '08e6a5bfa3622f741bc4e83a8d6822c06f447e7d02d3321449fe5b11972df88f')
 APPROVAL_PIN={'bytes': 1031, 'sha256': '3bbc244f4e044975a8f3e9761e8690a4f48f8051454134e66ef26332c3d2627f'}
 PROPOSAL_PIN={'bytes': 771, 'sha256': '18b59cbdf722a15de894f50fca1170072c0b6ac278582575cadb68b6e3446415'}
 PATCH_PIN={'bytes': 333, 'sha256': '88d5b46f2726fb570bb6727fe7955f9b5c399f370bf61fc81601c26c40f8da8c'}
@@ -214,7 +214,7 @@ def produce(M,B,*,root,repo,image,receipt,signature,controller_signature,content
   inherited=actual['Config'].get('Env');need(inherited is None or type(inherited)is list and all(type(v)is str for v in inherited),'business81_image')
   return(frame,inherited) # Public-image defaults in RAM only; never serialize/hash.
  try:
-  for spec in source_paths.values():rows.append(M.Held(spec['path'],maximum=131072,binding=spec['binding']))
+  for name,spec in source_paths.items():rows.append(M.Held(spec['path'],maximum=163840 if name=='normal' else 131072,binding=spec['binding']))
   need(type(approval_paths)is dict and set(approval_paths)=={'approval','proposal','patch'},'business81_assertion_paths')
   approval_sources={}
   for name,pin in(('approval',APPROVAL_PIN),('proposal',PROPOSAL_PIN),('patch',PATCH_PIN)):
