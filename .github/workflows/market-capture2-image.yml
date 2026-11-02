@@ -374,9 +374,10 @@ jobs:
             ${{ steps.build.outputs.root }}/build.log
             ${{ steps.build.outputs.root }}/cache-*.log
 
-      - name: Enforce original raw HIGH and CRITICAL gate without suppressions
+      - name: Enforce same-image security evidence with unchanged raw scanner findings
         if: always() && steps.finalize.outcome == 'success'
         env:
+          GH_TOKEN: ${{ github.token }}
           ROOT: ${{ steps.build.outputs.root }}
           EXPECTED_DRIVER: ${{ steps.build.outputs.helper_sha256 }}
           NORMAL_OPERATION_PIN: ${{ steps.build.outputs.operation_pin }}
@@ -474,3 +475,13 @@ jobs:
           retention-days: 10
           if-no-files-found: error
           path: ${{ steps.build.outputs.root }}/ci-evidence.json
+
+      - name: Preserve actual same-image assessment inputs and results even on refusal
+        if: always() && steps.build.outputs.root != ''
+        timeout-minutes: 3
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: normal-market-${{ steps.build.outputs.role_slug }}-security-assessment-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 10
+          if-no-files-found: warn
+          path: ${{ steps.build.outputs.root }}/security-assessment/

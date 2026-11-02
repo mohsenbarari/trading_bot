@@ -7,7 +7,7 @@ from contextlib import ExitStack
 from hashlib import sha1,sha256
 from pathlib import Path,PurePosixPath
 from types import ModuleType
-import argparse,ast,errno,fcntl,gzip,json,math,os,re,selectors,signal,stat,subprocess,sys,tarfile,time,zipfile
+import argparse,ast,errno,fcntl,gzip,io,json,math,os,re,selectors,signal,stat,subprocess,sys,tarfile,time,zipfile
 
 
 # Closed published source expectations, never runtime-identity substitutes.
@@ -84,6 +84,15 @@ GLIBC_INSTALLER='scripts/prepare_glibc_security_os_cache.py'
 GLIBC_IO='scripts/glibc_image_io.py'
 GLIBC_ROOT='deploy/maintenance/glibc_backport_two_profiles/Root-TrixieSelected01-qualification.json'
 SHARED_CACHE='scripts/prepare_ci_security_caches.py'
+SECURITY_RUNTIME='scripts/collect_normal_market_runtime.py'
+SECURITY_NORMALIZER='scripts/normalize_normal_market_security_evidence.py'
+SECURITY_ASSESSOR='scripts/assess_image_security_evidence.py'
+SECURITY_COMPONENT='scripts/verify_image_component_presence.py'
+SECURITY_ACL='scripts/verify_acl_consumer_presence.py'
+SECURITY_SEED='deploy/security/normal-market-assessment/stable-source-inputs.zip'
+SECURITY_REVIEW='deploy/security/normal-market-assessment/current-review.json'
+SECURITY_SEED_PIN={'bytes':202287,'sha256':'0a908fe0b1a4c3042dfc1bd4378530349a27aaf6b169910df0e10f74d30d68a6'}
+SECURITY_CONTROLLERS=(SECURITY_RUNTIME,SECURITY_NORMALIZER,SECURITY_ASSESSOR,SECURITY_COMPONENT,SECURITY_ACL,SECURITY_SEED,SECURITY_REVIEW)
 GLIBC_HELPERS={GLIBC_ADAPTER:{'bytes':6105,'sha256':'17a0435b954f54596212daeed5d59a7affd0a5a0f696a5618f3e1e9a5257b43b'},
  GLIBC_INSTALLER:{'bytes':29419,'sha256':'ec8cfbf83dc1edb96fb4e6604d3e86fdbf2c7b7a0bec648550c897651a8d79f3'},
  GLIBC_IO:{'bytes':40590,'sha256':'e5a1587af0db34acfb5ab04434754cf75b9ad0aa43c0550f7ec7fedf5dd8a65f'}}
@@ -97,7 +106,7 @@ GLIBC_NAMED={'schema':'glibc84243_exact_runtime_named_context/1','files':GLIBC_F
 GLIBC_ARTIFACT={'id':13077600231,'run':41286801923,'attempt':1,'head':'a80b91eccdcd0b981c3c08888937a739869b64cf',
  'name':'trixie241-glibc84243-candidates-PENDING-ROOT-REVIEW-41286801923-1','bytes':35878836,'sha256':'bb5dc6aef44629d0f72cdf095832c4e7ec523eea06902c57121c983f4fb06f22'}
 GLIBC_RECIPE_PIN={'bytes':7308,'sha256':'09f57f4d846f4d6f85bb6fa412b237bdc40b6840743dfb9796facdabc5ee3dcc'}
-CONTROLLER_FILES=(SELF,SEALER,READER,WORKFLOW,BUSINESS,OUTER,*(BUSINESS_DIR+'/'+name for name in BUSINESS_SUPPORT),
+CONTROLLER_FILES=(SELF,SEALER,READER,WORKFLOW,BUSINESS,OUTER,*SECURITY_CONTROLLERS,*(BUSINESS_DIR+'/'+name for name in BUSINESS_SUPPORT),
  GLIBC_ADAPTER,GLIBC_INSTALLER,GLIBC_IO,GLIBC_ROOT,SHARED_CACHE,'scripts/market_sqlite_component_probe.py','deploy/maintenance/app_r2_observe02/run_app_image_ci_smoke.py','deploy/maintenance/app_gold2_smoke/export_controller_gold2.py','deploy/maintenance/app_gold2_smoke/archive_inventory_gold2.py','deploy/maintenance/app_r2_observe02/inventory.py','deploy/maintenance/app_r2_observe02/compose_security_os_candidate.py','deploy/maintenance/app_r2_observe02/compose_app_mountpoint_image.py','deploy/maintenance/app_r2_observe02/compose_market_security_os_candidate.py','deploy/maintenance/app_r2_observe02/admit_security_component_image_reuse.py','deploy/maintenance/app_r2_observe02/datastore_candidate_contract.py','deploy/maintenance/app_r2_observe02/runtime_image_archive_transport.py','scripts/security_age132_tool/source_io.py')
 DOCKER=['/usr/bin/docker','--host=unix:///var/run/docker.sock']
 MANIFEST_SHA='fef6305b1d7e6db851d1d0b77f3aa9910aad535e83f64f012790165a3d62c81b'
@@ -111,6 +120,9 @@ SQLITE_LOCK='scripts/sqlite_wal_package.lock.json'
 TAR_LOCK='scripts/tar_acl_package.lock.json'
 COREUTILS_LOCK='scripts/coreutils_acl_package.lock.json'
 CACHE_ROOTS=('pip_packages/security-os-capsule','pip_packages/sqlite-wal-capsule','pip_packages/tar-acl-capsule','pip_packages/coreutils-acl-capsule')
+CACHE_ORIGINAL_ROOT='pip_packages/security-assessment-originals'
+CACHE_ORIGINAL_GROUPS=('util','ncurses','acl-tar','sqlite-wal','tar-acl','coreutils-acl')
+NORMAL_CACHE_COUNT=32
 
 
 ROLE_READER_PIN = (19587, '7de62bb2c8564fd13271413ca3362bcbd9bf6c3775a3d57536a6566c2347f606')
@@ -430,7 +442,10 @@ def cache_inputs(release,receipt):
  add(CACHE_ROOTS[3]+'/manifest.json',{'bytes':len(meta),'sha256':sha256(meta).hexdigest()})
  for path in ('pip_packages/.security-os-capsule.lock','pip_packages/.sqlite-wal-capsule.lock','pip_packages/.tar-acl-capsule.lock','pip_packages/.coreutils-acl-capsule.lock'):
   expected[path]={'bytes':0,'sha256':sha256(b'').hexdigest()}
- need(len(expected)==26,'cache_inventory');return expected,new
+ artifacts={**old['artifacts'],'sqlite-wal':new['artifact'],'tar-acl':tar['artifact'],'coreutils-acl':core['artifact']}
+ need(set(artifacts)==set(CACHE_ORIGINAL_GROUPS),'cache_inventory')
+ for group in CACHE_ORIGINAL_GROUPS:add(CACHE_ORIGINAL_ROOT+'/'+group+'.zip',artifacts[group])
+ need(len(expected)==NORMAL_CACHE_COUNT,'cache_inventory');return expected,new
 def context_rows(root,expected):
  need(type(expected)is dict and all(relative(name)for name in expected),'context_inventory')
  directories={''}
@@ -614,7 +629,7 @@ def receipt_contract(receipt,signature,controllers,cache_rows,epoch,glibc_runtim
   and r['path']in names and r['mode']in {'100644','100755'}and hex40(r['git_blob'])and hex64(r['sha256'])
   and type(r['bytes'])is int and 0<r['bytes']<=MAX_CONTROLLER_SOURCE for r in controllers)
   and controllers==sorted(controllers,key=lambda r:r['path'])and len({r['path']for r in controllers})==len(names),'controller_inventory')
- need(type(cache_rows)is dict and len(cache_rows)==26 and type(epoch)is int and 0<epoch<=4102444800,'controller_inventory')
+ need(type(cache_rows)is dict and len(cache_rows)==NORMAL_CACHE_COUNT and type(epoch)is int and 0<epoch<=4102444800,'controller_inventory')
  for name,row in cache_rows.items():
   need(relative(name)and name.startswith('pip_packages/')and type(row)is dict and set(row)=={'bytes','sha256'}
    and type(row['bytes'])is int and 0<=row['bytes']<=MAX_FILE and hex64(row['sha256']),'cache_binding')
@@ -762,7 +777,7 @@ def controller_parcel_inputs(root,receipt,controllers,cache,glibc_runtime=None):
  for name,pin in GLIBC_FILES.items():add('glibc-runtime/'+name,root/'glibc-capsule'/name,pin,0o644)
  add('glibc-runtime-Root-qualification.json',root/'controller-source'/GLIBC_ROOT,GLIBC_ROOT_PIN,0o644)
  need(len(receipt['release_files'])==release_count and len(receipt['product_files'])==count and len(controllers)==len(names)
-  and len(cache)==26 and len(result)==release_count+count+len(names)+26+6,'controller_parcel_inventory')
+  and len(cache)==NORMAL_CACHE_COUNT and len(result)==release_count+count+len(names)+NORMAL_CACHE_COUNT+6,'controller_parcel_inventory')
  need(sum(s['binding']['bytes']for s in result.values())<=MAX_CONTEXT,'controller_parcel_bound')
  return result
 
@@ -833,7 +848,7 @@ def controller_parcel(root,receipt,controllers,cache,signature,controller_signat
   need(archive.before==created,'controller_parcel_binding')
   verify_controller_parcel(archive,index,guard)
   value={'schema':'normal_market_complete_ci_controller_parcel/1','archive':archive.binding,'index_sha256':sha256(raw_index).hexdigest(),
-   'members':len(rows)+1,'sources':len(rows),'release_files':len(receipt['release_files']),'product_files':len(receipt['product_files']),'controller_files':len(controllers),'cache_files':26,'glibc_runtime_files':6,'glibc_runtime':glibc_runtime,
+   'members':len(rows)+1,'sources':len(rows),'release_files':len(receipt['release_files']),'product_files':len(receipt['product_files']),'controller_files':len(controllers),'cache_files':NORMAL_CACHE_COUNT,'glibc_runtime_files':6,'glibc_runtime':glibc_runtime,
    'release_commit':receipt['release_commit'],'business_commit':receipt['business_commit'],'two_git_input_signature':signature,
    'controller_input_signature':controller_signature,'complete_ci_controller_payload':True,
    'complete_deployment_control_payload':False,'activation_authority':False,'security_accepted':False}
@@ -954,7 +969,7 @@ def prepare_checked_caches(root,context,receipt,source_guard,*,retained=None,fin
   try:
    env=environment(root,token=True)
    env.update({key:os.environ[key]for key in('GITHUB_ACTIONS','RUNNER_ENVIRONMENT','GITHUB_REPOSITORY','GITHUB_REF','RUNNER_TEMP','GITHUB_WORKSPACE','GITHUB_SHA')})
-   command([sys.executable,'-I','-S','-B',str(root/'controller-source'/SHARED_CACHE),'--context-root',str(context)],
+   command([sys.executable,'-I','-S','-B',str(root/'controller-source'/SHARED_CACHE),'--context-root',str(context),'--retain-normal-original-zips'],
     environment=env,seconds=900,maximum=MAX_JSON,guard=check,target=fd)
   finally:os.fsync(fd);os.close(fd)
   for name,cache in [('prepare_app_security_os_cache.py',CACHE_ROOTS[0]),('prepare_sqlite_wal_os_cache.py',CACHE_ROOTS[1]),('prepare_tar_acl_os_cache.py',CACHE_ROOTS[2]),('prepare_coreutils_acl_os_cache.py',CACHE_ROOTS[3])]:
@@ -1394,14 +1409,147 @@ def finalize(root,repo,*,retained=None,final_checks=None,role=None):
   finish_or_transfer(resources,evidence_checks,retained,final_checks)
  need(output is not None,'export_not_completed');publish_known(root/'image-export.json',encoded(output),[row.named for row in resources if row is not None],retained=retained,final_checks=final_checks);return output
 
-def raw_gate(root,repo,*,retained=None,final_checks=None,role=None):
- hosted(root,repo);row=Held(root/'image-build.json',maximum=MAX_JSON);evidence=[];checks=[]
+def security_seed_inputs(raw):
+ """One exact reviewed Source ZIP; only bounded flat originals enter RAM."""
+ need(type(raw)is bytes and {'bytes':len(raw),'sha256':sha256(raw).hexdigest()}==SECURITY_SEED_PIN,'security_seed')
+ result={}
+ with zipfile.ZipFile(io.BytesIO(raw))as archive:
+  rows=archive.infolist()
+  need(len(rows)==29 and sum(row.file_size for row in rows)<=1024**2,'security_seed')
+  for row in rows:
+   need(re.fullmatch('[A-Za-z0-9][A-Za-z0-9._-]{0,127}',row.filename)and row.filename not in result
+    and not row.flag_bits&1 and 0<row.file_size<=196608 and not row.is_dir()
+    and not stat.S_ISLNK(row.external_attr>>16),'security_seed')
+   with archive.open(row)as incoming:payload=incoming.read(row.file_size+1)
+   need(len(payload)==row.file_size,'security_seed');result[row.filename]=payload
+ return result
+
+
+def same_image_security_gate(root,repo,observed,*,gate):
+ """Persist true current originals and re-assess them at each actual gate.
+
+ Failed preparation is retained and is never implicitly retried. The assessor's
+ finalizer physically closes this invocation's original readers before PASS.
+ The normal outer controller separately retains its existing source/clock finals.
+ """
+ global PHASE
+ need(gate in('raw','complete'),'security_gate')
+ PHASE='same_image_security_gate';readers=[];checks=[];closed=[False];result=None
+ work=root/'security-assessment';work_owned=False
+ def check():
+  if NORMAL_OPERATION is not None:NORMAL_OPERATION.check()
+  for item in readers:
+   if item.fd is not None:item.check()
+   else:item.named()
+  for callback in checks:callback()
+ def take(path,*,binding=None,maximum=MAX_JSON):
+  item=Held(path,maximum=maximum,binding=binding);readers.append(item);return item.raw(maximum)
+ def close_inputs():
+  need(not closed[0],'security_finalizer');closed[0]=True
+  finish_evidence(readers,checks)
+ def publish(path,raw):
+  need(type(raw)is bytes and 0<len(raw)<=MAX_JSON,'security_input_bound')
+  return publish_known(path,raw,prior_checks=[check])
  try:
-  record=document(row.raw());require_selected(record['source_inputs'],role);reopen_glibc_runtime(root,record,evidence)
-  counts,_=raw_reports(root,record['image_id'],retained=evidence,final_checks=checks)
- finally:finish_or_transfer([*evidence,row],checks,retained,final_checks)
- need(counts['HIGH']==counts['CRITICAL']==0,'raw_high_critical_findings')
- return {'status':'raw_high_critical_zero','security_accepted':False}
+  build_raw=take(root/'image-build.json');build=document(build_raw);receipt=build['source_inputs']
+  declared={row['path']:row for row in build['controller_inputs']['controller_files']};raws={}
+  for name in SECURITY_CONTROLLERS:
+   need(name in declared,'security_source_inventory')
+   raws[name]=take(root/'controller-source'/name,binding={key:declared[name][key]for key in('bytes','sha256')},maximum=MAX_CONTROLLER_SOURCE)
+  A=module(raws[SECURITY_ASSESSOR],root/'controller-source'/SECURITY_ASSESSOR)
+  R=module(raws[SECURITY_RUNTIME],root/'controller-source'/SECURITY_RUNTIME)
+  N=module(raws[SECURITY_NORMALIZER],root/'controller-source'/SECURITY_NORMALIZER)
+  index_path=work/'inputs.json';prepare=not work.exists()
+  if prepare:work.mkdir(mode=0o700);(work/'inputs').mkdir(mode=0o700)
+  info=identity(work.lstat())
+  need(work.resolve(strict=True)==work and stat.S_ISDIR(info[2])and stat.S_IMODE(info[2])==0o700
+   and info[3:5]==(os.geteuid(),os.getegid()),'security_work_directory');work_owned=True
+  if prepare:
+   originals=security_seed_inputs(raws[SECURITY_SEED])
+   original_paths={'product-build.json':root/'image-build.json','product-source.json':root/'source-identity.json',
+    'product-manifest.json':root/'input-manifest.json','product-Dockerfile':root/'sealed/release/deploy/market-data/Dockerfile.capture2',
+    'scan.json':root/'reports/vulnerabilities.json','sbom.json':root/'reports/sbom.cdx.json','image-export.json':root/'image-export.json',
+    'sqlite-probe.json':root/'reports/actual-sqlite.json','sqlite-lock.json':root/'sealed/release'/SQLITE_LOCK}
+   for name,path in original_paths.items():originals[name]=take(path)
+   for name,group in(('util.candidate.zip','util'),('ncurses.candidate.zip','ncurses'),('acl.candidate.zip','acl-tar')):
+    relative_name=CACHE_ORIGINAL_ROOT+'/'+group+'.zip';pin=build['controller_inputs']['normal_cache_files'].get(relative_name)
+    need(type(pin)is dict,'security_cache_original');originals[name]=take(root/'sealed/release'/relative_name,binding=pin)
+   originals.update({'factual-evidence.json':encoded(observed),'runtime-collector.py':raws[SECURITY_RUNTIME],
+    'normalizer.py':raws[SECURITY_NORMALIZER],'component-verifier.py':raws[SECURITY_COMPONENT],
+    'acl-verifier.py':raws[SECURITY_ACL],'current-review.json':raws[SECURITY_REVIEW]})
+   original_bindings={}
+   for name,raw in sorted(originals.items()):
+    need(A.NAME.fullmatch(name),'security_input_name');original_bindings[name]=publish(work/'inputs'/name,raw)
+   publish(work/'originals.json',encoded({'schema':'normal_market_current_security_originals/1','inputs':original_bindings,
+    'runtime_collection_performed':False,'security_accepted':False}))
+   PHASE='same_image_security_collection';expected,bundle=R.prepare_request(build,originals['runtime-vector.json'],
+    originals['sqlite-lock.json'],raws[SECURITY_COMPONENT],raws[SECURITY_ACL])
+   runtime=R.collect(sys.modules.get(__name__) or module_self(),root,bundle,raws[SECURITY_RUNTIME],check)
+   originals['runtime-observation.json']=encoded(runtime);originals['component-original.json']=encoded(runtime['component_presence'])
+   for name in('runtime-observation.json','component-original.json'):
+    original_bindings[name]=publish(work/'inputs'/name,originals[name])
+   PHASE='same_image_security_normalization';prepared=N.prepare(A,R,originals,now=int(time.time()))
+   bindings={}
+   for name,raw in sorted(prepared['inputs'].items()):
+    need(A.NAME.fullmatch(name),'security_input_name')
+    if name in originals:need(raw==originals[name],'security_original_changed');bindings[name]=original_bindings[name]
+    else:bindings[name]=publish(work/'inputs'/name,raw)
+   lock_pin=publish(work/'lock.json',prepared['lock_raw'])
+   publish(index_path,encoded({'schema':'normal_market_current_security_inputs/1','image_id':build['image_id'],
+    'release_commit':receipt['release_commit'],'two_git_input_signature':build['two_git_input_signature'],
+    'controller_input_signature':build['controller_input_signature'],'run_id':build['run_id'],'run_attempt':build['run_attempt'],
+    'lock':lock_pin,'inputs':bindings,'security_accepted':False}))
+  need(index_path.is_file(),'security_preparation_incomplete')
+  index=document(take(index_path));need(type(index)is dict and set(index)=={'schema','image_id','release_commit',
+   'two_git_input_signature','controller_input_signature','run_id','run_attempt','lock','inputs','security_accepted'}
+   and index['schema']=='normal_market_current_security_inputs/1'and index['security_accepted']is False
+   and all(index[key]==build[key]for key in('image_id','two_git_input_signature','controller_input_signature','run_id','run_attempt'))
+   and index['release_commit']==receipt['release_commit'],'security_input_identity')
+  need(type(index['inputs'])is dict and 0<len(index['inputs'])<=128
+   and all(type(name)is str and A.NAME.fullmatch(name)for name in index['inputs']),'security_input_inventory')
+  inputs={name:take(work/'inputs'/name,binding=pin)for name,pin in sorted(index['inputs'].items())}
+  need({path.name for path in(work/'inputs').iterdir()}==set(inputs),'security_input_inventory')
+  need(inputs['factual-evidence.json']==encoded(observed)and inputs['product-build.json']==build_raw
+   and inputs['current-review.json']==raws[SECURITY_REVIEW]and inputs['runtime-collector.py']==raws[SECURITY_RUNTIME]
+   and inputs['normalizer.py']==raws[SECURITY_NORMALIZER]and inputs['component-verifier.py']==raws[SECURITY_COMPONENT]
+   and inputs['acl-verifier.py']==raws[SECURITY_ACL],'security_original_changed')
+  lock_raw=take(work/'lock.json',binding=index['lock']);PHASE='same_image_security_gate'
+  result=A.assess(lock_raw,inputs['scan.json'],inputs['sbom.json'],inputs,now=int(time.time()),finalizer=close_inputs)
+  need(closed[0]is True,'security_finalizer')
+ except BaseException as error:
+  if work_owned:
+   code=error.args[0]if len(error.args)==1 and type(error.args[0])is str and error.args[0]in CODES else None
+   try:
+    publish_known(work/('failure-'+gate+'.json'),encoded({'schema':'normal_market_current_security_failure/1',
+     'phase':PHASE,'exception_class':type(error).__name__,'public_refusal_code':code,
+     'command_diagnostic':failure_diagnostic(error),'security_accepted':False}))
+   except BaseException as evidence_error:
+    raise BaseExceptionGroup('security refusal and evidence publication',[error,evidence_error])from None
+  raise
+ finally:
+  if not closed[0]:
+   primary=sys.exception()
+   try:close_inputs()
+   except BaseException as close_error:
+    if primary is not None:raise BaseExceptionGroup('security refusal and input closure',[primary,close_error])from None
+    raise
+ need(type(result)is dict and result.get('raw_counts')==observed['raw_counts']and result.get('security_accepted')is False
+  and result.get('scanner_findings_modified')is False,'security_assessment_result')
+ publish_known(work/('assessment-'+gate+'.json'),encoded(result),prior_checks=[row.named for row in readers])
+ need(result.get('status')=='PASS'and type(result.get('unresolved_count'))is int and result['unresolved_count']==0,'unresolved_high_critical_findings')
+ return result
+
+
+def module_self():
+ """The sealed workflow executes a namespace rather than registering a module."""
+ value=ModuleType('_normal_market_current_driver');value.__dict__.update(globals());return value
+
+
+def raw_gate(root,repo,*,retained=None,final_checks=None,role=None):
+ observed=complete_evidence(root,repo,retained=retained,final_checks=final_checks,role=role,publish_result=False)
+ assessment=same_image_security_gate(root,repo,observed,gate='raw')
+ return {'status':'same_image_security_evidence_passed','raw_counts':observed['raw_counts'],
+  'raw_gate_passed':observed['raw_gate_passed'],'assessment_policy_sha256':assessment['policy_sha256'],'security_accepted':False}
 def publish_known(path,raw,prior_checks=(),*,retained=None,final_checks=None):
  """Known bytes and all earlier named operands survive the writer's closes."""
  need(type(raw)is bytes and 0<len(raw)<=MAX_JSON,'output_bound')
@@ -1454,8 +1602,9 @@ def business81_outputs(root,build,guard,*,retained=None,final_checks=None):
   finish_or_transfer(rows,[],retained,final_checks)
 
 
-def complete_evidence(root,repo,*,retained=None,final_checks=None,role=None):
+def complete_evidence(root,repo,*,retained=None,final_checks=None,role=None,publish_result=True):
  """Observe existing same-image/controller evidence; no security acceptance."""
+ need(type(publish_result)is bool,'security_publication_mode')
  global PHASE
  PHASE='complete_ci_gate';hosted(root,repo);held=[];snapshots=[];value=None;evidence=[];evidence_checks=[]
  try:
@@ -1507,14 +1656,17 @@ def complete_evidence(root,repo,*,retained=None,final_checks=None,role=None):
  finally:
   resources=[*evidence,*held,*snapshots]
   finish_or_transfer(resources,evidence_checks,retained,final_checks)
- need(value is not None,'business81_actual');publish_known(root/'ci-evidence.json',encoded(value),[row.named for row in resources],retained=retained,final_checks=final_checks);return value
+ need(value is not None and type(publish_result)is bool,'business81_actual')
+ if publish_result:publish_known(root/'ci-evidence.json',encoded(value),[row.named for row in resources],retained=retained,final_checks=final_checks)
+ return value
 def complete_gate(root,repo,*,retained=None,final_checks=None,role=None):
- """Legacy strict raw-zero gate; factual completion cannot waive findings."""
+ """Reopen and re-assess the exact current persisted evidence at completion."""
  resources=[];checks=[];value=None
  try:
   observed=complete_evidence(root,repo,retained=resources,final_checks=checks,role=role)
-  counts=observed['raw_counts'];need(counts['HIGH']==counts['CRITICAL']==0,'raw_high_critical_findings')
+  assessment=same_image_security_gate(root,repo,observed,gate='complete')
   value=dict(observed,schema='normal_market_ci_complete_evidence/2'if role is not None else'normal_market_ci_complete_evidence/1',status='ci_evidence_complete_not_activated')
+  value.update(same_image_security_assessment_complete=True,assessment_policy_sha256=assessment['policy_sha256'])
  finally:finish_or_transfer(resources,checks,retained,final_checks)
  need(value is not None,'business81_actual')
  publish_known(root/'ci-completed.json',encoded(value),[row.named for row in resources],retained=retained,final_checks=final_checks)
@@ -1548,6 +1700,9 @@ def main(argv=None,*,retained=None,final_checks=None):
 
 CODES=frozenset(('archive_bound', 'archive_config', 'archive_shape', 'arguments', 'build_contract', 'build_not_completed', 'build_receipt', 'buildx_driver', 'cache_binding', 'cache_inventory', 'clean_main_required', 'command_bound', 'command_contract', 'command_failed', 'command_timeout', 'context_bound', 'context_changed', 'context_directory', 'context_inventory', 'controller_inventory', 'controller_signature', 'controller_source', 'controller_source_bound', 'disk_reserve', 'export_not_completed', 'historical81_business_producer_not_integrated', 'hosted_main_only', 'image_config', 'image_identity', 'image_labels', 'image_layers', 'json_bound', 'json_duplicate', 'json_nonfinite', 'live_main_changed', 'live_main_scope', 'normal_main_integration_unarmed', 'normal_workflow_token_required', 'output_bound', 'output_write', 'probe_cleanup', 'probe_exit', 'probe_isolation', 'probe_mounts', 'probe_owner', 'probe_resources', 'probe_scope', 'raw_high_critical_findings', 'release_commit', 'report_changed', 'report_identity', 'report_shape', 'repository_identity', 'root_scope', 'source93_probe', 'source_binding', 'source_bound', 'source_changed', 'source_contract', 'source_epoch', 'source_file', 'source_parent', 'sqlite_lock', 'sqlite_probe', 'two_git_signature', 'vendor_lock'))
 CODES=CODES|frozenset(('separate_role_fixture_review_required','role_fixture_helper_pin','role_fixture_contract_pin','coreutils_lock','role_component','role_catalog','role_manifest','role_receipt','role_candidate','reader_role_source_pin','reader_source_pin','reader_source_contract','probe_diagnostic','evidence_ownership','actual_profile_exit', 'actual_test_completion', 'actual_test_selection', 'baseline_pin', 'business81_actual', 'business81_assertion_approval', 'business81_assertion_approval_pin', 'business81_assertion_paths', 'business81_assertion_scope', 'business81_bundle', 'business81_cleanup', 'business81_deadline', 'business81_exit', 'business81_fixture_pin', 'business81_helper_pin', 'business81_image', 'business81_image_changed', 'business81_isolation', 'business81_mounts', 'business81_network', 'business81_output_bound', 'business81_output_finalizers', 'business81_output_write', 'business81_owner', 'business81_plans', 'business81_resources', 'business81_source', 'business81_start', 'business81_start_timeout', 'business81_two_git', 'candidate_scope', 'combined_actual_selection', 'container_plan', 'controller_parcel_binding', 'controller_parcel_bound', 'controller_parcel_deadline', 'controller_parcel_inventory', 'fixture_inventory', 'fixture_original', 'helper_inventory', 'helper_pin', 'historical_inventory', 'physical_finalizer', 'profile_identity', 'profile_result', 'profile_results', 'profile_selection', 'release_recipe_source', 'replay_original', 'replay_selection', 'security_assertion_delta', 'security_assertion_original', 'security_assertion_scope', 'selection', 'separate_security_assertion_review_required', 'source_changed', 'source_closed_changed', 'source_metadata', 'source_open', 'source_parent', 'source_pin', 'tar_lock', 'test_id_duplicate'))
+CODES=CODES|frozenset(('security_seed','security_gate','security_finalizer','security_input_bound','security_source_inventory','security_cache_original','security_input_name','security_original_changed','security_preparation_incomplete','security_input_identity','security_input_inventory','security_assessment_result','security_publication_mode','security_work_directory','unresolved_high_critical_findings'))
+CODES=CODES|frozenset(('abi_not_verified', 'absence_advisory_not_supported', 'absence_advisory_scope', 'absence_missing_or_ambiguous', 'absence_scope', 'acl_caller_fix_missing', 'acl_caller_identity', 'acl_caller_inventory', 'acl_caller_payload_binding', 'acl_callers_unresolved', 'acl_library_only', 'acl_source_receipt', 'advisory_review', 'advisory_review_missing', 'aggregate_bound', 'archive_inventory', 'archive_member', 'assessor_dependency', 'binding_value', 'build_record_pin', 'clock_type', 'completion_contract', 'component_absence_advisory', 'component_absence_facts', 'component_absence_identity', 'component_absence_installed', 'component_absence_original', 'component_absence_package', 'component_absence_perl_inc', 'component_absence_perl_present', 'component_absence_present', 'component_absence_proof', 'component_absence_roots', 'component_absence_scope', 'component_absence_verifier', 'component_not_absent', 'current_advisory', 'current_package_inventory', 'current_source', 'current_version', 'disposition', 'duplicate_finding', 'duplicate_json_key', 'duplicate_rule', 'family', 'family_inputs', 'finalizer_failed', 'finalizer_required', 'finding_bound', 'finding_coverage', 'finding_fields', 'finding_identifier', 'finding_layer', 'finding_sbom', 'finding_sbom_ambiguous', 'finding_scope', 'finding_source_disagreement', 'input_binding', 'input_bound', 'input_buffer_type', 'input_inventory', 'input_name', 'input_names', 'json_bound', 'json_depth', 'json_nonfinite', 'json_syntax', 'lock_unarmed', 'member_bound', 'namespace', 'native_payload_missing_or_ambiguous', 'normal_caller_inventory', 'normal_caller_original', 'normal_caller_payload', 'normal_caller_smoke', 'normal_cleanup_gate', 'normal_component_projection', 'normal_current_review', 'normal_export_gate', 'normal_factual_gate', 'normal_original_inputs', 'normal_producer_source', 'normal_proof_originals', 'normal_runtime_scope', 'normal_source_adapter', 'normal_source_payload', 'normal_source_row', 'normal_sqlite_gate', 'normal_unreviewed_acl_caller', 'original_compile_provenance', 'original_pin', 'original_proof_inputs', 'output_bound', 'package_deb_pin', 'package_epoch_version', 'package_inventory', 'payload_file', 'payload_files', 'payload_identity', 'payload_incomplete', 'payload_mismatch', 'payload_packages', 'preserve_historical_open', 'primary_callers', 'primary_component', 'primary_identity', 'primary_inventory', 'primary_origin', 'primary_versions', 'product_app_build', 'product_app_manifest', 'product_app_signature', 'product_app_source', 'product_build_binding', 'product_controller_signature', 'product_file_inventory', 'product_inputs', 'product_market_build', 'product_market_inventory', 'product_market_manifest', 'product_market_role', 'product_market_source', 'product_proof_originals', 'product_recipe_binding', 'proof_binding', 'proof_inputs', 'proof_inventory', 'proof_kind', 'proof_source', 'purl_encoding', 'purl_epoch', 'purl_namespace', 'purl_package', 'purl_platform', 'purl_qualifier', 'purl_version', 'receipt_boundary', 'receipt_pin', 'recipe_identity', 'recipe_pin', 'report_binding', 'required_gate', 'required_gate_coverage', 'required_gate_failed', 'required_gates', 'result_bound', 'rule_bound', 'rule_shape', 'runtime_actual_files', 'runtime_bundle_bound', 'runtime_caller_smoke', 'runtime_cleanup_identity', 'runtime_cleanup_incomplete', 'runtime_collector_input', 'runtime_container_preexisting', 'runtime_cp_smoke', 'runtime_duplicate_json', 'runtime_expected_packages', 'runtime_file_changed', 'runtime_file_close', 'runtime_file_metadata', 'runtime_file_short', 'runtime_identity', 'runtime_install_smoke', 'runtime_installed_source', 'runtime_installed_version', 'runtime_nonfinite_json', 'runtime_observation_deadline', 'runtime_observation_incomplete', 'runtime_original_budget', 'runtime_original_vector', 'runtime_package_duplicate', 'runtime_package_missing', 'runtime_package_record', 'runtime_packages', 'runtime_paths', 'runtime_payload_mismatch', 'runtime_receipt_identity', 'runtime_report_bound', 'runtime_request', 'runtime_sed_smoke', 'runtime_sqlite_lock', 'runtime_tar_smoke', 'runtime_total_bound', 'runtime_verifier_source', 'sbom_bound', 'sbom_component', 'sbom_image', 'sbom_properties', 'sbom_property', 'sbom_purl', 'scan_image', 'scan_os', 'scan_result', 'scan_results', 'scan_severity', 'scan_vulnerabilities', 'scope_value', 'security_review_expired', 'source_fix_missing_or_ambiguous', 'source_package', 'source_proof', 'source_tests', 'source_version', 'sqlite_fts5_originals', 'sqlite_fts5_package', 'sqlite_fts5_payload', 'sqlite_fts5_probe', 'sqlite_fts5_probe_originals', 'sqlite_fts5_source', 'subdir_boundary', 'subdir_contract', 'subdir_exits', 'subdir_fixture', 'subdir_package', 'subdir_profiles', 'unresolved_proofs', 'unused_proof', 'upstream_suite', 'vendor_source'))
+CODES=CODES|frozenset(('normal_sqlite_fts5_original','normal_sqlite_fts5_payload'))
 CODES=CODES|frozenset(('glibc_runtime_binding', 'glibc_runtime_source', 'glibc_runtime_record', 'glibc_runtime_custody', 'glibc_runtime_inventory', 'glibc_runtime_OFD', 'glibc_runtime_original_custody_changed', 'glibc_runtime_changed', 'glibc_runtime_closed', 'glibc_runtime_close_unknown', 'glibc_runtime_foreign_FD', 'glibc_runtime_artifact', 'glibc_runtime_prepare', 'glibc_runtime_subject', 'glibc_runtime_argv', 'glibc_runtime_recipe'))
 def failure_diagnostic(error):
  # Only public exception type/code locations; never args, locals or absolute paths.
@@ -1579,7 +1734,7 @@ def closed_failure(error):
   return code,kind
  code,kind=fields(error)
  history=OUTER_FAILURE if OUTER_FAILURE is not None and OUTER_FAILURE[0]is error else None
- return {'schema':'normal_market_two_source_ci_failure/1','status':'refused','phase':PHASE if PHASE in ('bootstrap','controller_source','business81_source_preflight','git_product_seal','glibc_runtime_prepare','normal_cache_prepare','normal_cache_check','context_restamp','ordinary_build','actual_image','actual_source93','actual_source_role','actual_sqlite','actual_historical81','controller_sources_parcel','build_finalization','raw_report_binding','ordinary_image_export','ordinary_image_compression','export_finalization','complete_ci_gate')else'bootstrap',
+ return {'schema':'normal_market_two_source_ci_failure/1','status':'refused','phase':PHASE if PHASE in ('bootstrap','controller_source','business81_source_preflight','git_product_seal','glibc_runtime_prepare','normal_cache_prepare','normal_cache_check','context_restamp','ordinary_build','actual_image','actual_source93','actual_source_role','actual_sqlite','actual_historical81','controller_sources_parcel','build_finalization','raw_report_binding','ordinary_image_export','ordinary_image_compression','export_finalization','complete_ci_gate','same_image_security_collection','same_image_security_normalization','same_image_security_gate')else'bootstrap',
   'code':code,'exception_class':kind,'diagnostic':failure_diagnostic(error),'original_diagnostic':failure_diagnostic(history[1])if history is not None and history[1]is not None else None,'outer_physical_finalizers_completed':bool(history is not None and OUTER_PHYSICAL_FINALIZERS_COMPLETED),
   'original_failure_code':fields(history[1])[0]if history is not None and history[1]is not None else None,
   'physical_finalizer_failures':[{'stage':stage,'code':fields(exc)[0],'exception_class':fields(exc)[1]}for stage,exc in history[2]]if history is not None else[],

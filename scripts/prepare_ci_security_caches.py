@@ -102,7 +102,9 @@ def context_root(value):
         read(root/'scripts'/name,1024**2,pin)
     return root
 
-def main(context=None):
+def main(context=None,*,retain_normal_original_zips=False):
+    if type(retain_normal_original_zips) is not bool or (retain_normal_original_zips and context is None):
+        raise RuntimeError('release_originals_normal_context_required')
     root=context_root(context)
     helper=runpy.run_path(str(root/'scripts/prepare_app_security_os_cache.py'))
     need=helper['need'];document=helper['document']
@@ -129,7 +131,7 @@ def main(context=None):
                 if group=='security-os':result=helper['prepare_cache'](path,check_only=True)
                 else:result=extras[group][0]['prepare'](path,check_only=True)
                 need(result.get('status')=='cache_verified' and result.get('security_accepted') is False,'release_existing_cache')
-        if all(present):
+        if all(present) and not retain_normal_original_zips:
             held.check()
             for _,gate in extras.values():gate.check()
             print('All four authentic CI caches verified without download; security acceptance remains false.')
@@ -187,6 +189,11 @@ def main(context=None):
         # original ZIP, receipt, package, recipe and manifest pins remain in force.
         with tempfile.TemporaryDirectory(prefix='npm-app-os-',dir=os.environ['RUNNER_TEMP']) as temporary:
             paths={}
+            originals=cache.parent/'security-assessment-originals'
+            if retain_normal_original_zips:
+                cache.parent.mkdir(exist_ok=True)
+                need(not originals.exists(),'release_originals_preexisting')
+                originals.mkdir(mode=0o755)
             for group,identifier in ASSET_IDS.items():
                 spec=specs[group]
                 endpoint=('actions/artifacts/'+str(spec['id'])+'/zip' if group=='sqlite-wal'
@@ -195,6 +202,8 @@ def main(context=None):
                 raw=api(endpoint,spec['bytes'],accept)
                 need(len(raw)==spec['bytes'] and sha256(raw).hexdigest()==spec['sha256'],'release_payload_pin')
                 path=Path(temporary)/(group+'.zip');helper['write_new'](path,raw,0o600);paths[group]=path
+                if retain_normal_original_zips:
+                    helper['write_new'](originals/(group+'.zip'),raw,0o644)
                 held.check()
             cache.parent.mkdir(exist_ok=True)
             result=helper['prepare_cache'](cache,{group:paths[group] for group in recipe.lock['artifacts']});held.check()
@@ -209,4 +218,6 @@ def main(context=None):
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description='Admit only the exact public shared CI cache assets.')
     parser.add_argument('--context-root',type=Path)
-    main(parser.parse_args().context_root)
+    parser.add_argument('--retain-normal-original-zips',action='store_true')
+    args=parser.parse_args()
+    main(args.context_root,retain_normal_original_zips=args.retain_normal_original_zips)
