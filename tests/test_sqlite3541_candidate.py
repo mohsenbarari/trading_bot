@@ -82,7 +82,8 @@ class CandidateSourceTests(unittest.TestCase):
   lifecycle=(AREA/'lifecycle.c').read_text();verify=(AREA/'verify.py').read_text()
   self.assertIn('pthread_create',lifecycle);self.assertIn('sqlite3_shutdown()',lifecycle);self.assertIn('sqlite3_initialize()',lifecycle)
   self.assertIn('SQLITE_DBCONFIG_FP_DIGITS, 0, &digits',lifecycle);self.assertIn('cycle < 4',lifecycle)
-  self.assertIn('legacy_CAST_JSON_numeric_parity',verify);self.assertIn('fresh_connection_numeric_parity',verify)
+  self.assertIn('legacy_CAST_numeric_parity',verify);self.assertIn('quote_JSON_numeric_roundtrip',verify)
+  self.assertIn('require_numeric_compatibility(baseline,numeric_observation(fresh))',verify)
   self.assertIn("sqlite3.connect(root/'candidate-backup.db')",verify);self.assertIn("connection.set_authorizer",verify)
  def test_vendor_shell_probe_gets_a_separate_writable_source_copy(self):
   with tempfile.TemporaryDirectory(prefix='sqlite3541-vendor-copy-',dir=ROOT/'tests')as folder:
@@ -185,5 +186,23 @@ class CandidateSourceTests(unittest.TestCase):
      sources=(root/'sources').read_text()
      self.assertIn('https://archive.ubuntu.com/ubuntu',sources);self.assertIn('signed-by=/PUBLIC-UBUNTU-KEY',sources)
      self.assertNotIn('check-valid-until=no',sources);self.assertNotIn('trusted=yes',sources)
+
+class NumericContractTests(unittest.TestCase):
+ def module(self):
+  m=ModuleType('owned_numeric_contract');m.__file__=str(AREA/'verify.py');exec(compile((AREA/'verify.py').read_bytes(),m.__file__,'exec'),m.__dict__);return m
+ def test_unused_quote_JSON_spelling_does_not_override_exact_CAST_and_values(self):
+  m=self.module();old={'numeric_contract':m.NUMERIC_CONTRACT,'numeric_digest':'a'*64,'numeric_format_digests':{'quote':'b'*64}}
+  new={'numeric_contract':m.NUMERIC_CONTRACT,'numeric_digest':'a'*64,'numeric_format_digests':{'quote':'c'*64},'numeric_roundtrip_failures':{'quote':0,'json_array':0,'json_object':0}}
+  m.require_numeric_compatibility(old,new)
+  with self.assertRaisesRegex(RuntimeError,'legacy_CAST_numeric_parity'):m.require_numeric_compatibility(old,dict(new,numeric_digest='d'*64))
+ def test_every_quote_JSON_numeric_roundtrip_failure_still_blocks(self):
+  m=self.module();base={'numeric_contract':m.NUMERIC_CONTRACT,'numeric_digest':'a'*64}
+  for key in ('quote','json_array','json_object'):
+   failures={'quote':0,'json_array':0,'json_object':0};failures[key]=1
+   with self.subTest(key=key),self.assertRaisesRegex(RuntimeError,'quote_JSON_numeric_roundtrip'):m.require_numeric_compatibility(base,dict(base,numeric_roundtrip_failures=failures))
+ def test_old_or_missing_numeric_contract_cannot_be_accepted(self):
+  m=self.module();base={'numeric_contract':m.NUMERIC_CONTRACT,'numeric_digest':'a'*64};new=dict(base,numeric_roundtrip_failures={'quote':0,'json_array':0,'json_object':0})
+  for value in (None,'legacy_all_JSON_bytes_equal'):
+   with self.subTest(value=value),self.assertRaisesRegex(RuntimeError,'numeric_contract'):m.require_numeric_compatibility(base,dict(new,numeric_contract=value))
 
 if __name__=='__main__':unittest.main()

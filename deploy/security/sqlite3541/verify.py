@@ -32,11 +32,22 @@ def samples():
   value=struct.unpack('!d',rng.getrandbits(64).to_bytes(8,'big'))[0]
   if math.isfinite(value):values.append(value)
  return values
-def numeric(connection):
- result=[]
+NUMERIC_CONTRACT='legacy_cast15_exact_quote_json_numeric_roundtrip_exact'
+def numeric_observation(connection):
+ names=('CAST','quote','json_array','json_object');outputs={name:[]for name in names}
+ failures={name:0 for name in names[1:]}
  for value in samples():
-  result.append(connection.execute("SELECT CAST(? AS TEXT),quote(?),json_array(?),json_object('p',?)",(value,)*4).fetchone())
- return sha256(encoded(result)).hexdigest()
+  row=connection.execute("SELECT CAST(? AS TEXT),quote(?),json_array(?),json_object('p',?),CAST(quote(?) AS REAL),json_extract(json_array(?),'$[0]'),json_extract(json_object('p',?),'$.p')",(value,)*7).fetchone()
+  for i,name in enumerate(names):outputs[name].append(row[i])
+  for i,name in enumerate(names[1:]):failures[name]+=row[i+4]!=value
+ digests={name:sha256(encoded(rows)).hexdigest()for name,rows in outputs.items()}
+ return {'numeric_contract':NUMERIC_CONTRACT,'numeric_digest':digests['CAST'],
+  'numeric_format_digests':digests,'numeric_roundtrip_failures':failures}
+def numeric(connection):return numeric_observation(connection)['numeric_digest']
+def require_numeric_compatibility(baseline,result):
+ need(baseline.get('numeric_contract')==result.get('numeric_contract')==NUMERIC_CONTRACT,'numeric_contract')
+ need(result['numeric_digest']==baseline['numeric_digest'],'legacy_CAST_numeric_parity')
+ need(result.get('numeric_roundtrip_failures')=={'quote':0,'json_array':0,'json_object':0},'quote_JSON_numeric_roundtrip')
 def facts(connection,package):
  import _sqlite3,sqlite3
  need(sys.flags.isolated and sys.flags.dont_write_bytecode and not any(k in os.environ for k in('LD_PRELOAD','LD_LIBRARY_PATH','PYTHONPATH','PYTHONHOME')),'unmodified_system_python')
@@ -46,7 +57,7 @@ def facts(connection,package):
  options=sorted(r[0]for r in connection.execute('PRAGMA compile_options'))
  return{'sqlite_runtime':sqlite3.sqlite_version,'sqlite_source_id':connection.execute('SELECT sqlite_source_id()').fetchone()[0],
   'package':package,'compile_options':options,'limits':[connection.getlimit(i)for i in range(12)],
-  'numeric_samples':len(samples()),'numeric_digest':numeric(connection),'library':mapped(LIBRARY,maps),
+  'numeric_samples':len(samples()),**numeric_observation(connection),'library':mapped(LIBRARY,maps),
   'stdlib_extension':mapped(Path(_sqlite3.__file__),maps),'production_data_accessed':False,'security_accepted':False}
 def ordinary(connection):
  import sqlite3
@@ -86,7 +97,7 @@ def main():
   elif phase=='candidate':
    baseline=json.loads((root/'baseline.json').read_bytes());result=facts(con,args.package)
    need(result['sqlite_source_id'].endswith(SOURCE_ID),'canonical_installed_source_id')
-   need(result['numeric_digest']==baseline['numeric_digest'],'legacy_CAST_JSON_numeric_parity')
+   require_numeric_compatibility(baseline,result)
    need(result['limits']==baseline['limits'],'connection_limit_parity');need(query(con)==EXPECTED,'old_database_read')
    need(any('quote_lookup'in r[3]for r in con.execute('EXPLAIN QUERY PLAN '+QUERY,('emami',))),'market_lookup_index')
    ordinary(con)
@@ -100,9 +111,9 @@ def main():
    baseline=json.loads((root/'baseline.json').read_bytes())
    for _ in range(8):
     fresh=sqlite3.connect(':memory:')
-    try:need(numeric(fresh)==baseline['numeric_digest'],'fresh_connection_numeric_parity')
+    try:require_numeric_compatibility(baseline,numeric_observation(fresh))
     finally:fresh.close()
-   need(sqlite3.sqlite_version=='3.54.1','fresh_candidate_version');print('PASS: eight new independent connections preserve legacy CAST/JSON outputs');return
+   need(sqlite3.sqlite_version=='3.54.1','fresh_candidate_version');print('PASS: eight independent connections preserve legacy CAST and exact quote/JSON numeric roundtrip');return
   elif phase=='old-reopen':
    expected=json.loads((root/'candidate.json').read_bytes())['query_result'];need(query(con)==expected,'old_library_reopens_new_write');integrity(con)
    backup=sqlite3.connect(root/'candidate-backup.db');need(query(backup)==expected,'old_library_reopens_new_backup');integrity(backup);backup.close()
@@ -110,7 +121,7 @@ def main():
    result={'phase':phase,'package':args.package,'old_library_reopened_candidate_and_backup':True,'query_result':query(con),'library':identity(LIBRARY),'security_accepted':False};need(sqlite3.sqlite_version==args.package.split('-',1)[0],'old_reopen_runtime');put(root/'old-reopen.json',result)
   else:
    expected=json.loads((root/'old-reopen.json').read_bytes())['query_result'];need(query(con)==expected,'candidate_reopens_old_rollback_write');integrity(con)
-   baseline=json.loads((root/'baseline.json').read_bytes());result=facts(con,args.package);need(result['numeric_digest']==baseline['numeric_digest'],'reinitialized_numeric_parity');result.update(phase=phase,query_result=query(con));put(root/'candidate-reopen.json',result)
+   baseline=json.loads((root/'baseline.json').read_bytes());result=facts(con,args.package);require_numeric_compatibility(baseline,result);result.update(phase=phase,query_result=query(con));put(root/'candidate-reopen.json',result)
  finally:con.close()
  print('PASS: '+phase)
 if __name__=='__main__':main()

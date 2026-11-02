@@ -34,8 +34,8 @@ and repeated shutdown/reinitialization are exercised before Python probes.
 
 The unmodified upstream `make test` suite runs in a separate default-17 build.
 Its result is explicitly not claimed as a production-15 test result. Production
-probes compare 2,048 deterministic CAST/quote/JSON numeric samples with the actual
-old library, exercise multiple fresh Python processes, and test eight simultaneous
+probes compare 2,048 deterministic CAST samples with the actual old library and
+require exact quote/JSON numeric roundtrip, exercise multiple fresh Python processes, and test eight simultaneous
 first connections in each of four shutdown/reinitialize cycles (32 total). They also exercise
 WAL snapshots, upsert, rollback/savepoints, JSON/FTS/RTree, the lookup index and
 authorizer, backup/integrity and old→new→old→new database reopen. All databases
@@ -58,3 +58,12 @@ Official references:
 - https://www.sqlite.org/c3ref/c_dbconfig_defensive.html#sqlitedbconfigfpdigits
 - https://www.sqlite.org/c3ref/auto_extension.html
 - https://www.sqlite.org/formatchng.html
+
+Numeric acceptance is scoped to actual frozen business call sites: all 2048
+finite-double CAST strings remain byte-identical; quote/JSON constructors must
+round-trip each finite numeric value exactly. Their per-function text hashes are
+retained as observations, without claiming old quote/JSON spelling is unchanged.
+The exact frozen App and ten Market role sources, Golden and known host consumers
+use Python JSON serialization for events/hashes and no SQLite quote/JSON
+constructors. SQLite JSON extraction predicates and all actual App32/Market81,
+ABI, feature, lifecycle and database-reopen gates remain required.
