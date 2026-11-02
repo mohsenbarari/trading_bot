@@ -225,14 +225,17 @@ def product_profile(lock,inputs):
   need(all(type(receipt.get(k))is str and re.fullmatch('[a-f0-9]{40}',receipt[k])for k in('business_commit','business_tree'))
    and receipt['business_commit']!=receipt['release_commit'],'product_market_source')
   controller=build.get('controller_inputs');signature=build.get('controller_input_signature')
-  need(type(controller)is dict and controller.get('schema')=='normal_market_controller_inputs/1'
+  need(type(controller)is dict and controller.get('schema')in('normal_market_controller_inputs/1','normal_market_controller_inputs/2')
    and controller.get('release_commit')==receipt['release_commit']and controller.get('release_tree')==receipt['release_tree']
    and controller.get('two_git_input_signature')==expected['input_signature']and type(signature)is str
    and HEX.fullmatch(signature)and sha256(encoded(controller)).hexdigest()==signature,'product_controller_signature')
   need(source.get('schema')=='normal_market_source_identity/1'and same(source.get('inputs'),receipt)
    and source.get('input_signature')==expected['input_signature']and same(source.get('controller'),controller)
    and source.get('controller_signature')==signature,'product_market_source')
-  need(manifest.get('schema')=='normal_market_two_context_inputs/1'and manifest.get('two_git_input_signature')==expected['input_signature']
+  if controller['schema']=='normal_market_controller_inputs/2':
+   normal_controller_v2(controller,manifest,build,receipt)
+  else:need(manifest.get('schema')=='normal_market_two_context_inputs/1','product_market_manifest')
+  need(manifest.get('two_git_input_signature')==expected['input_signature']
    and manifest.get('controller_input_signature')==signature,'product_market_manifest')
   public_rows(receipt.get('release_files'),recipe=recipe,recipe_raw=recipe_raw)
   release=manifest.get('release');need(type(release)is dict and recipe in release
@@ -262,6 +265,33 @@ def product_profile(lock,inputs):
  else:raise Refused('product_build_schema')
  return {'profile':profile,'recipe':recipe,'role':role,'input_names':frozenset(names.values()),
   'original_inputs':{key:lock['inputs'][name]for key,name in names.items()}}
+
+def normal_controller_v2(controller,manifest,build,receipt):
+ """The actual normal producer's glibc context is part of the signed record."""
+ keys(controller,{'schema','release_commit','release_tree','repository_identity','two_git_input_signature','controller_files',
+  'normal_cache_files','glibc_runtime','source_date_epoch','source_signature_format_unchanged','business_tests_actual',
+  'complete_control_payload','activation_authority','security_accepted'},'product_controller_signature')
+ need(controller['repository_identity']==receipt['repository_identity']
+  and controller['source_signature_format_unchanged']=='normal-market-two-git-sources-v1'
+  and all(controller[key]is False for key in('business_tests_actual','complete_control_payload','activation_authority','security_accepted'))
+  and integer(controller['source_date_epoch'],1,4102444800),'product_controller_signature')
+ public_rows(controller['controller_files'])
+ cache=controller['normal_cache_files'];need(type(cache)is dict and 1<=len(cache)<=128,'product_controller_signature')
+ for path,pin in cache.items():
+  need(type(path)is str and path.startswith('pip_packages/')and not PurePosixPath(path).is_absolute()
+   and '..'not in PurePosixPath(path).parts and str(PurePosixPath(path))==path,'product_controller_signature')
+  keys(pin,{'bytes','sha256'},'product_controller_signature')
+  need(integer(pin['bytes'],0,64*1024**2)and type(pin['sha256'])is str and HEX.fullmatch(pin['sha256']),'product_controller_signature')
+ runtime=controller['glibc_runtime']
+ keys(runtime,{'schema','Root_qualification','named_context','context_signature','custody'},'product_controller_signature')
+ need(runtime['schema']=='normal_market_glibc_runtime_context/1'
+  and runtime['Root_qualification']=={'bytes':23392,'sha256':'7cacf5aaf2c03759343c4a355fe9e8f0e414412fae22ccce0d17eb22c7a2073d'}
+  and runtime['context_signature']==sha256(encoded(runtime['named_context'])).hexdigest()
+  and runtime['context_signature']=='7f7a43963d37f99c584b3d5ad6b6bc0de9fcbdb97815e50d25d934cc0109815d'
+  and build.get('glibc_runtime')==runtime,'product_controller_signature')
+ keys(manifest,{'schema','release','product','glibc_runtime','two_git_input_signature','controller_input_signature','source_date_epoch','security_accepted'},'product_market_manifest')
+ need(manifest['schema']=='normal_market_two_git_glibc_context_inputs/1'and manifest['security_accepted']is False
+  and manifest['glibc_runtime']==runtime and manifest['source_date_epoch']==controller['source_date_epoch'],'product_market_manifest')
 
 def sqlite_fts5_fixed(package,selected,inputs,product_inputs):
  """Only the already authenticated f88 FTS5 backport and mapped image DSO.
