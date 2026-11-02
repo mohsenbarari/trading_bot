@@ -686,7 +686,7 @@ def preparation_notes(task, sources):
         if allowed_new_tests:
             # Global drafting ceiling; the complete per-path profile below still
             # limits smaller siblings independently.
-            cap = max(min(32000, profile["total_limit"], profile["file_limits"][path])
+            cap = max(min(64000, profile["total_limit"], profile["file_limits"][path])
                       for path in allowed_new_tests)
             out_contract["max_new_test_file_utf8_bytes"] = cap
             if len(allowed_new_tests) == 1:

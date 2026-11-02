@@ -2383,7 +2383,7 @@ def _new_test_file_limits(task: dict, original_sources: dict) -> dict[str, int]:
         if is_new:
             cap = 24000
             if profile is not None:
-                cap = min(32000, profile["file_limits"][path], profile["total_limit"])
+                cap = min(64000, profile["file_limits"][path], profile["total_limit"])
             limits[path] = cap
     return limits
 

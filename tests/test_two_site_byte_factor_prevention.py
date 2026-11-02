@@ -60,8 +60,10 @@ def test_notes_single_actual_cap_targets_detached_and_legacy_unchanged():
         "max_new_test_file_utf8_bytes": 24000, "test_only_task": True, "new_test_files": [TEST]}
 
 
-@pytest.mark.parametrize("cap,total,effective,target", [(30000,40000,30000,22500), (40000,40000,32000,24000),
-    (32000,28000,28000,21000),
+@pytest.mark.parametrize("cap,total,effective,target", [(22000,40000,22000,16500),
+    (30000,40000,30000,22500), (40000,64000,40000,30000),
+    (64000,160000,64000,48000), (96000,160000,64000,48000),
+    (64000,28000,28000,21000),
     (12000,8000,8000,6000), (1,40000,1,0)])
 def test_notes_stricter_total_and_generic_cap(cap, total, effective, target):
     task, sources, _ = notes_fixture({TEST: cap}, total)
@@ -257,7 +259,8 @@ def test_notes_two_profiled_tests_match_actual_per_path_limits_without_mutation(
 
 @pytest.mark.parametrize("declared,total,effective", [
     (22000, 68000, 22000), (32000, 68000, 32000),
-    (40000, 68000, 32000), (32000, 28000, 28000),
+    (40000, 64000, 40000), (64000, 160000, 64000),
+    (96000, 160000, 64000), (64000, 28000, 28000),
 ])
 @pytest.mark.parametrize("letter", ["x", "é"])
 def test_profiled_pre_review_uses_same_utf8_cap_before_sandbox(
@@ -273,7 +276,7 @@ def test_profiled_pre_review_uses_same_utf8_cap_before_sandbox(
     with (patch.object(receipts, "tracked_test_inventory", return_value=[TEST]),
           patch.object(receipts, "normalize_test_selectors", return_value=([TEST], [])),
           patch.object(receipts.two_site_agent_sandbox, "run_tests", return_value=sandbox_result) as run):
-        for size in [effective, effective + 1, 28690, effective]:
+        for size in [effective, effective + 1, 32363, effective]:
             count, tail = divmod(size - 2, len(letter.encode("utf-8")))
             content = "#" + letter * count + "x" * tail + "\n"
             assert len(content.encode("utf-8")) == size

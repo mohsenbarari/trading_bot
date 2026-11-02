@@ -115,14 +115,15 @@ def test_total_only_counts_every_changed_file_including_docs(tmp_path, deps):
           expected(f"AssertionError: proposal total exceeds 30 byte limit: {total} bytes", "static-byte-profile", "FAILED"))
 
 
-def test_existing_test_declared_cap_can_exceed_24k_but_new_cannot(tmp_path, deps):
+def test_explicit_new_test_declared_cap_and_legacy_existing_source_remain_distinct(tmp_path, deps):
     profile = copy.deepcopy(PROFILE)
     profile["file_limits"][TEST] = 30000
     profile["total_limit"] = 40000
     task, worker = fixtures(profile)
-    worker["changes"][1]["content"] = "#" * 24001
+    worker["changes"][1]["content"] = "#" * 30001
     cycle(tmp_path, deps, task, worker,
-          expected(f"AssertionError: {TEST} exceeds 24000 byte limit: 24001 bytes", "static-byte-profile", "FAILED"))
+          expected(f"AssertionError: {TEST} exceeds 30000 byte limit: 30001 bytes", "static-byte-profile", "FAILED"))
+    worker["changes"][1]["content"] = "#" * 24001
     worker["changes"][1]["original_sha256"] = "c" * 64
     deps.reset_mock()
     assert subject.run_candidate_tests(tmp_path, task, worker, SHA) == expected()

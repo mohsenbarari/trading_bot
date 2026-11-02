@@ -463,13 +463,16 @@ def test_actual_run_correction_blocks_before_result_and_ready(tmp_path, monkeypa
 
 @pytest.mark.parametrize("declared,total,effective", [
     (None, 160000, 24000), (22000, 160000, 22000),
-    (32000, 160000, 32000), (50000, 160000, 32000),
-    (32000, 28000, 28000),
+    (32000, 160000, 32000), (40000, 64000, 40000),
+    (64000, 160000, 64000), (96000, 160000, 64000),
+    (64000, 28000, 28000),
 ])
 @pytest.mark.parametrize("letter", ["x", "é"])
-def test_explicit_profile32_boundaries_keep_legacy_and_smaller_caps(declared, total, effective, letter):
-    limits = None if declared is None else {TEST: declared}
-    task, sources = make_case([TEST], limits, total)
+def test_explicit_profile64_boundaries_keep_legacy_and_smaller_caps(declared, total, effective, letter):
+    # Mixed tasks reach the file ceiling without relaxing the independent 64k
+    # test-only raw-transport cap (a 64k file plus its envelope exceeds that cap).
+    limits = None if declared is None else {SCRIPT: 8000, TEST: declared}
+    task, sources = make_case([SCRIPT, TEST], limits, total)
     saved = copy.deepcopy((task, sources))
     assert runner._new_test_file_limits(task, sources) == {TEST: effective}
     assert runner.schema("worker", task, sources) == expected_schema(task, sources, {TEST: effective})
@@ -479,8 +482,8 @@ def test_explicit_profile32_boundaries_keep_legacy_and_smaller_caps(declared, to
     if letter == "é":
         assert len(bad["changes"][0]["content"]) < effective
     reject(lambda: checked(task, sources, bad), "new test file content exceeds budget: " + TEST)
-    regression = result(task, sources, {TEST: text(28690, letter)})
-    if effective >= 28690:
+    regression = result(task, sources, {TEST: text(32363, letter)})
+    if effective >= 32363:
         checked(task, sources, regression)
     else:
         reject(lambda: checked(task, sources, regression), "new test file content exceeds budget: " + TEST)
