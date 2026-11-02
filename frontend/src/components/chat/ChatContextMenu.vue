@@ -83,7 +83,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useOverlayA11y } from '../ui/useOverlayA11y'
 import { canShareFiles } from '../../composables/chat/useChatFileHandler'
 import { buildQuickMessageReactions } from '../../utils/messageReactions'
@@ -194,20 +194,69 @@ const menuModel = computed(() => {
   })
 })
 
+// The model is an initial placement estimate; rendered fonts/reactions/touch targets
+// determine the actual bounds. Re-measure after mounting and content/viewport changes.
+const measuredMenu = ref<{ width: number; height: number } | null>(null)
+const menuViewport = ref({
+  width: typeof window !== 'undefined' ? window.innerWidth : 400,
+  height: typeof window !== 'undefined' ? window.innerHeight : 800,
+})
 const menuStyle = computed(() => {
-  if (props.menuState.style) {
-    return props.menuState.style
-  }
-
-  return getMessengerContextMenuStyle({
+  const viewport = menuViewport.value
+  const initial = props.menuState.style || getMessengerContextMenuStyle({
     x: props.menuState.x,
     y: props.menuState.y,
     menuWidth: menuModel.value.menuWidth,
     menuHeight: menuModel.value.menuHeight,
-    viewportWidth: typeof window !== 'undefined' ? window.innerWidth : 400,
-    viewportHeight: typeof window !== 'undefined' ? window.innerHeight : 800,
+    viewportWidth: viewport.width,
+    viewportHeight: viewport.height,
   })
+  const bounds = measuredMenu.value
+  const placement = bounds ? getMessengerContextMenuStyle({
+    x: Number.parseFloat(initial.left || '') || props.menuState.x,
+    y: Number.parseFloat(initial.top || '') || props.menuState.y,
+    menuWidth: bounds.width,
+    menuHeight: Math.min(bounds.height, Math.max(0, viewport.height - 16)),
+    viewportWidth: viewport.width,
+    viewportHeight: viewport.height,
+  }) : initial
+  return { ...initial, ...placement, maxHeight: `${Math.max(0, viewport.height - 16)}px` }
 })
+
+function measureMenu() {
+  if (!props.menuState.visible || !menuRef.value) return
+  const width = window.innerWidth, height = window.innerHeight
+  // Stable geometry must not schedule another render/measurement cycle.
+  if (width !== menuViewport.value.width || height !== menuViewport.value.height) {
+    menuViewport.value = { width, height }
+  }
+  const bounds = menuRef.value.getBoundingClientRect()
+  if (bounds.width > 0 && bounds.height > 0
+      && (bounds.width !== measuredMenu.value?.width || bounds.height !== measuredMenu.value?.height)) {
+    measuredMenu.value = { width: bounds.width, height: bounds.height }
+  }
+}
+
+watch(menuRef, (element, _previous, onCleanup) => {
+  if (!element) return
+  const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measureMenu) : null
+  observer?.observe(element)
+  window.addEventListener('resize', measureMenu)
+  onCleanup(() => {
+    observer?.disconnect()
+    window.removeEventListener('resize', measureMenu)
+  })
+  measureMenu()
+}, { flush: 'post' })
+
+watch([() => props.menuState, showReactionRow, isReactionPickerExpanded, menuModel], async () => {
+  if (!props.menuState.visible) {
+    measuredMenu.value = null
+    return
+  }
+  await nextTick()
+  measureMenu()
+}, { flush: 'post' })
 
 watch(
   () => props.menuState.visible,
@@ -282,7 +331,8 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  overflow: visible;
+  overflow: hidden;
+  max-height: calc(100dvh - 16px);
   direction: rtl;
 }
 
@@ -390,10 +440,14 @@ function emitAction(actionKey: MessengerContextMenuActionKey) {
 }
 
 .reaction-picker-shell {
+  flex-shrink: 0;
   padding: 10px 12px 8px;
 }
 
 .menu-actions-panel {
+  min-height: 0;
+  max-height: none;
+  flex: 0 1 auto;
   width: min(var(--messenger-menu-width, 236px), 100%);
   padding: 4px 0;
 }
