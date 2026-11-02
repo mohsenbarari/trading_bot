@@ -46,6 +46,12 @@ POSTHOLD = 'ROOT_CURRENT_SOURCE_MAINTENANCE_HANDOFF_NORMAL_POSTHOLD_V1'
 MARKER_V2 = 'ROOT_MAINTENANCE_BRIDGE_EXTERNAL_MAIN_V2:'
 KIND_V2 = 'ROOT_MAINTENANCE_BRIDGE_EXTERNAL_MAIN_V2'
 POSTHOLD_V2 = 'ROOT_CURRENT_SOURCE_MAINTENANCE_HANDOFF_NORMAL_POSTHOLD_V2'
+MARKER_V3 = 'ROOT_MAINTENANCE_BRIDGE_SECURITY_MERGE_V3:'
+KIND_V3 = 'ROOT_MAINTENANCE_BRIDGE_SECURITY_MERGE_V3'
+POSTHOLD_V3 = 'ROOT_CURRENT_SOURCE_MAINTENANCE_HANDOFF_NORMAL_POSTHOLD_V3'
+# Closed project-specific security transition; never selected by a request.
+SECURITY_MERGE_SOURCE_BASE = '703601c8e5d0ecb22b726b031f86794fb8a0e7d9'
+SECURITY_HISTORY_LIMIT = 65536
 MAX_RECORD_BYTES = 32768
 MAX_EVIDENCE_BYTES = 200000
 MAX_EVIDENCE_TOTAL = 4000000
@@ -140,16 +146,20 @@ def parse_scope_bridge_marker(assignment_bytes):
         return None
     _require(text.count(family) == 1)
     prefixes = re.findall(r'ROOT_MAINTENANCE_BRIDGE_[^\s:]*:', text)
-    _require(len(prefixes) == 1 and prefixes[0] in (MARKER, MARKER_V2))
+    _require(len(prefixes) == 1 and prefixes[0] in (MARKER, MARKER_V2, MARKER_V3))
     prefix = prefixes[0]
     matches = re.findall(r'^' + re.escape(prefix) + r' (\{[^\r\n]*\})$', text, re.MULTILINE)
     _require(text.count(prefix) == len(matches) == 1)
     marker = _json((matches[0] + '\n').encode('utf-8'), 1024)
-    _require(set(marker) == {'record_sha256', 'posthold_sha256', 'head', 'checkpoint_sha256'})
+    keys = {'record_sha256', 'posthold_sha256', 'head', 'checkpoint_sha256'}
+    _require(set(marker) == (keys | {'security_commit'} if prefix == MARKER_V3 else keys))
     _require(_hex(marker['record_sha256'], 64) and _hex(marker['head'], 40)
              and _hex(marker['posthold_sha256'], 64) and _hex(marker['checkpoint_sha256'], 64))
     if prefix == MARKER_V2:
         marker['schema_version'] = '2.0'  # Internal only; wire marker stays four keys.
+    elif prefix == MARKER_V3:
+        _require(_hex(marker['security_commit'], 40))
+        marker['schema_version'] = '3.0'
     return marker
 
 
@@ -158,9 +168,11 @@ def parse_root_maintenance_bridge_bytes(raw, *, marker, prior_repository,
     """Pure closed record validation, not publication or proof of Root authority."""
     record = _json(raw, MAX_RECORD_BYTES)
     v2 = type(marker) is dict and marker.get('schema_version') == '2.0'
-    _require(set(record) == (RECORD_KEYS | {'external_main_transition'} if v2 else RECORD_KEYS)
-             and record['schema_version'] == ('2.0' if v2 else '1.0')
-             and record['kind'] == (KIND_V2 if v2 else KIND)
+    v3 = type(marker) is dict and marker.get('schema_version') == '3.0'
+    keys = RECORD_KEYS | ({'security_merge_transition'} if v3 else {'external_main_transition'} if v2 else set())
+    _require(set(record) == keys
+             and record['schema_version'] == ('3.0' if v3 else '2.0' if v2 else '1.0')
+             and record['kind'] == (KIND_V3 if v3 else KIND_V2 if v2 else KIND)
              and _hex(record['history_audit_sha256'], 64))
     _require(hashlib.sha256(raw).hexdigest() == marker['record_sha256'])
     _require(record['prior_checkpoint_sha256'] == marker['checkpoint_sha256']
@@ -172,7 +184,9 @@ def parse_root_maintenance_bridge_bytes(raw, *, marker, prior_repository,
              and set(record['repository']) == {'head', 'status', 'protected_refs', 'control_blobs'}
              and _same(record['repository'], bare) and bare['status'] == ''
              and bare['head'] == marker['head'] and bare['head'] != prior_repository['head'])
-    if v2:
+    if v3:
+        _validate_security_merge_transition(record, marker, prior_repository, bare)
+    elif v2:
         _validate_external_main_transition(record, prior_repository, bare)
     else:
         _require(_same(prior_repository['protected_refs'], bare['protected_refs']))
@@ -193,6 +207,9 @@ def parse_root_maintenance_bridge_bytes(raw, *, marker, prior_repository,
         _require(path not in paths and _hex(row['evidence_sha256'], 64))
         paths.add(path); heads.add(row['head']); cursor = row['head']
     _require(cursor == bare['head'])
+    if v3:
+        _require(sum(row['head'] == record['security_merge_transition']['merge_commit']
+                     for row in rows) == 1)
     return copy.deepcopy(record)
 
 
@@ -235,6 +252,80 @@ def _verify_external_main_git(root, record):
         )
         for args, expected, limit in queries:
             _require(_run_git_query(root, args, output_limit=limit) == expected)
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception:
+        raise RootMaintenanceBridgeError(ERROR) from None
+
+
+def _validate_security_merge_transition(record, marker, prior, current):
+    transition = record['security_merge_transition']
+    _require(type(transition) is dict and set(transition) == {
+        'old_main', 'old_origin_main', 'security_commit', 'source_merge_base',
+        'merge_commit', 'main_history', 'origin_history'})
+    for key in ('old_main', 'old_origin_main', 'security_commit', 'source_merge_base', 'merge_commit'):
+        _require(_hex(transition[key], 40))
+    target = transition['security_commit']
+    _require(target == marker['security_commit']
+             and transition['source_merge_base'] == SECURITY_MERGE_SOURCE_BASE
+             and transition['old_main'] != target and transition['old_origin_main'] != target)
+    refs = {'refs/heads/main', 'refs/remotes/origin/main', 'refs/heads/candidate/wa-ir-standby-v1'}
+    before, after = prior['protected_refs'], current['protected_refs']
+    _require(type(before) is dict and type(after) is dict and set(before) == set(after) == refs
+             and all(_hex(value, 40) for value in (*before.values(), *after.values()))
+             and transition['old_main'] == before['refs/heads/main']
+             and transition['old_origin_main'] == before['refs/remotes/origin/main']
+             and after['refs/heads/main'] == after['refs/remotes/origin/main'] == target
+             and before['refs/heads/candidate/wa-ir-standby-v1'] == after['refs/heads/candidate/wa-ir-standby-v1']
+             and _same(prior['control_blobs'], current['control_blobs']))
+    for key in ('main_history', 'origin_history'):
+        history = transition[key]
+        _require(type(history) is dict and set(history) == {'commit_count', 'utf8_bytes', 'sha256'}
+                 and type(history['commit_count']) is int
+                 and type(history['utf8_bytes']) is int
+                 and 1 <= history['commit_count'] <= SECURITY_HISTORY_LIMIT // 41
+                 and 41 <= history['utf8_bytes'] <= SECURITY_HISTORY_LIMIT
+                 and history['commit_count'] <= history['utf8_bytes'] // 41
+                 and _hex(history['sha256'], 64))
+
+
+def _security_merge_rows(record):
+    transition = record['security_merge_transition']
+    return [row['head'] + ' ' + row['parent'] +
+            (' ' + transition['security_commit'] if row['head'] == transition['merge_commit'] else '')
+            for row in record['commits']]
+
+
+def _verify_security_merge_git(root, record):
+    """Closed actual two-parent merge, both protected FF histories, no new executor."""
+    try:
+        transition = record['security_merge_transition']
+        target, prior, head = transition['security_commit'], record['prior_head'], record['repository']['head']
+        endpoints = (transition['old_main'], transition['old_origin_main'], target,
+                     transition['source_merge_base'], transition['merge_commit'], prior, head)
+        for endpoint in dict.fromkeys(endpoints):
+            _require(_hex(endpoint, 40)
+                     and _run_git_query(root, ['cat-file', '-t', endpoint], output_limit=64) == b'commit\n')
+        _require(transition['source_merge_base'] == SECURITY_MERGE_SOURCE_BASE)
+        for ref in ('refs/heads/main', 'refs/remotes/origin/main'):
+            _require(_run_git_query(root, ['rev-parse', '--verify', ref], output_limit=64)
+                     == (target + '\n').encode('ascii'))
+        for old, key in ((transition['old_main'], 'main_history'),
+                         (transition['old_origin_main'], 'origin_history')):
+            _require(_run_git_query(root, ['merge-base', '--is-ancestor', old, target], output_limit=64) == b'')
+            raw = _run_git_query(root, ['rev-list', '--reverse', '--topo-order', '--parents',
+                                      old + '..' + target], output_limit=SECURITY_HISTORY_LIMIT)
+            history = transition[key]
+            _require(raw.endswith(b'\n') and len(raw) == history['utf8_bytes']
+                     and len(raw.splitlines()) == history['commit_count']
+                     and hashlib.sha256(raw).hexdigest() == history['sha256'])
+        _require(_run_git_query(root, ['merge-base', '--all', prior, target], output_limit=64)
+                 == (SECURITY_MERGE_SOURCE_BASE + '\n').encode('ascii'))
+        expected = ('\n'.join(_security_merge_rows(record)) + '\n').encode('ascii')
+        _require(_run_git_query(root, ['rev-list', '--first-parent', '--reverse', '--parents',
+                                     prior + '..' + head], output_limit=16384) == expected)
+        for endpoint in (prior, target):
+            _require(_run_git_query(root, ['merge-base', '--is-ancestor', endpoint, head], output_limit=64) == b'')
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception:
@@ -292,10 +383,11 @@ def _scope_bytes(root, norm):
 
 def _handoff(post, record, marker):
     v2 = type(marker) is dict and marker.get('schema_version') == '2.0'
+    v3 = type(marker) is dict and marker.get('schema_version') == '3.0'
     for key in ('checkpoint_changed', 'reservations_changed', 'Supervisor_started'):
         _require(post.get(key) is False)
-    _require(set(post) == POST_KEYS and post['schema_version'] == ('2.0' if v2 else '1.0')
-             and post['kind'] == (POSTHOLD_V2 if v2 else POSTHOLD)
+    _require(set(post) == POST_KEYS and post['schema_version'] == ('3.0' if v3 else '2.0' if v2 else '1.0')
+             and post['kind'] == (POSTHOLD_V3 if v3 else POSTHOLD_V2 if v2 else POSTHOLD)
              and post['record_sha256'] == marker['record_sha256']
              and post['prior_checkpoint_sha256'] == record['prior_checkpoint_sha256']
              and post['head'] == record['repository']['head']
@@ -322,6 +414,7 @@ def read_root_maintenance_bridge_locked(root, state_root, repository):
         scope_binding = checkpoint_binding = old_binding = None
         directory_binding = state_binding = None
         external_record = None
+        security_record = None
         custody = {}
 
         def preserve(action):
@@ -350,6 +443,10 @@ def read_root_maintenance_bridge_locked(root, state_root, repository):
             # Run each established binding independently even after a primary error.
             if external_record is not None:
                 preserve(lambda: _verify_external_main_git(root, external_record))
+                if not in_hold:
+                    preserve(lambda: _recheck_external_pending(root, state_root))
+            if security_record is not None:
+                preserve(lambda: _verify_security_merge_git(root, security_record))
                 if not in_hold:
                     preserve(lambda: _recheck_external_pending(root, state_root))
             for path, (mark, body, limit, private) in custody.items():
@@ -409,6 +506,9 @@ def read_root_maintenance_bridge_locked(root, state_root, repository):
                         if marker.get('schema_version') == '2.0':
                             external_record = record
                             _verify_external_main_git(root, external_record)
+                        elif marker.get('schema_version') == '3.0':
+                            security_record = record
+                            _verify_security_merge_git(root, security_record)
                         post_raw = read(directory / (marker['posthold_sha256'] + '.json'), 8192, private=True)
                         _require(hashlib.sha256(post_raw).hexdigest() == marker['posthold_sha256'])
                         _handoff(_json(post_raw, 8192), record, marker)
@@ -428,9 +528,13 @@ def read_root_maintenance_bridge_locked(root, state_root, repository):
                             evidence = read(root / row['evidence_path'], min(MAX_EVIDENCE_BYTES, MAX_EVIDENCE_TOTAL - total))
                             total += len(evidence)
                             _require(bool(evidence) and hashlib.sha256(evidence).hexdigest() == row['evidence_sha256'])
-                        actual = _run_git_query(root, ['rev-list', '--reverse', '--parents',
-                            prior['head'] + '..' + norm['head']], output_limit=16384).decode('ascii').splitlines()
-                        _require(actual == [row['head'] + ' ' + row['parent'] for row in record['commits']])
+                        args = (['rev-list', '--first-parent', '--reverse', '--parents']
+                                if security_record is not None else ['rev-list', '--reverse', '--parents'])
+                        actual = _run_git_query(root, [*args, prior['head'] + '..' + norm['head']],
+                                                output_limit=16384).decode('ascii').splitlines()
+                        expected = (_security_merge_rows(record) if security_record is not None else
+                                    [row['head'] + ' ' + row['parent'] for row in record['commits']])
+                        _require(actual == expected)
                         _run_git_query(root, ['merge-base', '--is-ancestor', prior['head'], norm['head']], output_limit=4096)
                         result = {**record, 'new_repository': copy.deepcopy(norm)}
                 except BaseException as exc:
