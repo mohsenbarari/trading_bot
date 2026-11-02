@@ -152,7 +152,9 @@ class UbuntuFullCoreTests(unittest.TestCase):
    bi=bound(pin(rows[a.BUILDINFO]));rows[a.CHANGES]=('Format: 1.8\nChecksums-Sha256:\n '+package_pin['sha256']+' '+str(len(package))+' '+a.PACKAGE+'\n '+bi['sha256']+' '+str(bi['bytes'])+' '+a.BUILDINFO+'\n').encode()
    for name,version in(('positive-baseline.json',a.BASE),('positive-candidate.json',a.VERSION)):
     value=f.positive(version);value.update({'python_version':a.SPEC['python'],'sqlite_runtime':a.SPEC['upstream'],'python_no_site':True,'system_library':a.SPEC['library']})
-    value['sqlite_system_library']['path']=a.SPEC['library'];value['sqlite_stdlib_extension']['path']=a.SPEC['extension'];rows[name]=value
+    value['sqlite_system_library']['path']=a.SPEC['library'];value['sqlite_stdlib_extension']['path']=a.SPEC['extension']
+    if profile=='noble':value['candidate_view_checks']=None if version==a.BASE else {'rowid_in_view':True,'nested_join_rows':[[1,2,3]],'production_library_only':True,'security_accepted':False}
+    rows[name]=value
    rows['abi-contract.json']={'soname':'libsqlite3.so.0','needed':['libc.so.6'],'exports':sorted(['sqlite3_open_v2','sqlite3_prepare_v2','sqlite3_backup_init','sqlite3_wal_checkpoint_v2']),'glibc_versions':['GLIBC_2.2.5']}
    rows['vendor-standard.log']=b'0 errors out of 15000 tests on OWNED PUBLIC FIXTURE\n'
    rows['vendor-fts5-regression.log']=b'\n'.join(f'fts5prefix2-4-{d}-{n}... Ok'.encode()for d in('full','col','none')for n in(1,2))+b'\n0 errors out of 30 tests on OWNED PUBLIC FIXTURE\n'
@@ -163,14 +165,14 @@ class UbuntuFullCoreTests(unittest.TestCase):
     'official_fts5_commit':r.UPSTREAM_FTS_COMMIT,'base_image':r.BASE_IMAGE,'root_observed_consumer_profile':bound(r.PROFILE_PIN),
     'source_signer':{'fingerprint':r.SIGNER_FINGERPRINT,**bound(r.SIGNER_PIN)},'public_ca_bootstrap':r.CA_BOOTSTRAP,
     'package_doc_path_includes':['/usr/share/doc/libsqlite3-0','/usr/share/doc/libsqlite3-0/*'],'native_ca_certificates_package':'OWNED-1',
-    'source_files':{n:bound(v)for n,v in r.SOURCE_FILES.items()},'test_only_compatibility':r.vendor_test_compatibility_expected(),
+    'source_files':{n:bound(v)for n,v in r.SOURCE_FILES.items()},'test_only_compatibility':r.vendor_test_compatibility_expected(),'session_input_validation':dict(r.SESSION_INPUT_PROOF),
     'debian_rules':{'bytes':512,'sha256':'d'*64},'ubuntu_control':{'bytes':128,'sha256':'e'*64},'build_toolchain_packages':['OWNED gcc 1'],
     'package_file':{'name':a.PACKAGE,**package_pin},'local_build_metadata':{a.CHANGES:bound(pin(rows[a.CHANGES])),a.BUILDINFO:bi},
     'baseline_library':{k:rows['positive-baseline.json']['sqlite_system_library'][k]for k in('bytes','sha256')},'candidate_library':{k:rows['positive-candidate.json']['sqlite_system_library'][k]for k in('bytes','sha256')}}
    for key in('native_bundle_replaces_bootstrap_after_authenticated_install','source_maintainer_signature_verified','baseline_authenticated_reinstall_required','strict_full_package_payload_verification','compile_options_equal','elf_soname_exports_dependencies_equal','python_binary_unchanged','sqlite_stdlib_extension_unchanged','mapped_installed_libraries_verified','app_ci_restore_gate_required'):p[key]=True
    for key in('upstream_fault_suites_run','wal_reset_reproduction_performed','full_upstream_suite_pass_claimed','local_build_metadata_signed','runtime_loader_override_used','production_data_accessed','security_accepted'):p[key]=False
    with patch.object(f,'R',r):privilege=f.fixture_vendor_privilege()
-   watched={'Makefile':{k:harness['generated_after'][k]for k in('bytes','sha256')},'debian/rules':p['debian_rules'],'debian/control':p['ubuntu_control'],'src/wal.c':p['wal_after'],'ext/fts5/fts5_index.c':p['fts5_after'],'ext/fts5/test/fts5prefix2.test':bound(r.FTS_TEST_AFTER),**{n:bound(v)for n,v in r.VENDOR_HELPERS.items()}}
+   watched={'Makefile':{k:harness['generated_after'][k]for k in('bytes','sha256')},'debian/rules':p['debian_rules'],'debian/control':p['ubuntu_control'],'ext/session/sqlite3session.c':p['session_input_validation']['after'],'src/wal.c':p['wal_after'],'ext/fts5/fts5_index.c':p['fts5_after'],'ext/fts5/test/fts5prefix2.test':bound(r.FTS_TEST_AFTER),**{n:bound(v)for n,v in r.VENDOR_HELPERS.items()}}
    p['vendor_tests']={'same_configured_source':watched,'standard_and_official_regression':{n:r.vendor_log_contract(n,rows[n])for n in r.VENDOR_COMMANDS},'standard_scope':dict(r.VENDOR_STANDARD_SCOPE),'no_new_filters_or_exclusions':True,'no_new_filters_or_exclusions_scope':'test_selection_only','testfixture_harness':harness,'full_all_permutations_claimed':False,'default_omissions_are_not_waivers':True,'unprivileged_execution':privilege}
    if profile=='noble':p['rowid_nested_join_backport']=r.rowid_nested_join_expected()
    rows['provenance.json']=p

@@ -24,7 +24,7 @@ SNAPSHOT='https://snapshot.ubuntu.com/ubuntu/20261025T000000Z'
 SOURCE_FILES={'sqlite3_3.45.1-1ubuntu2.8.debian.tar.xz': (37512, 'd543bf91c6f14ccd52ebe44d6ef3b360196b2596e0a7ca86089aef5fc52f5ec0'), 'sqlite3_3.45.1-1ubuntu2.8.dsc': (2601, 'f3c0a904d2d2386e81b39774f2a2f00f92c42adb2f141ff59cc6a347c4487a69'), 'sqlite3_3.45.1.orig-www.tar.xz': (5693812, '79b60798195a024d447e661e5bbc1eb40af50387ebf840e6f581190cc02064b6'), 'sqlite3_3.45.1.orig.tar.xz': (8257884, 'e32e817f7b4166a301f60b14a711871bfab7d35c1d7e29b585dfc479ae150aa4')}
 PATCH='0001-wal-reset-production-only.patch'
 PATCH_PIN=(6746,'ab1d8c75b8ed521cc5d1d0c64da66be26ca3b72d53326c28b6a86473f42ddc85')
-VERIFY_PIN=(16832, '0c2027475c4445244eb546965e6205cc1c0bd98f7834d4bf60890015cf71a489')
+VERIFY_PIN=(17714, '7a3e34209f7a638caf481d51031dfbdc54c7a3001ccbf0eb205591b5dc6265ed')
 WAL_BEFORE=(174376,'d4a104b5f3cb807e026a9dbcdb77519358b06b66f76cb6b6ef70e3793379dd62')
 WAL_AFTER=(175230,'7287fb98dcfbfb3c33dfba555c21396f7ef53c68a325dc706e68ca3c19ab73a7')
 FTS_PATCH='0002-fts5-detail-none-merge-bound.patch'
@@ -289,7 +289,7 @@ def configure_repository():
   matches=list(Path('/var/lib/apt/lists').glob('*_dists_'+suite+'_InRelease'))
   require(len(matches)==1,'repository_inventory');digest(matches[0],binding,maximum=524288)
 
-PUBLIC_POSITIVE_REFUSAL_CODES = ('backup_integrity', 'backup_query_drift', 'binary_bound', 'binary_changed', 'binary_identity', 'binary_mapping', 'binary_parent', 'compile_options_bound', 'fts_contract', 'isolated_python_required', 'json_contract', 'loader_override', 'lookup_index_not_used', 'mapping_bound', 'native_library_layout', 'native_python_required', 'native_ubuntu_required', 'non_system_library', 'os_metadata', 'os_metadata_bound', 'package_library_path', 'package_metadata_bound', 'package_paths_bound', 'package_payload_changed', 'package_scope', 'package_version', 'package_version_changed', 'python_customization', 'python_version_changed', 'readonly_reopen_drift', 'scratch_not_private', 'sqlite_runtime_package_mismatch', 'stdlib_extension_required', 'stdlib_sqlite_required', 'system_library_missing_or_ambiguous', 'transaction_or_query_drift', 'wal_mode', 'wal_reader', 'wal_refresh', 'wal_snapshot_drift')
+PUBLIC_POSITIVE_REFUSAL_CODES=('backup_integrity', 'backup_query_drift', 'binary_bound', 'binary_changed', 'binary_identity', 'binary_mapping', 'binary_parent', 'compile_options_bound', 'fts_contract', 'isolated_python_required', 'json_contract', 'loader_override', 'lookup_index_not_used', 'mapping_bound', 'native_library_layout', 'native_python_required', 'native_ubuntu_required', 'nested_join_contract', 'non_system_library', 'os_metadata', 'os_metadata_bound', 'package_library_path', 'package_metadata_bound', 'package_paths_bound', 'package_payload_changed', 'package_scope', 'package_version', 'package_version_changed', 'python_customization', 'python_version_changed', 'readonly_reopen_drift', 'rowid_view_contract', 'scratch_not_private', 'sqlite_runtime_package_mismatch', 'stdlib_extension_required', 'stdlib_sqlite_required', 'system_library_missing_or_ambiguous', 'transaction_or_query_drift', 'wal_mode', 'wal_reader', 'wal_refresh', 'wal_snapshot_drift')
 def positive_failure(raw):
  reason='sqlite_compatibility_gate_failed'
  def unique(pairs):
@@ -350,20 +350,19 @@ TESTFIXTURE_TARGET_AFTER = b'testfixture$(TEXE):\thas_tclsh85 $(TESTFIXTURE_SRC)
 TESTFIXTURE_LINK_TAIL = b'\t$(LTLINK) -DSQLITE_NO_SYNC=1 $(TEMP_STORE) $(TESTFIXTURE_FLAGS) \\\n\t\t-o $@ $(TESTFIXTURE_SRC) $(LIBTCL) $(TLIBS)\n'
 TESTFIXTURE_STANZAS_PIN = (4097, '5dc8fb147f38fe9b3f645555f399ad1365a00a830a0dc9affa3f9569bbcc121e')
 TESTFIXTURE_OLD_WORDS_PIN = {'0': (4322, '689171f808bea32fdf84b7cee8762cc515676ff7f393ebd0ba4f86f4a39e6514'), '1': (2856, '965c92915bdd29de3f884edd25509a63ccfc1a3f5a74ed9f6aab85fabb32df06')}
-TESTFIXTURE_LOCAL_PATCH = (b'Description: LOCAL generated testfixture full-core linkage and rebuild dependency only\n'
-    b'Origin: local; not an upstream or production CVE patch\n\n'
-    b'--- a/Makefile\n+++ b/Makefile\n@@ -1,4 +1,4 @@\n-'
-    + TESTFIXTURE_CORE_BEFORE + b'+' + TESTFIXTURE_CORE_AFTER
-    + b' TESTFIXTURE_SRC1 = sqlite3.c\n TESTFIXTURE_SRC = $(TESTSRC) $(TOP)/src/tclsqlite.c\n-'
-    + TESTFIXTURE_ASSIGNMENT_BEFORE + b'+' + TESTFIXTURE_ASSIGNMENT_AFTER
-    + b'@@ -6 +6 @@\n-' + TESTFIXTURE_TARGET_BEFORE + b'+' + TESTFIXTURE_TARGET_AFTER)
+TESTFIXTURE_DEFAULT_BEFORE = b'TESTFIXTURE_FLAGS += -DSQLITE_STATIC_RANDOMJSON\n'
+TESTFIXTURE_DEFAULT_AFTER = TESTFIXTURE_DEFAULT_BEFORE + b'TESTFIXTURE_FLAGS += -USQLITE_ALLOW_ROWID_IN_VIEW\n'
+TEST_CLI_BEFORE = b'sqlite3$(TEXE):\tshell.c libsqlite3.la\n\t$(LTLINK) $(READLINE_FLAGS) $(SHELL_OPT) -o $@ \\\n\t\tshell.c libsqlite3.la \\\n\t\t$(LIBREADLINE) $(TLIBS) -rpath "$(libdir)"\n'
+TEST_CLI_AFTER = b'sqlite3$(TEXE):\tshell.c sqlite3.c Makefile\n\t$(LTLINK) $(READLINE_FLAGS) $(SHELL_OPT) -USQLITE_ALLOW_ROWID_IN_VIEW -o $@ \\\n\t\tshell.c sqlite3.c \\\n\t\t$(LIBREADLINE) $(TLIBS) -rpath "$(libdir)"\n'
+TESTFIXTURE_LOCAL_PATCH=b'Description: LOCAL generated Noble vendor test configuration only; production package already built\nOrigin: local; no vendor test exclusions or production flag changes\n\n--- a/Makefile\n+++ b/Makefile\n@@ -677,9 +677,9 @@\n \t\t-avoid-version\n \tsed -i "/dependency_libs/s/\'.*\'/\'\'/" $@\n \n-sqlite3$(TEXE):\tshell.c libsqlite3.la\n-\t$(LTLINK) $(READLINE_FLAGS) $(SHELL_OPT) -o $@ \\\n-\t\tshell.c libsqlite3.la \\\n+sqlite3$(TEXE):\tshell.c sqlite3.c Makefile\n+\t$(LTLINK) $(READLINE_FLAGS) $(SHELL_OPT) -USQLITE_ALLOW_ROWID_IN_VIEW -o $@ \\\n+\t\tshell.c sqlite3.c \\\n \t\t$(LIBREADLINE) $(TLIBS) -rpath "$(libdir)"\n \n sqldiff$(TEXE):\t$(TOP)/tool/sqldiff.c sqlite3.lo sqlite3.h\n@@ -1309,14 +1309,15 @@\n TESTFIXTURE_FLAGS += -DSQLITE_ENABLE_BYTECODE_VTAB\n TESTFIXTURE_FLAGS += -DSQLITE_CKSUMVFS_STATIC\n TESTFIXTURE_FLAGS += -DSQLITE_STATIC_RANDOMJSON\n+TESTFIXTURE_FLAGS += -USQLITE_ALLOW_ROWID_IN_VIEW\n TESTFIXTURE_FLAGS += -DSQLITE_STRICT_SUBTYPE=1\n \n-TESTFIXTURE_SRC0 = $(TESTSRC2) libsqlite3.la\n+TESTFIXTURE_SRC0 = sqlite3.c\n TESTFIXTURE_SRC1 = sqlite3.c\n TESTFIXTURE_SRC = $(TESTSRC) $(TOP)/src/tclsqlite.c\n-TESTFIXTURE_SRC += $(TESTFIXTURE_SRC$(USE_AMALGAMATION))\n-\n-testfixture$(TEXE):\thas_tclsh85 $(TESTFIXTURE_SRC)\n+TESTFIXTURE_SRC += $(filter-out $(TOP)/ext/fts3/fts3_term.c,$(TESTFIXTURE_SRC$(USE_AMALGAMATION)))\n+\n+testfixture$(TEXE):\thas_tclsh85 $(TESTFIXTURE_SRC) Makefile\n \t$(LTLINK) -DSQLITE_NO_SYNC=1 $(TEMP_STORE) $(TESTFIXTURE_FLAGS) \\\n \t\t-o $@ $(TESTFIXTURE_SRC) $(LIBTCL) $(TLIBS)\n \n'
 
 def testfixture_after(raw):
     """Only the local generated test target changes, after package compilation."""
     require(raw.count(TESTFIXTURE_TARGET_BEFORE + TESTFIXTURE_LINK_TAIL) == 1, 'testfixture_authentic_link_rule')
     pairs = ((TESTFIXTURE_CORE_BEFORE, TESTFIXTURE_CORE_AFTER),
         (TESTFIXTURE_ASSIGNMENT_BEFORE, TESTFIXTURE_ASSIGNMENT_AFTER),
-        (TESTFIXTURE_TARGET_BEFORE, TESTFIXTURE_TARGET_AFTER))
+        (TESTFIXTURE_TARGET_BEFORE, TESTFIXTURE_TARGET_AFTER),
+        (TESTFIXTURE_DEFAULT_BEFORE,TESTFIXTURE_DEFAULT_AFTER),(TEST_CLI_BEFORE,TEST_CLI_AFTER))
     for old, new in pairs:
         require(raw.count(old) == 1 and new not in raw, 'testfixture_exact_local_delta')
     for old, new in pairs:
@@ -1047,10 +1046,22 @@ def verify_rowid_nested_join_source(src):
  for name,pin in ROWID_NESTED_JOIN['after'].items():digest(src/name,pin)
  return rowid_nested_join_contract(rowid_nested_join_expected())
 
+SESSION_INPUT_PATCH = b'--- a/ext/session/sqlite3session.c\n+++ b/ext/session/sqlite3session.c\n@@ -343,6 +343,18 @@\n   int ret = getVarint32(aBuf, *piVal);\n   *piVal = (*piVal & 0x7FFFFFFF);\n   return ret;\n+}\n+\n+\n+static int sessionVarintGetSafe(const u8 *aBuf, int nBuf, int *piVal){\n+  u8 aCopy[9];\n+  const u8 *aRead = aBuf;\n+  memset(aCopy, 0, sizeof(aCopy));\n+  if( nBuf<sizeof(aCopy) ){\n+    memcpy(aCopy, aBuf, nBuf);\n+    aRead = aCopy;\n+  }\n+  return sessionVarintGet(aRead, piVal);\n }\n \n /* Load an unaligned and unsigned 32-bit integer */\n@@ -3569,21 +3581,31 @@\n   int *pnByte                     /* OUT: Size of record in bytes */\n ){\n   int rc = SQLITE_OK;\n-  int nByte = 0;\n+  i64 nByte = 0;\n   int i;\n   for(i=0; rc==SQLITE_OK && i<nCol; i++){\n     int eType;\n     rc = sessionInputBuffer(pIn, nByte + 10);\n     if( rc==SQLITE_OK ){\n-      eType = pIn->aData[pIn->iNext + nByte++];\n-      if( eType==SQLITE_TEXT || eType==SQLITE_BLOB ){\n-        int n;\n-        nByte += sessionVarintGet(&pIn->aData[pIn->iNext+nByte], &n);\n-        nByte += n;\n-        rc = sessionInputBuffer(pIn, nByte);\n-      }else if( eType==SQLITE_INTEGER || eType==SQLITE_FLOAT ){\n-        nByte += 8;\n-      }\n+      if( pIn->iNext+nByte>=pIn->nData ){\n+        rc = SQLITE_CORRUPT_BKPT;\n+      }else{\n+        eType = pIn->aData[pIn->iNext + nByte++];\n+        if( eType==SQLITE_TEXT || eType==SQLITE_BLOB ){\n+          int n;\n+          int nRem = pIn->nData - (pIn->iNext + nByte);\n+          nByte += sessionVarintGetSafe(&pIn->aData[pIn->iNext+nByte], nRem,&n);\n+          nByte += n;\n+          rc = sessionInputBuffer(pIn, nByte);\n+        }else if( eType==SQLITE_INTEGER || eType==SQLITE_FLOAT ){\n+          nByte += 8;\n+        }else if( eType!=0 && eType!=SQLITE_NULL ){\n+          rc = SQLITE_CORRUPT_BKPT;\n+        }\n+      }\n+    }\n+    if( rc==SQLITE_OK && (pIn->iNext+nByte)>pIn->nData ){\n+      rc = SQLITE_CORRUPT_BKPT;\n     }\n   }\n   *pnByte = nByte;\n'
+SESSION_INPUT_PROOF = {'schema': 'sqlite_session_input_validation_prerequisite/1', 'upstream_git': 'c597ed79d1bd03f57198d10d1f431adda293cf2e', 'upstream_fossil': '869a51ae84dfaaf824c872e4b3024f35eea7fa67bb584759a2d42ebf8404ef6e', 'upstream_source_sha256': 'c53e435bb9c96eb1ae077405b0715a464c714473b39fffaecb63e4bf8bd28be4', 'prerequisite_record_validation_fossil': '8fcf92e15d87487703afc1129f3a89a8d4d72cb30d30a1a9151a5596473069bd', 'source_path': 'ext/session/sqlite3session.c', 'before': {'bytes': 208865, 'sha256': '28deac8747bf150195a0082d91e68b6439859cba48c006ae784c2e2ffcdccb91'}, 'after': {'bytes': 209503, 'sha256': 'ff93425fb5a186e4765a0937a4b6dbd0f30648b046142a0fc138d1f51e70cca3'}, 'patch': {'bytes': 1936, 'sha256': 'a154d1814b58e58f9f8de4178ae135a3583c353e191dac996f4a31dea5773fc6'}, 'malformed_changeset_hex': '540101740017000003ffffffff', 'official_expected': 'SQLITE_CORRUPT', 'test_bodies_changed': False, 'production_core_changed': True, 'security_accepted': False}
+
+def session_input_contract(value):
+ require(type(value) is dict and encoded(value)==encoded(SESSION_INPUT_PROOF),'session_input_contract')
+ return value
+
+def verify_session_input_source(src):
+ expected=SESSION_INPUT_PROOF['after']
+ digest(src/'ext/session/sqlite3session.c',(expected['bytes'],expected['sha256']))
+ return session_input_contract(dict(SESSION_INPUT_PROOF))
+
 def vendor_tests(src):
  # Debian has already configured/built this exact source with its unchanged
  # rules/feature flags. Do not reconfigure, filter TESTOPTS, or substitute a suite.
- watched=('Makefile','debian/rules','debian/control','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test',*VENDOR_HELPERS)
+ watched=('Makefile','debian/rules','debian/control','ext/session/sqlite3session.c','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test',*VENDOR_HELPERS)
  before={name:digest(src/name,maximum=4*1024**2)for name in watched}
  require(all(before[name]=={'bytes':pin[0],'sha256':pin[1]}for name,pin in VENDOR_HELPERS.items()),'vendor_naming_helper_changed')
  require(not any(k in current_environment()for k in('TESTOPTS','TESTS','EXTRA_QUICKTEST','SQLITE_TEST_PREFIX')),'vendor_test_filter')
@@ -1097,16 +1108,21 @@ def build():
  digest(src/'debian/rules',rules_pin);digest(src/'debian/control',control_pin);digest(src/'src/wal.c',WAL_BEFORE)
  for name,pin in VENDOR_HELPERS.items():digest(src/name,pin)
  digest(src/'ext/fts5/fts5_index.c',FTS_BEFORE);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_BEFORE)
+ digest(src/'ext/session/sqlite3session.c',(SESSION_INPUT_PROOF['before']['bytes'],SESSION_INPUT_PROOF['before']['sha256']))
  for name,pin in ROWID_NESTED_JOIN['before'].items():digest(src/name,pin)
  series=src/'debian/patches/series';previous=bytes_at(series,maximum=65536)
  patches=[('trading-bot-production-wal-reset.patch',PATCH,PATCH_PIN),
   ('trading-bot-fts5-detail-none-merge.patch',FTS_PATCH,FTS_PATCH_PIN),
   ('trading-bot-fts5-upstream-regression.patch',FTS_TEST_PATCH,FTS_TEST_PATCH_PIN),
-  ('trading-bot-rowid-nested-join-core.patch',ROWID_NESTED_JOIN['name'],ROWID_NESTED_JOIN['patch'])]
+  ('trading-bot-rowid-nested-join-core.patch',ROWID_NESTED_JOIN['name'],ROWID_NESTED_JOIN['patch']),
+  ('trading-bot-session-input-prerequisite.patch',None,(len(SESSION_INPUT_PATCH),sha256(SESSION_INPUT_PATCH).hexdigest()))]
  require(all(name.encode()not in previous for name,_,_ in patches),'patch_once')
- for name,leaf,pin in patches:publish(src/'debian/patches'/name,bytes_at(RECIPE/leaf,pin))
+ for name,leaf,pin in patches:
+  raw=SESSION_INPUT_PATCH if leaf is None else bytes_at(RECIPE/leaf,pin)
+  require((len(raw),sha256(raw).hexdigest())==pin,'session_patch_pin');publish(src/'debian/patches'/name,raw)
  series.write_bytes(previous+(b''if previous.endswith(b'\n')else b'\n')+b''.join(name.encode()+b'\n'for name,_,_ in patches))
  command(['/usr/bin/quilt','--quiltrc','/dev/null','push','-a'],cwd=src,timeout=30)
+ session_input=verify_session_input_source(src)
  nested_join=verify_rowid_nested_join_source(src)
  digest(src/'src/wal.c',WAL_AFTER);digest(src/'ext/fts5/fts5_index.c',FTS_AFTER);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_AFTER)
  changelog=src/'debian/changelog';original=changelog.read_bytes();require(original.startswith(('sqlite3 ('+BASE_VERSION+')').encode()),'changelog_base')
@@ -1120,9 +1136,13 @@ def build():
  require(metadata(['/usr/bin/dpkg-parsechangelog','-S','Version'],cwd=src).decode().strip()==VERSION,'local_package_version')
  command(['/usr/bin/dpkg-buildpackage','-B','-uc','-us','-j2'],cwd=src,timeout=1800)
  verify_rowid_nested_join_source(src)
+ package_paths=list(WORK.glob('libsqlite3-0_'+VERSION+'_amd64.deb'));require(len(package_paths)==1,'runtime_package_inventory')
+ package_before_vendor=digest(package_paths[0],maximum=32*1024**2)
  compatibility=prepare_vendor_test_compatibility(src)
  vendor,vendor_logs=vendor_tests(src)
  verify_vendor_test_compatibility(src,compatibility)
+ verify_session_input_source(src)
+ require(digest(package_paths[0],maximum=32*1024**2)==package_before_vendor,'vendor_package_changed')
  verify_rowid_nested_join_source(src)
  digest(src/'debian/rules',rules_pin);digest(src/'debian/control',control_pin);digest(src/'src/wal.c',WAL_AFTER)
  digest(src/'ext/fts5/fts5_index.c',FTS_AFTER);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_AFTER)
@@ -1163,7 +1183,7 @@ def build():
   'production_patch':{'bytes':PATCH_PIN[0],'sha256':PATCH_PIN[1]},
   'fts5_merge_patch':{'bytes':FTS_PATCH_PIN[0],'sha256':FTS_PATCH_PIN[1]},'fts5_upstream_regression_patch':{'bytes':FTS_TEST_PATCH_PIN[0],'sha256':FTS_TEST_PATCH_PIN[1]},
   'official_fts5_commit':UPSTREAM_FTS_COMMIT,'fts5_before':{'bytes':FTS_BEFORE[0],'sha256':FTS_BEFORE[1]},'fts5_after':{'bytes':FTS_AFTER[0],'sha256':FTS_AFTER[1]},
-  'vendor_tests':vendor,'test_only_compatibility':compatibility,'rowid_nested_join_backport':nested_join,'wal_before':{'bytes':WAL_BEFORE[0],'sha256':WAL_BEFORE[1]},
+  'vendor_tests':vendor,'test_only_compatibility':compatibility,'session_input_validation':session_input,'rowid_nested_join_backport':nested_join,'wal_before':{'bytes':WAL_BEFORE[0],'sha256':WAL_BEFORE[1]},
   'wal_after':{'bytes':WAL_AFTER[0],'sha256':WAL_AFTER[1]},'positive_verifier':{'bytes':VERIFY_PIN[0],'sha256':VERIFY_PIN[1]},
   'source_date_epoch':SOURCE_EPOCH,'build_options':ENV['DEB_BUILD_OPTIONS'],'upstream_fault_suites_run':False,
   'wal_reset_reproduction_performed':False,'full_upstream_suite_pass_claimed':False,

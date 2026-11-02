@@ -259,6 +259,18 @@ def compatibility():
                 'query_plan': plan}
 
 
+def candidate_view_checks():
+    """Public in-memory production-feature positive; never a vendor waiver."""
+    connection = sqlite3.connect(':memory:')
+    try:
+        connection.executescript('CREATE TABLE source(a); INSERT INTO source VALUES(1); CREATE VIEW view_source AS SELECT a FROM source;')
+        require(connection.execute('SELECT rowid IS NULL FROM view_source').fetchall() == [(1,)], 'rowid_view_contract')
+        require(connection.execute('SELECT a,b,c FROM ((view_source JOIN (SELECT 2 AS b)) JOIN (SELECT 3 AS c))').fetchall() == [(1,2,3)], 'nested_join_contract')
+    finally:
+        connection.close()
+    return {'rowid_in_view':True,'nested_join_rows':[[1,2,3]],'production_library_only':True,'security_accepted':False}
+
+
 def verify(expected):
     require(sys.version_info[:3] == PYTHON_VERSION, 'python_version_changed')
     extension = loader_identity()
@@ -278,12 +290,12 @@ def verify(expected):
             'sqlite_package':version, 'sqlite_runtime':sqlite3.sqlite_version,
             'system_library':library['path'], 'sqlite_system_library':library, 'sqlite_stdlib_extension':extension, 'python_environment_ignored':True, 'python_no_site':True, 'compile_options':options,
             'compile_options_sha256':sha256(body).hexdigest(),
-            'compatibility':compatibility(), 'production_data_accessed':False,
+            'compatibility':compatibility(), 'candidate_view_checks':candidate_view_checks() if expected.endswith('+gold2') else None, 'production_data_accessed':False,
             'wal_reset_reproduction_performed':False, 'all_cves_attested':False,
             'security_accepted':False}
 
 
-PUBLIC_REFUSAL_CODES = ('backup_integrity', 'backup_query_drift', 'binary_bound', 'binary_changed', 'binary_identity', 'binary_mapping', 'binary_parent', 'compile_options_bound', 'fts_contract', 'isolated_python_required', 'json_contract', 'loader_override', 'lookup_index_not_used', 'mapping_bound', 'native_library_layout', 'native_python_required', 'native_ubuntu_required', 'non_system_library', 'os_metadata', 'os_metadata_bound', 'package_library_path', 'package_metadata_bound', 'package_paths_bound', 'package_payload_changed', 'package_scope', 'package_version', 'package_version_changed', 'python_customization', 'python_version_changed', 'readonly_reopen_drift', 'scratch_not_private', 'sqlite_runtime_package_mismatch', 'stdlib_extension_required', 'stdlib_sqlite_required', 'system_library_missing_or_ambiguous', 'transaction_or_query_drift', 'wal_mode', 'wal_reader', 'wal_refresh', 'wal_snapshot_drift')
+PUBLIC_REFUSAL_CODES=('backup_integrity', 'backup_query_drift', 'binary_bound', 'binary_changed', 'binary_identity', 'binary_mapping', 'binary_parent', 'compile_options_bound', 'fts_contract', 'isolated_python_required', 'json_contract', 'loader_override', 'lookup_index_not_used', 'mapping_bound', 'native_library_layout', 'native_python_required', 'native_ubuntu_required', 'nested_join_contract', 'non_system_library', 'os_metadata', 'os_metadata_bound', 'package_library_path', 'package_metadata_bound', 'package_paths_bound', 'package_payload_changed', 'package_scope', 'package_version', 'package_version_changed', 'python_customization', 'python_version_changed', 'readonly_reopen_drift', 'rowid_view_contract', 'scratch_not_private', 'sqlite_runtime_package_mismatch', 'stdlib_extension_required', 'stdlib_sqlite_required', 'system_library_missing_or_ambiguous', 'transaction_or_query_drift', 'wal_mode', 'wal_reader', 'wal_refresh', 'wal_snapshot_drift')
 
 def public_failure(exc):
     reason = (exc.args[0] if type(exc) is ValueError and len(exc.args) == 1

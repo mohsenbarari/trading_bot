@@ -1022,10 +1022,22 @@ def vendor_failure_diagnostic(src,failed_output,scope):
  print(encoded(row).decode(),end='',flush=True)
  if errors:raise BaseExceptionGroup('failure-only diagnostic and retirement failures',errors)
 
+SESSION_INPUT_PATCH = b'--- a/ext/session/sqlite3session.c\n+++ b/ext/session/sqlite3session.c\n@@ -343,6 +343,18 @@\n   int ret = getVarint32(aBuf, *piVal);\n   *piVal = (*piVal & 0x7FFFFFFF);\n   return ret;\n+}\n+\n+\n+static int sessionVarintGetSafe(const u8 *aBuf, int nBuf, int *piVal){\n+  u8 aCopy[9];\n+  const u8 *aRead = aBuf;\n+  memset(aCopy, 0, sizeof(aCopy));\n+  if( nBuf<sizeof(aCopy) ){\n+    memcpy(aCopy, aBuf, nBuf);\n+    aRead = aCopy;\n+  }\n+  return sessionVarintGet(aRead, piVal);\n }\n \n /* Load an unaligned and unsigned 32-bit integer */\n@@ -3569,21 +3581,31 @@\n   int *pnByte                     /* OUT: Size of record in bytes */\n ){\n   int rc = SQLITE_OK;\n-  int nByte = 0;\n+  i64 nByte = 0;\n   int i;\n   for(i=0; rc==SQLITE_OK && i<nCol; i++){\n     int eType;\n     rc = sessionInputBuffer(pIn, nByte + 10);\n     if( rc==SQLITE_OK ){\n-      eType = pIn->aData[pIn->iNext + nByte++];\n-      if( eType==SQLITE_TEXT || eType==SQLITE_BLOB ){\n-        int n;\n-        nByte += sessionVarintGet(&pIn->aData[pIn->iNext+nByte], &n);\n-        nByte += n;\n-        rc = sessionInputBuffer(pIn, nByte);\n-      }else if( eType==SQLITE_INTEGER || eType==SQLITE_FLOAT ){\n-        nByte += 8;\n-      }\n+      if( pIn->iNext+nByte>=pIn->nData ){\n+        rc = SQLITE_CORRUPT_BKPT;\n+      }else{\n+        eType = pIn->aData[pIn->iNext + nByte++];\n+        if( eType==SQLITE_TEXT || eType==SQLITE_BLOB ){\n+          int n;\n+          int nRem = pIn->nData - (pIn->iNext + nByte);\n+          nByte += sessionVarintGetSafe(&pIn->aData[pIn->iNext+nByte], nRem,&n);\n+          nByte += n;\n+          rc = sessionInputBuffer(pIn, nByte);\n+        }else if( eType==SQLITE_INTEGER || eType==SQLITE_FLOAT ){\n+          nByte += 8;\n+        }else if( eType!=0 && eType!=SQLITE_NULL ){\n+          rc = SQLITE_CORRUPT_BKPT;\n+        }\n+      }\n+    }\n+    if( rc==SQLITE_OK && (pIn->iNext+nByte)>pIn->nData ){\n+      rc = SQLITE_CORRUPT_BKPT;\n     }\n   }\n   *pnByte = nByte;\n'
+SESSION_INPUT_PROOF = {'schema': 'sqlite_session_input_validation_prerequisite/1', 'upstream_git': 'c597ed79d1bd03f57198d10d1f431adda293cf2e', 'upstream_fossil': '869a51ae84dfaaf824c872e4b3024f35eea7fa67bb584759a2d42ebf8404ef6e', 'upstream_source_sha256': 'c53e435bb9c96eb1ae077405b0715a464c714473b39fffaecb63e4bf8bd28be4', 'prerequisite_record_validation_fossil': '8fcf92e15d87487703afc1129f3a89a8d4d72cb30d30a1a9151a5596473069bd', 'source_path': 'ext/session/sqlite3session.c', 'before': {'bytes': 210422, 'sha256': '8d6650bf3a4d8effb30edc35e18b68b6b26c39e6c02c225ca2b7773ba8046205'}, 'after': {'bytes': 211060, 'sha256': '8f2b866ed4f823c6039affb33e559bf55c995128d95dc767a5ff017dc7a75f20'}, 'patch': {'bytes': 1936, 'sha256': 'a154d1814b58e58f9f8de4178ae135a3583c353e191dac996f4a31dea5773fc6'}, 'malformed_changeset_hex': '540101740017000003ffffffff', 'official_expected': 'SQLITE_CORRUPT', 'test_bodies_changed': False, 'production_core_changed': True, 'security_accepted': False}
+
+def session_input_contract(value):
+ require(type(value) is dict and encoded(value)==encoded(SESSION_INPUT_PROOF),'session_input_contract')
+ return value
+
+def verify_session_input_source(src):
+ expected=SESSION_INPUT_PROOF['after']
+ digest(src/'ext/session/sqlite3session.c',(expected['bytes'],expected['sha256']))
+ return session_input_contract(dict(SESSION_INPUT_PROOF))
+
 def vendor_tests(src):
  # Debian has already configured/built this exact source with its unchanged
  # rules/feature flags. Do not reconfigure, filter TESTOPTS, or substitute a suite.
- watched=('Makefile','debian/rules','debian/control','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test',*VENDOR_HELPERS)
+ watched=('Makefile','debian/rules','debian/control','ext/session/sqlite3session.c','src/wal.c','ext/fts5/fts5_index.c','ext/fts5/test/fts5prefix2.test',*VENDOR_HELPERS)
  before={name:digest(src/name,maximum=4*1024**2)for name in watched}
  require(all(before[name]=={'bytes':pin[0],'sha256':pin[1]}for name,pin in VENDOR_HELPERS.items()),'vendor_naming_helper_changed')
  require(not any(k in current_environment()for k in('TESTOPTS','TESTS','EXTRA_QUICKTEST','SQLITE_TEST_PREFIX')),'vendor_test_filter')
@@ -1072,14 +1084,19 @@ def build():
  digest(src/'debian/rules',rules_pin);digest(src/'debian/control',control_pin);digest(src/'src/wal.c',WAL_BEFORE)
  for name,pin in VENDOR_HELPERS.items():digest(src/name,pin)
  digest(src/'ext/fts5/fts5_index.c',FTS_BEFORE);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_BEFORE)
+ digest(src/'ext/session/sqlite3session.c',(SESSION_INPUT_PROOF['before']['bytes'],SESSION_INPUT_PROOF['before']['sha256']))
  series=src/'debian/patches/series';previous=bytes_at(series,maximum=65536)
  patches=[('trading-bot-production-wal-reset.patch',PATCH,PATCH_PIN),
   ('trading-bot-fts5-detail-none-merge.patch',FTS_PATCH,FTS_PATCH_PIN),
-  ('trading-bot-fts5-upstream-regression.patch',FTS_TEST_PATCH,FTS_TEST_PATCH_PIN)]
+  ('trading-bot-fts5-upstream-regression.patch',FTS_TEST_PATCH,FTS_TEST_PATCH_PIN),
+  ('trading-bot-session-input-prerequisite.patch',None,(len(SESSION_INPUT_PATCH),sha256(SESSION_INPUT_PATCH).hexdigest()))]
  require(all(name.encode()not in previous for name,_,_ in patches),'patch_once')
- for name,leaf,pin in patches:publish(src/'debian/patches'/name,bytes_at(RECIPE/leaf,pin))
+ for name,leaf,pin in patches:
+  raw=SESSION_INPUT_PATCH if leaf is None else bytes_at(RECIPE/leaf,pin)
+  require((len(raw),sha256(raw).hexdigest())==pin,'session_patch_pin');publish(src/'debian/patches'/name,raw)
  series.write_bytes(previous+(b''if previous.endswith(b'\n')else b'\n')+b''.join(name.encode()+b'\n'for name,_,_ in patches))
  command(['/usr/bin/quilt','--quiltrc','/dev/null','push','-a'],cwd=src,timeout=30)
+ session_input=verify_session_input_source(src)
  digest(src/'src/wal.c',WAL_AFTER);digest(src/'ext/fts5/fts5_index.c',FTS_AFTER);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_AFTER)
  changelog=src/'debian/changelog';original=changelog.read_bytes();require(original.startswith(('sqlite3 ('+BASE_VERSION+')').encode()),'changelog_base')
  date=email.utils.format_datetime(datetime.datetime.fromtimestamp(SOURCE_EPOCH,datetime.timezone.utc))
@@ -1091,9 +1108,13 @@ def build():
  changelog.write_bytes(entry+original)
  require(metadata(['/usr/bin/dpkg-parsechangelog','-S','Version'],cwd=src).decode().strip()==VERSION,'local_package_version')
  command(['/usr/bin/dpkg-buildpackage','-B','-uc','-us','-j2'],cwd=src,timeout=1800)
+ package_paths=list(WORK.glob('libsqlite3-0_'+VERSION+'_amd64.deb'));require(len(package_paths)==1,'runtime_package_inventory')
+ package_before_vendor=digest(package_paths[0],maximum=32*1024**2)
  compatibility=prepare_vendor_test_compatibility(src)
  vendor,vendor_logs=vendor_tests(src)
  verify_vendor_test_compatibility(src,compatibility)
+ verify_session_input_source(src)
+ require(digest(package_paths[0],maximum=32*1024**2)==package_before_vendor,'vendor_package_changed')
  digest(src/'debian/rules',rules_pin);digest(src/'debian/control',control_pin);digest(src/'src/wal.c',WAL_AFTER)
  digest(src/'ext/fts5/fts5_index.c',FTS_AFTER);digest(src/'ext/fts5/test/fts5prefix2.test',FTS_TEST_AFTER)
  packages=list(WORK.glob('libsqlite3-0_'+VERSION+'_amd64.deb'));require(len(packages)==1,'runtime_package_inventory');package=packages[0]
@@ -1133,7 +1154,7 @@ def build():
   'production_patch':{'bytes':PATCH_PIN[0],'sha256':PATCH_PIN[1]},
   'fts5_merge_patch':{'bytes':FTS_PATCH_PIN[0],'sha256':FTS_PATCH_PIN[1]},'fts5_upstream_regression_patch':{'bytes':FTS_TEST_PATCH_PIN[0],'sha256':FTS_TEST_PATCH_PIN[1]},
   'official_fts5_commit':UPSTREAM_FTS_COMMIT,'fts5_before':{'bytes':FTS_BEFORE[0],'sha256':FTS_BEFORE[1]},'fts5_after':{'bytes':FTS_AFTER[0],'sha256':FTS_AFTER[1]},
-  'vendor_tests':vendor,'test_only_compatibility':compatibility,'wal_before':{'bytes':WAL_BEFORE[0],'sha256':WAL_BEFORE[1]},
+  'vendor_tests':vendor,'test_only_compatibility':compatibility,'session_input_validation':session_input,'wal_before':{'bytes':WAL_BEFORE[0],'sha256':WAL_BEFORE[1]},
   'wal_after':{'bytes':WAL_AFTER[0],'sha256':WAL_AFTER[1]},'positive_verifier':{'bytes':VERIFY_PIN[0],'sha256':VERIFY_PIN[1]},
   'source_date_epoch':SOURCE_EPOCH,'build_options':ENV['DEB_BUILD_OPTIONS'],'upstream_fault_suites_run':False,
   'wal_reset_reproduction_performed':False,'full_upstream_suite_pass_claimed':False,
