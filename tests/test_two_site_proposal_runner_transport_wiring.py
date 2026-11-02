@@ -289,7 +289,7 @@ def test_run_command_uses_task_aware_schema(tmp_path: Path):
     def mock_validate_profile(profile, fresh=True):
         return {"profile": "valid", "fresh": fresh}
 
-    with patch.object(runner, "validate_runtime_contract"), \
+    with patch.object(runner, "_generation_contract_sha", return_value="0" * 64), \
          patch.object(runner, "load_task", return_value=(task, sources)), \
          patch.object(runner, "git", side_effect=lambda *args: "HEAD_SHA" if "rev-parse" in args else ""), \
          patch.object(runner, "bounded_file_text", return_value="template prompt"), \

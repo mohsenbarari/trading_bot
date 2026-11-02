@@ -3161,7 +3161,20 @@ def _generation_artifact_bindings(
     compact = status.get("compact_review")
     if type(compact) is not bool:
         raise ProposalError("completion compact-review binding is missing")
-    wire = _cli_stream_input(prompt_bytes.decode("utf-8"), is_compact_review=compact)
+    framing = None
+    framing_path = run_dir / _FRAMED_MANIFEST
+    if status.get("input_transport") == _FRAMED_INPUT:
+        if compact:
+            raise ProposalError("compact review cannot use framed input")
+        framing, wires = _framed_input_plan(prompt_bytes.decode("utf-8"))
+        retained = bounded_file_bytes(root, framing_path, 8192, "input framing manifest")
+        if retained != serialize_json(framing) or sha(retained) != status.get("input_framing_sha256"):
+            raise ProposalError("completion input-framing binding mismatch")
+        wire = b"".join(wires)
+    else:
+        if "input_transport" in status or "input_framing_sha256" in status or framing_path.exists():
+            raise ProposalError("completion input-framing mode is missing or invalid")
+        wire = _cli_stream_input(prompt_bytes.decode("utf-8"), is_compact_review=compact)
     stdout = bounded_file_bytes(root, run_dir / "stream.jsonl", MAX_OUTPUT,
                                 "completion retained stdout")
     stderr = bounded_file_bytes(root, run_dir / "stderr.txt", MAX_OUTPUT,
@@ -3218,7 +3231,14 @@ def _generation_artifact_bindings(
             or status.get("cli_normal_exit_observed") is not normalized_observations["normal_exit_observed"]
             or status.get("generation_completion_outcome") != normalized_observations["outcome"]):
         raise ProposalError("completion status contradicts captured lifecycle")
-    if normalized_observations["outcome"] == "RECOVERED_COMPLETED_RESULT":
+    if framing is not None:
+        if normalized_observations["outcome"] != "NORMAL_EXIT":
+            raise ProposalError("framed input requires a real normal exit")
+        raw_result, envelope = _parse_framed_stream(
+            stdout.decode("utf-8"), framing, task, active_sources, role, force_full_paths,
+            status.get("model"), status.get("conversation_id"), original_sources=sources,
+        )
+    elif normalized_observations["outcome"] == "RECOVERED_COMPLETED_RESULT":
         if stderr:
             raise ProposalError("stderr invalidates recovered generation")
         raw_result, envelope = _validate_final_generation_frame(
@@ -3276,7 +3296,7 @@ def _generation_artifact_bindings(
                  or status.get("effort") != recovery_effort
                  or status.get("effort_arg_present") is not True)):
         raise ProposalError("recovery requires the pinned Gemini role/profile effort")
-    return {
+    proof = {
         "schema_version": "1.0", "kind": "GENERATION_COMPLETION_V1",
         "policy": GENERATION_COMPLETION_POLICY,
         "runtime_contract_sha256": _generation_contract_sha(root),
@@ -3295,6 +3315,9 @@ def _generation_artifact_bindings(
         "observations": normalized_observations,
         "outer_context_exited_normally": True,
     }
+    if framing is not None:
+        proof["input_framing"] = framing
+    return proof
 
 
 def _publish_generation_proof(path: Path, proof: dict) -> str:
@@ -3448,6 +3471,240 @@ def _cli_stream_input(prompt: str, *, is_compact_review: bool = False) -> bytes:
     if len(wire) > 6 * logical_limit + 46:
         raise ProposalError("CLI input wire exceeds derived budget")
     return wire
+
+
+_FRAMED_INPUT = "FULL_INPUT_ACK_V1"
+_FRAMED_MANIFEST = "input-framing.json"
+
+
+def _input_ack(index: int, count: int, token: str) -> dict:
+    # This exact transport-only object fits BOTH unchanged role schemas.
+    return {"status": "BLOCKED", "summary": f"{_FRAMED_INPUT}:{index}/{count}:{token}",
+            "covered_requirements": [], "findings": ["TRANSPORT_ACK_ONLY"], "changes": []}
+
+
+def _framed_input_plan(prompt: str) -> tuple[dict, list[bytes]]:
+    raw = prompt.encode("utf-8")
+    if not MAX_CONTEXT < len(raw) <= 2 * MAX_CONTEXT:
+        raise ProposalError("framed logical prompt size is invalid")
+    chunks, offset = [], 0
+    while offset < len(raw):
+        end = min(offset + 118000, len(raw))
+        while end < len(raw) and raw[end] & 0xC0 == 0x80:
+            end -= 1
+        chunks.append(raw[offset:end])
+        offset = end
+    if not 2 <= len(chunks) <= 3:
+        raise ProposalError("framed input count is invalid")
+    frames, wires, offset = [], [], 0
+    for index, chunk in enumerate(chunks, 1):
+        token = sha(_FRAMED_INPUT.encode() + str(index).encode() + chunk)[:24]
+        ack = _input_ack(index, len(chunks), token) if index < len(chunks) else None
+        instruction = (
+            "Retain this exact fragment; do not solve or review the task yet. Return ONLY "
+            "the existing five-key response object with status BLOCKED, empty covered_requirements "
+            "and changes, findings [\"TRANSPORT_ACK_ONLY\"], and summary "
+            f"\"{_FRAMED_INPUT}:{index}/{len(chunks)}:TOKEN\". Replace TOKEN with the "
+            "END_FULL_INPUT_TOKEN after the complete fragment. This is a transport ACK, not a business result."
+            if ack is not None else
+            "FINAL fragment. Reassemble ALL preceding fragments and this fragment in exact order. "
+            "They form ONE complete logical prompt, including ALL full source files. "
+            "Now follow that whole prompt and return its final schema-bound business response; never a transport ACK."
+        )
+        text = (f"{_FRAMED_INPUT} transport fragment {index}/{len(chunks)}. " + instruction
+                + "\nBEGIN_EXACT_LOGICAL_FRAGMENT\n" + chunk.decode("utf-8")
+                + f"\nEND_EXACT_LOGICAL_FRAGMENT\nEND_FULL_INPUT_TOKEN={token}\n")
+        if len(text.encode("utf-8")) > 120000:
+            raise ProposalError("framed message exceeds 120000 bytes")
+        wire = _cli_stream_input(text)
+        frames.append({"index": index, "offset": offset, "utf8_bytes": len(chunk),
+                       "sha256": sha(chunk), "wire_bytes": len(wire), "wire_sha256": sha(wire),
+                       "ack": ack})
+        wires.append(wire)
+        offset += len(chunk)
+    if sum(map(len, wires)) > 6 * (2 * MAX_CONTEXT) + 46:
+        raise ProposalError("combined framed wire exceeds derived budget")
+    return {"protocol": _FRAMED_INPUT, "logical_prompt_bytes": len(raw),
+            "logical_prompt_sha256": sha(raw), "frame_count": len(frames), "frames": frames}, wires
+
+
+def _framed_stream_projection(raw: str, manifest: dict, model: str, session: str,
+                              *, complete: bool) -> tuple[int, str]:
+    """Validate every real ACK/terminal; only then project the REAL final turn."""
+    events = [unique_json(line) for line in raw.splitlines() if line.strip()]
+    init, terminals, start = None, 0, 0
+    for pos, event in enumerate(events):
+        if terminals == manifest["frame_count"]:
+            raise ProposalError("late event after framed final result")
+        if type(event) is not dict or ("conversation_id" in event and event["conversation_id"] != session):
+            raise ProposalError("framed event/session mismatch")
+        kind = event.get("event")
+        if kind in {"init", "result", "step_update"} and type(event.get(kind)) is not dict:
+            raise ProposalError("malformed framed event envelope")
+        step = event.get("step_update")
+        if isinstance(step, dict) and "conversation_id" in step and step["conversation_id"] != session:
+            raise ProposalError("framed step/session mismatch")
+        if kind == "init":
+            if (init is not None or type(event.get("init")) is not dict
+                    or event["init"].get("model") != model or event.get("conversation_id") != session):
+                raise ProposalError("framed init/model mismatch")
+            init = event
+        if kind in {"error", "denied", "permission_denied"}:
+            raise ProposalError("error or denial invalidates framed stream")
+        if terminals < manifest["frame_count"] - 1:
+            for obj in (event, event.get("step_update")):
+                if not isinstance(obj, dict):
+                    continue
+                if (obj.get("error") is not None or obj.get("denied_actions")
+                        or obj.get("state") in {"ERROR", "DENIED"}):
+                    raise ProposalError("error or denial invalidates framed ACK")
+                if (any(k in obj for k in ("tool_name", "tool_info", "subagent_info"))
+                        or obj.get("step_type") in {"tool", "subagent"}):
+                    raise ProposalError("tool attempt invalidates framed ACK")
+        if kind != "result":
+            continue
+        envelope = event.get("result")
+        if (init is None or type(envelope) is not dict or envelope.get("status") != "SUCCESS"
+                or envelope.get("conversation_id") != session or envelope.get("denied_actions")):
+            raise ProposalError("framed terminal is not successful")
+        terminals += 1
+        if type(envelope.get("num_turns")) is not int or envelope["num_turns"] != terminals:
+            raise ProposalError("framed cumulative turn count mismatch")
+        if terminals > manifest["frame_count"]:
+            raise ProposalError("extra framed terminal")
+        if terminals < manifest["frame_count"]:
+            if "structured_output" in envelope:
+                value = envelope["structured_output"]
+            else:
+                response = envelope.get("response")
+                if type(response) is not str or len(response.encode("utf-8")) > 4096:
+                    raise ProposalError("framed ACK response is invalid")
+                value = unique_json(response)
+            if value != manifest["frames"][terminals - 1]["ack"]:
+                raise ProposalError("framed ACK mismatch")
+            start = pos + 1
+    if init is None or (complete and terminals != manifest["frame_count"]):
+        raise ProposalError("incomplete framed stream")
+    projection = "\n".join(json.dumps(e, ensure_ascii=False) for e in [init, *events[start:]]) + "\n"
+    return terminals, projection
+
+
+def _parse_framed_stream(raw: str, manifest: dict, task: dict, sources: dict, role: str,
+                         force_full_paths: tuple[str, ...], model: str, session: str,
+                         *, original_sources: dict | None = None) -> tuple[dict, dict]:
+    _, final = _framed_stream_projection(raw, manifest, model, session, complete=True)
+    result, envelope = _parse_stream(final, task, sources, role, force_full_paths, model,
+                                     original_sources=original_sources)
+    if result.get("summary", "").startswith(_FRAMED_INPUT + ":"):
+        raise ProposalError("transport ACK cannot be the final result")
+    return result, envelope
+
+
+def _capture_framed_process(process: subprocess.Popen, wires: list[bytes], manifest: dict,
+                            stdout_path: Path, stderr_path: Path, timeout: float,
+                            model: str, session: str,
+                            *, pre_provider_check: Callable[[], None] | None = None) -> None:
+    """Bounded normal-exit-only exchange; each next write requires its real ACK."""
+    selector = selectors.DefaultSelector()
+    deadline = time.monotonic() + timeout
+    offsets, active, total, pending, accepted = [0] * len(wires), 0, 0, bytearray(), bytearray()
+    primary = None
+    try:
+        with stdout_path.open("xb") as stdout, stderr_path.open("xb") as stderr:
+            streams = {process.stdout: stdout, process.stderr: stderr}
+            for stream in streams:
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ, "output")
+            os.set_blocking(process.stdin.fileno(), False)
+            selector.register(process.stdin, selectors.EVENT_WRITE, "input")
+            while selector.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise subprocess.TimeoutExpired(getattr(process, "args", "CLI"), timeout)
+                for key, _ in selector.select(min(remaining, .25)):
+                    stream = key.fileobj
+                    if key.data == "input":
+                        try:
+                            count = os.write(stream.fileno(), wires[active][offsets[active]:])
+                        except BlockingIOError:
+                            continue
+                        if count <= 0:
+                            raise ProposalError("framed input short write")
+                        offsets[active] += count
+                        if offsets[active] == len(wires[active]):
+                            selector.unregister(stream)
+                            if active == len(wires) - 1:
+                                stream.close()
+                        continue
+                    try:
+                        chunk = os.read(stream.fileno(), min(STREAM_CHUNK_SIZE, MAX_OUTPUT - total + 1))
+                    except BlockingIOError:
+                        continue
+                    if not chunk:
+                        selector.unregister(stream)
+                        stream.close()
+                        continue
+                    if total + len(chunk) > MAX_OUTPUT:
+                        raise ProposalError("CLI output exceeds budget")
+                    streams[stream].write(chunk)
+                    total += len(chunk)
+                    if stream is not process.stdout:
+                        continue
+                    pending.extend(chunk)
+                    while b"\n" in pending:
+                        line, _, rest = pending.partition(b"\n")
+                        pending[:] = rest
+                        accepted.extend(line + b"\n")
+                        if not line.strip():
+                            continue
+                        event = unique_json(line.decode("utf-8"))
+                        if type(event) is not dict:
+                            raise ProposalError("framed event must be an object")
+                        if event.get("event") == "result":
+                            count, _ = _framed_stream_projection(accepted.decode("utf-8"), manifest,
+                                                                 model, session, complete=False)
+                            if count != active + 1 or offsets[active] != len(wires[active]):
+                                raise ProposalError("framed terminal preceded its complete input")
+                            if active < len(wires) - 1:
+                                if pre_provider_check is not None:
+                                    pre_provider_check()
+                                active += 1
+                                selector.register(process.stdin, selectors.EVENT_WRITE, "input")
+                if process.poll() is not None and not process.stdin.closed:
+                    try:
+                        selector.unregister(process.stdin)
+                    except KeyError:
+                        pass
+                    process.stdin.close()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(getattr(process, "args", "CLI"), timeout)
+            process.wait(timeout=remaining)
+            if process.returncode != 0 or offsets != list(map(len, wires)) or pending.strip():
+                raise ProposalError("framed exchange did not exit normally with complete input")
+            _framed_stream_projection(accepted.decode("utf-8"), manifest, model, session, complete=True)
+    except BaseException as exc:
+        primary = exc
+        try:
+            terminate_process(process)
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        except BaseException:
+            pass
+        raise
+    finally:
+        cleanup = None
+        for stream in (selector, process.stdin, process.stdout, process.stderr):
+            try:
+                if stream is not None and (stream is selector or not stream.closed):
+                    stream.close()
+            except BaseException as exc:
+                if cleanup is None:
+                    cleanup = exc
+        if primary is None and cleanup is not None:
+            raise cleanup
 
 
 def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
@@ -3672,6 +3929,10 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     if len(prompt.encode("utf-8")) > schema_prompt_limit:
         raise ProposalError("split task or feedback into a smaller coherent unit")
     stdin_bytes = _cli_stream_input(prompt, is_compact_review=is_compact_review)
+    input_framing, framed_wires = None, None
+    if not is_compact_review and len(prompt.encode("utf-8")) > MAX_CONTEXT:
+        input_framing, framed_wires = _framed_input_plan(prompt)
+        stdin_bytes = b"".join(framed_wires)
     out = None
     meta = None
     generation_process = None
@@ -3699,6 +3960,10 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                         "compact_review": is_compact_review,
                         "cli": initial_cli_identity, "cli_source": cli_source,
                         "session_gate": session_gate}
+                if input_framing is not None:
+                    write_json(out / _FRAMED_MANIFEST, input_framing)
+                    meta.update(input_transport=_FRAMED_INPUT,
+                                input_framing_sha256=file_sha256(out / _FRAMED_MANIFEST))
                 if autopilot_run_id is not None:
                     meta["controller_run_id"] = autopilot_run_id
                 if prior_status is not None:
@@ -3769,7 +4034,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                         original_sources=sources,
                     )
 
-                if role_model in {WORKER_MODEL, MODEL}:
+                if input_framing is None and role_model in {WORKER_MODEL, MODEL}:
                     generation_policy = GenerationRecoveryPolicy(final_frame_check)
                 capture_options = (
                     {"generation_completion": generation_policy}
@@ -3787,10 +4052,17 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 meta["cli_pid"] = process.pid
                 try:
                     write_json(out / "status.json", meta)
-                    capture_outcome = capture_bounded_process(
-                        process, stdin_bytes, out / "stream.jsonl", out / "stderr.txt",
-                        timeout + 15, **capture_options,
-                    )
+                    if input_framing is not None:
+                        _capture_framed_process(
+                            process, framed_wires, input_framing, out / "stream.jsonl",
+                            out / "stderr.txt", timeout + 15, role_model, profile.conversation_id,
+                            pre_provider_check=pre_provider_check,
+                        )
+                    else:
+                        capture_outcome = capture_bounded_process(
+                            process, stdin_bytes, out / "stream.jsonl", out / "stderr.txt",
+                            timeout + 15, **capture_options,
+                        )
                 except BaseException as capture_error:
                     first_primary = capture_error
                     # A status-write failure can precede capture ownership.
@@ -3850,7 +4122,12 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                         raise ProposalError("CLI identity changed during generation")
                     meta["quota_evidence"] = quota_evidence
                     write_json(out / "status.json", meta)
-                if capture_outcome is None:
+                if input_framing is not None:
+                    result, envelope = _parse_framed_stream(
+                        raw, input_framing, task, active_sources, role, force_full_paths,
+                        role_model, profile.conversation_id, original_sources=sources,
+                    )
+                elif capture_outcome is None:
                     result, envelope = _parse_stream(
                         raw, task, active_sources, role, force_full_paths, role_model,
                         original_sources=sources,
