@@ -1,0 +1,323 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "assignment_scope_sha256": "60cea71c873c6ec93c1191634d7eb48954918646c5683717a38cf0ab0bd1448d",
+  "parent_assignment_id": "WA-P1-00B-AUTHORITY-SECURITY-RESUME-20261102-001",
+  "original_parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "task_id": "p1-00b-security-resume-authority-registration-20261102-007",
+  "scenario_key": "P1-00B-RECONCILE-SECURITY-RESUME-V6.authority-registration-framed-full-seven",
+  "source_head": "a4b1fd512e45960da6df319c002142a30352aaac",
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_internal_authority_execute_failure.py",
+      "sha256": "d7a60d5f329d0889a2fcba3d52b28cb0b41c72c51c913e278f3bfdf3637903d1",
+      "utf8_bytes": 15378,
+      "mode": "100644",
+      "last_commit": "f4dd10018ef832881894e276bfa214e070ce7422",
+      "parent": "973e2a28092a8718c412718135eab181c3ecd4fd",
+      "canonical_symbol": "api/routers/sessions.py:internal_session_authority_check",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539"
+      ],
+      "scenarios": [
+        "internal_authority_execute_exception_before_inspection"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_authority_execute_failure.py::InternalAuthorityExecuteFailureCharacterizationTests::test_execute_exception_propagates_before_authority_inspection"
+      ],
+      "characterized_contract": {
+        "request_body": {
+          "call_count": 1,
+          "await_count": 1
+        },
+        "headers_get_order": [
+          {
+            "header": "X-Timestamp",
+            "default": null
+          },
+          {
+            "header": "X-Signature",
+            "default": null
+          },
+          {
+            "header": "X-API-Key",
+            "default": null
+          }
+        ],
+        "synthetic_verifier": {
+          "target": "api.routers.sessions.verify_session_authority_signature",
+          "call_count": 1,
+          "return_value": true,
+          "positional_body_comparison": "equality_only",
+          "positional_body_identity_claimed": false,
+          "keyword_keys": [
+            "timestamp",
+            "signature",
+            "api_key"
+          ]
+        },
+        "event_order": [
+          "body_call",
+          "body_await",
+          "header:X-Timestamp",
+          "header:X-Signature",
+          "header:X-API-Key",
+          "verifier",
+          "orm_execute"
+        ],
+        "pre_driver_orm_select": {
+          "statement_count": 1,
+          "entity": "User",
+          "table": "users",
+          "filter_column": "id",
+          "filter_operator": "eq",
+          "target_user_id": 5079,
+          "compiled_where": "users.id = :id_1",
+          "compiled_params": {
+            "id_1": 5079
+          },
+          "is_select": true,
+          "is_column_load": false,
+          "is_relationship_load": false
+        },
+        "exception_propagation": {
+          "exception_type": "RuntimeError",
+          "sentinel_message": "characterization-internal-authority-db-execute-failure-sentinel",
+          "identical_exception_object": true,
+          "propagates_before_authority_inspection": true
+        },
+        "authority_inspection": {
+          "target": "api.routers.sessions.inspect_local_session_authority",
+          "call_count": 0,
+          "await_count": 0
+        },
+        "driver_sql": {
+          "statement_count": 0,
+          "statements": []
+        },
+        "session_mutation_and_state": {
+          "guarded_async_session_sync_methods": [
+            "add",
+            "add_all"
+          ],
+          "guarded_async_session_async_methods": [
+            "delete",
+            "flush",
+            "commit",
+            "rollback",
+            "refresh"
+          ],
+          "guarded_sync_session_methods": [
+            "add",
+            "add_all",
+            "delete",
+            "flush",
+            "commit",
+            "rollback",
+            "refresh"
+          ],
+          "guarded_call_count": 0,
+          "guarded_await_count": 0,
+          "flush_called": false,
+          "new_count": 0,
+          "dirty_count": 0,
+          "deleted_count": 0
+        },
+        "network_and_redis_fence": {
+          "denied_connects_delta": 0,
+          "live_redis_constructs_delta": 0
+        }
+      },
+      "exclusions": {
+        "verifier_internals": true,
+        "verifier_body_identity_proof": true,
+        "scalar_result_consumption": true,
+        "inspection_internals": true,
+        "success_outcome": true,
+        "reset_outcome": true,
+        "revocation_outcome": true,
+        "persistence_side_effects": true,
+        "retry_behavior": true,
+        "process_reload": true,
+        "concurrency": true,
+        "origin_matrix": true,
+        "http_depends_wiring": true,
+        "full_seed_acceptance": true,
+        "high_blocker_closure": true,
+        "stage_acceptance": true
+      },
+      "credits": {
+        "added_behavior_units": 0,
+        "seed_credit": 0,
+        "origin_credit": 0,
+        "stage_credit": 0,
+        "reconciliation_credit": 0,
+        "reconciled_units": 3,
+        "group_total_units": 5,
+        "reconciled_scenarios": 4,
+        "group_total_scenarios": 7,
+        "pending_five": 5,
+        "canonical_packet_registered": false,
+        "claims_accounting_composition": false,
+        "claims_historical_git_or_provider_acceptance": false
+      },
+      "unmet_follow_up_dependencies": {
+        "canonical_union": true,
+        "manifest_derive_composition_and_counts": true,
+        "ledger_prefix_integration": true,
+        "actual_authority_registration": true
+      }
+    }
+  ],
+  "registered_handlers": [
+    {
+      "scenario": "internal_authority_execute_exception_before_inspection",
+      "scenario_key": "internal_authority_execute_exception_before_inspection",
+      "selector": "tests/test_p1_00b_characterization_internal_authority_execute_failure.py::InternalAuthorityExecuteFailureCharacterizationTests::test_execute_exception_propagates_before_authority_inspection",
+      "canonical_symbol": "api/routers/sessions.py:internal_session_authority_check",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539",
+      "source_path": "tests/test_p1_00b_characterization_internal_authority_execute_failure.py",
+      "source_file_sha256": "d7a60d5f329d0889a2fcba3d52b28cb0b41c72c51c913e278f3bfdf3637903d1",
+      "source_commit": "f4dd10018ef832881894e276bfa214e070ce7422"
+    }
+  ],
+  "raw_membership_delta": [],
+  "counts_after_union": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 263,
+    "evidenced_seed_count": 398,
+    "remaining_seed_count": 67
+  },
+  "promotion_assessment": {
+    "promoted_seed_ids": [],
+    "already_registered_seed_ids": [
+      "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539"
+    ],
+    "delta_distinct_seed_count": 0,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "before_manifest_sha256": "821de3225e4609a586db6ee337f933eb9740a23d860239688bc2c7fea2ec258b",
+    "before_manifest_utf8_bytes": 4377,
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 263,
+      "evidenced": 398,
+      "remaining": 67
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 263,
+      "evidenced": 398,
+      "remaining": 67
+    },
+    "added_behavior_units": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0,
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "accepted_prerequisite_helpers": [
+    {
+      "path": "tests/test_p1_00b_characterization_authority_record_contract_oracle.py",
+      "bytes": 19824,
+      "sha256": "52cd08169b177c16e5576fddb86b6b5c57afd685be473012ead410ee4687b29c",
+      "accepted_commit": "46b3807a8257ff3a67554a1c6ed1c681b631aa85"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_canonical_membership_snapshot.py",
+      "bytes": 11785,
+      "sha256": "7186a5eb551f50a8b35b6eceec38f896b58e7340cc0c5d6ac80086624d217deb",
+      "accepted_commit": "d83f5057c6df6f3da8db7cafb1175e822922433d"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_authority_membership_correspondence.py",
+      "bytes": 12413,
+      "sha256": "e0e7801944bf04e6ec92857bdafaf718039b214b218fc46e3a4344d02fc60072",
+      "accepted_commit": "6f3bdbe7fc3e0864a25c432bae01df46457b9d4e"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_notification_mark_all_accounting.py",
+      "bytes": 20531,
+      "sha256": "0a07c8597233a701a5b115de52b68ed043db74ed075cdf58a3ef3fc4d2c80407"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_ledger_prefix_helper.py",
+      "bytes": 7834,
+      "sha256": "b1c06db3e7cfa6c18c8653d27d0df294e843e20ba0474134c5eafacc6b3c0738"
+    }
+  ],
+  "accounting": {
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "total_handler_scenarios": 7,
+    "prior_reconciled_verifier_provenance": {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-verifier-only.json",
+      "sha256": "09c03b798d7c268a987874c1ebe3e834ed534edc97eade4be9b68e097d27f960",
+      "utf8_bytes": 11436,
+      "accepted_commit": "bfad4a12866719f255f003d15625c87ccd8da1b5",
+      "cumulative_reconciled_units": 3,
+      "cumulative_reconciled_scenarios": 4
+    },
+    "reconciled_units_in_this_packet_on_exact_acceptance": 1,
+    "reconciled_scenarios_in_this_packet_on_exact_acceptance": 1,
+    "cumulative_reconciled_units_on_exact_acceptance": 4,
+    "cumulative_reconciled_scenarios_on_exact_acceptance": 5,
+    "remaining_unreconciled_units_on_exact_acceptance": 1,
+    "remaining_unreconciled_scenarios_on_exact_acceptance": 2,
+    "group_reconciliation_complete": false,
+    "canonical_manifest_and_ledger_integration_complete": false,
+    "ledger_integration_status": "PENDING",
+    "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+    "added_behavior_units": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0,
+    "unreconciled_units_after_authority_on_exact_acceptance": [
+      {
+        "path": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py",
+        "sha256": "b5f2772f283424f94c0f8436b8575f58f7ec65a2e57500ea4422bc9c9785c4e9",
+        "source_commit": "777ed75419ed7083d875c262da2beb8103017d03",
+        "handler_scenarios": 2
+      }
+    ],
+    "preserved_deferred_and_failed_reservations": {
+      "deferred_a2_task_id": "p1-00b-799b-c006-session-prequery-reconciliation-a2",
+      "deferred_a2_status": "UNACCEPTED_RESERVED_NEVER_REPLAY_OR_RELEASE",
+      "failed_authority_singleton_task_id": "p1-00b-799b-c009-authority-execute-singleton-reconciliation",
+      "failed_authority_singleton_status": "UNACCEPTED_RESERVED_NEVER_REPLAY_OR_RELEASE",
+      "prior_attempt_006_proposal_sha256": "cf7a47345ce3b9018138c3873e3967225db02f5f95f77aa341b0e44ae7b7e617",
+      "prior_attempt_006_status": "UNACCEPTED_GENUINE_PROPOSAL_ONE_PASS_ONE_FAIL_CONTEXT_BLOCKED_CORRECTION_PRESERVED"
+    },
+    "previous_completed_group_provenance": {
+      "assignment_id": "WA-P1-00B-FIVE-SOURCE-RECONCILIATION-20261023-798D",
+      "accepted_closeout_commit": "e5c08c61895961bce399da9d8c69f561d7538ea1",
+      "status": "COMPLETED_PROVENANCE",
+      "reconciled_behavior_units": 5,
+      "reconciled_handler_scenarios": 7,
+      "remaining_in_group": 0
+    },
+    "ledger_prefix_binding": {
+      "path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+      "unchanged_ledger_sha256": "a25deecb4880ed4c7ceb905ae5db5048c8d3fc7b58129bc6cfdcf4d31d2c05c2",
+      "unchanged_ledger_utf8_bytes": 109329
+    }
+  },
+  "strict_canonical_progress": {
+    "proven": 288,
+    "partial": 177,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}
