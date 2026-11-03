@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "assignment_scope_sha256": "6b6eff78bf62c60b839b42fb3cc9bd286fb096b3f8a58d41a59cf8f218d13257",
+  "parent_assignment_id": "WA-P1-00B-AUTHORITY-SECURITY-RESUME-20261102-001",
+  "original_parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "task_id": "p1-00b-current-session-body-registration-a-20261102-003",
+  "scenario_key": "P1-00B-CURRENT-SESSION-REGISTRATION-A-V3.qualified-185-minimal-review-context",
+  "source_head": "8b073836d57b35e9758ac6fce9c63e87831f4865",
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py",
+      "sha256": "b5f2772f283424f94c0f8436b8575f58f7ec65a2e57500ea4422bc9c9785c4e9",
+      "utf8_bytes": 7060,
+      "mode": "100644",
+      "last_commit": "777ed75419ed7083d875c262da2beb8103017d03",
+      "parent": "e5c08c61895961bce399da9d8c69f561d7538ea1",
+      "canonical_symbols": [
+        "api/routers/sessions.py:internal_reset_user_sessions",
+        "api/routers/sessions.py:internal_replace_user_sessions"
+      ],
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+        "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+      ],
+      "scenarios": [
+        "reset_body_failure_before_headers_and_db",
+        "replace_body_failure_before_headers_and_db"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py::InternalSessionBodyFailuresCharacterizationTests::test_reset_body_failure_stops_before_headers_and_db",
+        "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py::InternalSessionBodyFailuresCharacterizationTests::test_replace_body_failure_stops_before_headers_and_db"
+      ],
+      "historical_provenance": {
+        "worker_run_id": "p1-00b-799b-c001-session-body-worker-1",
+        "reviewer_run_id": "p1-00b-799b-c001-session-body-reviewer-1",
+        "claims_new_native_or_provider_execution": false,
+        "claims_future_acceptance": false
+      },
+      "characterized_contract": {
+        "entrypoints": [
+          "api/routers/sessions.py:internal_reset_user_sessions",
+          "api/routers/sessions.py:internal_replace_user_sessions"
+        ],
+        "request_body": {
+          "call_count": 1,
+          "await_count": 1,
+          "positional_args": [],
+          "keyword_args": {},
+          "exception_type": "RuntimeError",
+          "identical_exception_propagated": true,
+          "escapes_before": [
+            "request.headers_property",
+            "request.headers.get",
+            "verify_session_authority_signature",
+            "select",
+            "reset_user_session_state",
+            "force_clear_sessions"
+          ]
+        },
+        "scenario_bindings": [
+          {
+            "scenario": "reset_body_failure_before_headers_and_db",
+            "user_id": 9101,
+            "mobile_number": "09120009101",
+            "source_server": "synthetic-peer-reset-body-failure",
+            "error_message": "synthetic-reset-request-body-read-failure"
+          },
+          {
+            "scenario": "replace_body_failure_before_headers_and_db",
+            "user_id": 9202,
+            "mobile_number": "09120009202",
+            "source_server": "synthetic-peer-replace-body-failure",
+            "error_message": "synthetic-replace-request-body-read-failure"
+          }
+        ],
+        "zero_side_effect_and_fence_invariants": {
+          "headers_property_access_count": 0,
+          "poison_headers_access_count": 0,
+          "verify_session_authority_signature_calls": 0,
+          "select_calls": 0,
+          "reset_user_session_state_calls": 0,
+          "reset_user_session_state_awaits": 0,
+          "force_clear_sessions_calls": 0,
+          "force_clear_sessions_awaits": 0,
+          "db_argument": "inert object()",
+          "handler_identities_unchanged": true,
+          "network_denied_connects_delta": 0,
+          "live_redis_constructs_delta": 0
+        }
+      },
+      "exclusions": {
+        "body_read_success_and_malformed_body_parsing": true,
+        "signature_and_authentication_validation": true,
+        "http_routing_and_depends_wiring": true,
+        "sql_execution_and_scalar_result_consumption": true,
+        "missing_user_404_and_mobile_mismatch_409": true,
+        "successful_session_reset_and_revocation": true,
+        "persistence_retry_reload_and_concurrency": true,
+        "origin_matrix_interactions": true,
+        "full_seed_acceptance": true,
+        "high_blocker_closure": true,
+        "stage_acceptance": true
+      },
+      "credits": {
+        "added_behavior_units": 0,
+        "added_distinct_seeds": 0,
+        "accepted_full_seeds": 0,
+        "raw_registration_delta": 0,
+        "stage_or_origin_or_optimization_credit": 0
+      }
+    }
+  ],
+  "registered_handlers": [
+    {
+      "scenario": "reset_body_failure_before_headers_and_db",
+      "scenario_key": "reset_body_failure_before_headers_and_db",
+      "selector": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py::InternalSessionBodyFailuresCharacterizationTests::test_reset_body_failure_stops_before_headers_and_db",
+      "canonical_symbol": "api/routers/sessions.py:internal_reset_user_sessions",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+      "source_path": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py",
+      "source_file_sha256": "b5f2772f283424f94c0f8436b8575f58f7ec65a2e57500ea4422bc9c9785c4e9",
+      "source_commit": "777ed75419ed7083d875c262da2beb8103017d03"
+    },
+    {
+      "scenario": "replace_body_failure_before_headers_and_db",
+      "scenario_key": "replace_body_failure_before_headers_and_db",
+      "selector": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py::InternalSessionBodyFailuresCharacterizationTests::test_replace_body_failure_stops_before_headers_and_db",
+      "canonical_symbol": "api/routers/sessions.py:internal_replace_user_sessions",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593",
+      "source_path": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py",
+      "source_file_sha256": "b5f2772f283424f94c0f8436b8575f58f7ec65a2e57500ea4422bc9c9785c4e9",
+      "source_commit": "777ed75419ed7083d875c262da2beb8103017d03"
+    }
+  ],
+  "prior_packet_references": [
+    {
+      "manifest_key": "business_768_live786_reset_execute_singleton_path",
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-reset-execute-singleton.json",
+      "utf8_bytes": 9510,
+      "sha256": "4ef4ffe40f33dfe4328573bdca380b220e33306e1bee5f18d5baf54aef7170a2",
+      "accepted_commit": "226e3b111a393bb834c4f8a91ac473f2d766f915"
+    },
+    {
+      "manifest_key": "business_768_live786_replace_execute_singleton_path",
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-replace-execute-singleton.json",
+      "utf8_bytes": 9738,
+      "sha256": "cf251e42b72c41490e205499dbc269704d75ba422dbf730ef1027d29101d579c",
+      "accepted_commit": "c9e9b30cd919472b1e253bc9b6da53da644171a8"
+    },
+    {
+      "manifest_key": "business_768_live786_verifier_only_path",
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-verifier-only.json",
+      "utf8_bytes": 11436,
+      "sha256": "09c03b798d7c268a987874c1ebe3e834ed534edc97eade4be9b68e097d27f960",
+      "accepted_commit": "bfad4a12866719f255f003d15625c87ccd8da1b5"
+    },
+    {
+      "manifest_key": "business_768_live786_authority_registration_after_security_path",
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-authority-registration-security.json",
+      "utf8_bytes": 12255,
+      "sha256": "676426367cb4fd92ace6cd9f2bd04c90fb70bc8f24e357c3fe4293004f56c113",
+      "accepted_commit": "041c5f5fdc06a7389238461dc29f3657ab19d8cd"
+    }
+  ],
+  "raw_membership_delta": [],
+  "counts_after_union": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 263,
+    "evidenced_seed_count": 398,
+    "remaining_seed_count": 67
+  },
+  "promotion_assessment": {
+    "promoted_seed_ids": [],
+    "already_registered_seed_ids": [
+      "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+      "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+    ],
+    "delta_distinct_seed_count": 0,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "before_manifest_sha256": "78fb57df9bde1afbc336b02f4026dcc418032efa39d7fdc050c5d057c94f023c",
+    "before_manifest_utf8_bytes": 4578,
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 263,
+      "evidenced": 398,
+      "remaining": 67
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 263,
+      "evidenced": 398,
+      "remaining": 67
+    },
+    "added_behavior_units": 0,
+    "added_distinct_seeds": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0,
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "accounting": {
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "total_handler_scenarios": 7,
+    "prior_inventory_registered_units": 4,
+    "prior_inventory_registered_scenarios": 5,
+    "reconciled_units_in_this_packet_on_exact_acceptance": 1,
+    "reconciled_scenarios_in_this_packet_on_exact_acceptance": 2,
+    "cumulative_reconciled_units_on_exact_acceptance": 5,
+    "cumulative_reconciled_scenarios_on_exact_acceptance": 7,
+    "remaining_unreconciled_units_on_exact_acceptance": 0,
+    "remaining_unreconciled_scenarios_on_exact_acceptance": 0,
+    "unreconciled_units_after_body_on_exact_acceptance": [],
+    "group_reconciliation_complete": false,
+    "full_group_union_complete": false,
+    "canonical_manifest_and_ledger_integration_complete": false,
+    "ledger_integration_status": "PENDING",
+    "outcome_b_full_group_closeout_required": true,
+    "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+    "added_behavior_units": 0,
+    "added_distinct_seeds": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0
+  },
+  "strict_canonical_progress": {
+    "proven": 288,
+    "partial": 177,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}
