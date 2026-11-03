@@ -18,7 +18,7 @@ from typing import Any, Callable, Mapping
 try:
     from scripts.two_site_proposal_runner import (
         MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ForbiddenToolAttemptError,
-        CorrectionDeltaError, ProposalError, RetryableProviderOutputError, RetryableProviderSessionError,
+        CorrectionDeltaError, ProposalError, ProposalProfileError, RetryableProviderOutputError, RetryableProviderSessionError,
         _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task as _load_task,
         run as runner_run, serialize_json, unique_json,
@@ -27,7 +27,7 @@ try:
 except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
         MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ForbiddenToolAttemptError,
-        CorrectionDeltaError, ProposalError, RetryableProviderOutputError, RetryableProviderSessionError,
+        CorrectionDeltaError, ProposalError, ProposalProfileError, RetryableProviderOutputError, RetryableProviderSessionError,
         _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task as _load_task,
         run as runner_run, serialize_json, unique_json,
@@ -1242,6 +1242,62 @@ def test_gate_feedback(
     return validate_correction_feedback(serialized, proposal_sha)
 
 
+_EMPTY_INITIAL_PROFILE = (
+    "proposal runtime selected session is ambiguous or absent; "
+    "LAST_HINT_INITIAL_METADATA_EMPTY new=1 empty=1 final_valid=0; "
+    "PREP_DIAG phase=SECOND reason=INITIALIZER_FAILED attempts=2 "
+    "invalid=0 sqlite=0 multiple=0 ui=NONEMPTY init=OWNED_INIT_ONLY"
+)
+
+
+def _retryable_profile_preparation(
+    root: Path, run_dir: Path, run_id: str, role: str, head: str,
+    task: dict, error: ProposalProfileError,
+) -> bool:
+    """Admit only the observed owned failure before any generation dispatch."""
+    if type(error) is not ProposalProfileError or str(error) != _EMPTY_INITIAL_PROFILE:
+        return False
+    allowed = {"task.json", "prompt.txt", "response-schema.json", "status.json", "input-framing.json"}
+    forbidden_fields = {
+        "runtime_profile", "prepared_effort", "cli_pid", "conversation_id", "usage",
+        "result_sha256", "delta_result_sha256", "completion_proof_sha256",
+        "cli_returncode", "cli_normal_exit_observed", "generation_completion_outcome",
+        "generation_capture_failure", "noneligible_completion_observations",
+        "secondary_context_error_type", "quota_evidence",
+    }
+    try:
+        info = run_dir.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+            return False
+        names = set()
+        for path in run_dir.iterdir():
+            if path.name not in allowed:
+                return False
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                    or info.st_uid != os.geteuid() or info.st_mode & 0o022):
+                return False
+            names.add(path.name)
+        if not {"task.json", "prompt.txt", "response-schema.json", "status.json"} <= names:
+            return False
+        status = unique_json(bounded_file_bytes(root, run_dir / "status.json", MAX_CONTEXT, "preparation status").decode())
+        snapshot = unique_json(bounded_file_bytes(root, run_dir / "task.json", 3 * MAX_CONTEXT, "preparation task").decode())
+        if not isinstance(status, dict) or not isinstance(snapshot, dict):
+            return False
+        return (
+            status.get("run_id") == run_id and status.get("role") == role
+            and status.get("head") == head and status.get("task_id") == task["task_id"]
+            and status.get("model") == expected_role_model(role, task["task_id"])
+            and status.get("state") == "BLOCKED"
+            and status.get("authority") == "PROPOSAL_ONLY_NOT_ACCEPTANCE"
+            and status.get("error") == "ProposalProfileError: " + str(error)
+            and not forbidden_fields.intersection(status)
+            and snapshot.get("source_head") == head and snapshot.get("task") == task
+        )
+    except Exception:
+        return False
+
+
 def run_provider_session(
     root: Path, task_path: Path, role: str, base_run_id: str, timeout: int,
     state_check: Callable[[], None], feedback: Path | None = None,
@@ -1250,7 +1306,7 @@ def run_provider_session(
 ) -> tuple[str, Path]:
     proposals_dir = root / ".local/two-site-refactor/proposals"
     attempts = (base_run_id, f'{base_run_id}-retry-1', f'{base_run_id}-retry-2')
-    last_error: RetryableProviderSessionError | None = None
+    last_error: RetryableProviderSessionError | ProposalProfileError | None = None
     output_errors = 0
     next_hint: dict[str, str | int] | None = None
     label = "reviewer" if role == "verifier" else "worker"
@@ -1339,6 +1395,15 @@ def run_provider_session(
                 root, task_path, role, fallback_id, timeout, **fallback_kwargs
             )
             return fallback_id, fallback_dir
+        except ProposalProfileError as exc:
+            next_hint = None
+            state_check()
+            task, _ = load_task(root, task_path)
+            if not _retryable_profile_preparation(
+                root, proposals_dir / attempt_id, attempt_id, role, expected_head, task, exc,
+            ):
+                raise
+            last_error = exc
         except RetryableProviderSessionError as exc:
             next_hint = None
             last_error = exc
