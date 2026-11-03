@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "assignment_scope_sha256": "80208105800094b4904f1d57dfaf3c9873bac20e1fd5a4083366e72f466e4dd1",
+  "parent_assignment_id": "WA-P1-00B-AUTHORITY-SECURITY-RESUME-20261102-001",
+  "original_parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "task_id": "p1-00b-current-session-group-ledger-closeout-20261103-002",
+  "scenario_key": "P1-00B-CURRENT-SESSION-GROUP-BL-V2.corrected-local-profile-closeout",
+  "source_head": "b2d4ef0b1695f1e7a234648895ce644d7d4649a4",
+  "records": [],
+  "accepted_union_reference": {
+    "path": "docs/refactor/two-server/section-1/inventory/current-session-five-source-union.json",
+    "utf8_bytes": 10792,
+    "sha256": "5d9734c108edd3269cd56c264bed8079ded467d5c63a648c84db6eb639f6ab82",
+    "accepted_commit": "b2d4ef0b1695f1e7a234648895ce644d7d4649a4"
+  },
+  "raw_membership_delta": [],
+  "counts_after_closeout": {
+    "expected_seed_count": 465,
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 263,
+    "evidenced_seed_count": 398,
+    "remaining_seed_count": 67
+  },
+  "accounting": {
+    "current_group_status_on_exact_acceptance": "COMPLETED_PROVENANCE",
+    "source_union_complete": true,
+    "full_group_union_complete": true,
+    "physical_union_sources_verified": 5,
+    "physical_union_scenarios_verified": 7,
+    "remaining_union_units": 0,
+    "remaining_union_scenarios": 0,
+    "remaining_current_group_units": 0,
+    "remaining_current_group_scenarios": 0,
+    "group_reconciliation_complete": true,
+    "canonical_manifest_and_ledger_integration_complete": true,
+    "ledger_integration_status": "COMPLETE",
+    "outcome_b_l_required": false,
+    "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "total_handler_scenarios": 7,
+    "added_behavior_units": 0,
+    "added_distinct_seeds": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0
+  },
+  "strict_canonical_progress": {
+    "proven": 288,
+    "partial": 177,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}
