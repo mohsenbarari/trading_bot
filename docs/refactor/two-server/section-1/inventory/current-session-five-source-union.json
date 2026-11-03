@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "assignment_scope_sha256": "80208105800094b4904f1d57dfaf3c9873bac20e1fd5a4083366e72f466e4dd1",
+  "parent_assignment_id": "WA-P1-00B-AUTHORITY-SECURITY-RESUME-20261102-001",
+  "original_parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "task_id": "p1-00b-current-session-group-union-20261103-001",
+  "scenario_key": "P1-00B-CURRENT-SESSION-GROUP-BU-V1.physical-five-source-seven-scenario-union",
+  "source_head": "7c1519c77d335156a1a175fd83c7c12d648678e7",
+  "records": [],
+  "owner_packet_references": [
+    {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-reset-execute-singleton.json",
+      "utf8_bytes": 9510,
+      "sha256": "4ef4ffe40f33dfe4328573bdca380b220e33306e1bee5f18d5baf54aef7170a2",
+      "accepted_commit": "226e3b111a393bb834c4f8a91ac473f2d766f915"
+    },
+    {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-replace-execute-singleton.json",
+      "utf8_bytes": 9738,
+      "sha256": "cf251e42b72c41490e205499dbc269704d75ba422dbf730ef1027d29101d579c",
+      "accepted_commit": "c9e9b30cd919472b1e253bc9b6da53da644171a8"
+    },
+    {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-verifier-only.json",
+      "utf8_bytes": 11436,
+      "sha256": "09c03b798d7c268a987874c1ebe3e834ed534edc97eade4be9b68e097d27f960",
+      "accepted_commit": "bfad4a12866719f255f003d15625c87ccd8da1b5"
+    },
+    {
+      "path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-authority-registration-security.json",
+      "utf8_bytes": 12255,
+      "sha256": "676426367cb4fd92ace6cd9f2bd04c90fb70bc8f24e357c3fe4293004f56c113",
+      "accepted_commit": "041c5f5fdc06a7389238461dc29f3657ab19d8cd"
+    },
+    {
+      "path": "docs/refactor/two-server/section-1/inventory/current-session-body-registration.json",
+      "utf8_bytes": 10833,
+      "sha256": "9ef13f20a2c85cc813e79e6e209398cddb25c6f60a66eb12e47013d63cc49049",
+      "accepted_commit": "2a0ca26f7c8a8fa33dc105d668f795bbfa11797a"
+    }
+  ],
+  "source_index": [
+    {
+      "path": "tests/test_p1_00b_characterization_internal_reset_execute_failure.py",
+      "sha256": "ef84b9aeed432fedd70dfc0590c3d9b7ec5324fd204e0fe676165e1a0906edec",
+      "utf8_bytes": 15348,
+      "mode": "100644",
+      "last_commit": "0bfd5783775a8612f9bf97d63a12e24c85ae9279",
+      "parent": "9a3bfcebe29399253b7ee60c605e72cf73e19d82",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_reset_execute_failure.py::InternalResetExecuteFailureCharacterizationTests::test_execute_exception_propagates_before_reset_side_effects"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_replace_execute_failure.py",
+      "sha256": "6a3ce45d737994d88d811f38226431801e495ffdb92ab13a4817ea5bc385e8a3",
+      "utf8_bytes": 15384,
+      "mode": "100644",
+      "last_commit": "973e2a28092a8718c412718135eab181c3ecd4fd",
+      "parent": "0bfd5783775a8612f9bf97d63a12e24c85ae9279",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_replace_execute_failure.py::InternalReplaceExecuteFailureCharacterizationTests::test_execute_exception_propagates_before_revocation_side_effects"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py",
+      "sha256": "6ed021334ea4384e5f1b98897a1aeb6c45f0cfed29105bb90e9a227ff8d803c8",
+      "utf8_bytes": 10936,
+      "mode": "100644",
+      "last_commit": "9a3bfcebe29399253b7ee60c605e72cf73e19d82",
+      "parent": "777ed75419ed7083d875c262da2beb8103017d03",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+        "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py::InternalSessionVerifierFailuresCharacterizationTests::test_reset_verifier_exception_stops_before_sql_and_reset",
+        "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py::InternalSessionVerifierFailuresCharacterizationTests::test_replace_verifier_exception_stops_before_sql_and_revoke"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_authority_execute_failure.py",
+      "sha256": "d7a60d5f329d0889a2fcba3d52b28cb0b41c72c51c913e278f3bfdf3637903d1",
+      "utf8_bytes": 15378,
+      "mode": "100644",
+      "last_commit": "f4dd10018ef832881894e276bfa214e070ce7422",
+      "parent": "973e2a28092a8718c412718135eab181c3ecd4fd",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_authority_execute_failure.py::InternalAuthorityExecuteFailureCharacterizationTests::test_execute_exception_propagates_before_authority_inspection"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py",
+      "sha256": "b5f2772f283424f94c0f8436b8575f58f7ec65a2e57500ea4422bc9c9785c4e9",
+      "utf8_bytes": 7060,
+      "mode": "100644",
+      "last_commit": "777ed75419ed7083d875c262da2beb8103017d03",
+      "parent": "e5c08c61895961bce399da9d8c69f561d7538ea1",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+        "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py::InternalSessionBodyFailuresCharacterizationTests::test_reset_body_failure_stops_before_headers_and_db",
+        "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py::InternalSessionBodyFailuresCharacterizationTests::test_replace_body_failure_stops_before_headers_and_db"
+      ]
+    }
+  ],
+  "scenario_index": [
+    {
+      "source_path": "tests/test_p1_00b_characterization_internal_reset_execute_failure.py",
+      "selector": "tests/test_p1_00b_characterization_internal_reset_execute_failure.py::InternalResetExecuteFailureCharacterizationTests::test_execute_exception_propagates_before_reset_side_effects",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562"
+    },
+    {
+      "source_path": "tests/test_p1_00b_characterization_internal_replace_execute_failure.py",
+      "selector": "tests/test_p1_00b_characterization_internal_replace_execute_failure.py::InternalReplaceExecuteFailureCharacterizationTests::test_execute_exception_propagates_before_revocation_side_effects",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+    },
+    {
+      "source_path": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py",
+      "selector": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py::InternalSessionVerifierFailuresCharacterizationTests::test_reset_verifier_exception_stops_before_sql_and_reset",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562"
+    },
+    {
+      "source_path": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py",
+      "selector": "tests/test_p1_00b_characterization_internal_session_verifier_failures_batch.py::InternalSessionVerifierFailuresCharacterizationTests::test_replace_verifier_exception_stops_before_sql_and_revoke",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+    },
+    {
+      "source_path": "tests/test_p1_00b_characterization_internal_authority_execute_failure.py",
+      "selector": "tests/test_p1_00b_characterization_internal_authority_execute_failure.py::InternalAuthorityExecuteFailureCharacterizationTests::test_execute_exception_propagates_before_authority_inspection",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539"
+    },
+    {
+      "source_path": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py",
+      "selector": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py::InternalSessionBodyFailuresCharacterizationTests::test_reset_body_failure_stops_before_headers_and_db",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562"
+    },
+    {
+      "source_path": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py",
+      "selector": "tests/test_p1_00b_characterization_internal_session_body_failures_batch.py::InternalSessionBodyFailuresCharacterizationTests::test_replace_body_failure_stops_before_headers_and_db",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+    }
+  ],
+  "distinct_seed_ids": [
+    "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+    "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593",
+    "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539"
+  ],
+  "raw_membership_delta": [],
+  "counts_after_union": {
+    "expected_seed_count": 465,
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 263,
+    "evidenced_seed_count": 398,
+    "remaining_seed_count": 67
+  },
+  "accounting": {
+    "current_group_status_on_exact_acceptance": "PHYSICAL_UNION_VERIFIED_ONLY",
+    "source_union_complete": true,
+    "full_group_union_complete": true,
+    "physical_union_sources_verified": 5,
+    "physical_union_scenarios_verified": 7,
+    "remaining_union_units": 0,
+    "remaining_union_scenarios": 0,
+    "group_reconciliation_complete": false,
+    "canonical_manifest_and_ledger_integration_complete": false,
+    "ledger_integration_status": "PENDING",
+    "outcome_b_l_required": true,
+    "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "total_handler_scenarios": 7,
+    "added_behavior_units": 0,
+    "added_distinct_seeds": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0
+  },
+  "strict_canonical_progress": {
+    "proven": 288,
+    "partial": 177,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}
