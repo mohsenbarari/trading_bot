@@ -104,6 +104,49 @@ def _commit_signing_required(root: Path) -> bool:
         raise CoordinatorSandboxError("SANDBOX_SIGNING_POLICY") from exc
 
 
+def _scope_control_identity(path: Path, maximum: int) -> tuple:
+    path = _canonical(path, directory=False)
+    info = path.stat()
+    _need(info.st_uid == os.geteuid() and info.st_nlink == 1
+          and not info.st_mode & 0o022 and 0 < info.st_size <= maximum,
+          "SANDBOX_ASSIGNMENT_CONTROL_CUSTODY")
+    return tuple(getattr(info, key) for key in (
+        "st_dev", "st_ino", "st_uid", "st_nlink", "st_mode", "st_size",
+        "st_mtime_ns", "st_ctime_ns",
+    ))
+
+
+def _assignment_control_mounts(root: Path, common: Path, scope_env: Mapping[str, str]) -> tuple[Path, ...]:
+    """Expose only the validated registry and active public Assignment Markdown."""
+    if common.parent == root:
+        return ()  # Both controls are already inside the bound checkout.
+    try:
+        from scripts.two_site_assignment_scope import (
+            MAX_CONTROL_FILE_BYTES, load_active_assignment_scope, load_expected_assignment_scope,
+        )
+        control_root = common.parent / ".local/two-site-refactor"
+        registry = control_root / "worktrees.yaml"
+        registry_identity = _scope_control_identity(registry, MAX_CONTROL_FILE_BYTES)
+        scope = load_active_assignment_scope(root)
+        assignment = control_root / "assignments" / (scope.assignment_id + ".md")
+        assignment_identity = _scope_control_identity(assignment, MAX_CONTROL_FILE_BYTES)
+        # The production reader selects/validates the ID; replay it after the
+        # selected file's custody check, then reject any concurrent replacement.
+        load_expected_assignment_scope(root, scope.assignment_id, scope.sha256)
+        _need(_scope_control_identity(registry, MAX_CONTROL_FILE_BYTES) == registry_identity
+              and _scope_control_identity(assignment, MAX_CONTROL_FILE_BYTES) == assignment_identity,
+              "SANDBOX_ASSIGNMENT_CONTROL_CHANGED")
+        if "TWO_SITE_ASSIGNMENT_ID" in scope_env or "TWO_SITE_ASSIGNMENT_SHA256" in scope_env:
+            _need(scope_env.get("TWO_SITE_ASSIGNMENT_ID") == scope.assignment_id
+                  and scope_env.get("TWO_SITE_ASSIGNMENT_SHA256") == scope.sha256,
+                  "SANDBOX_ASSIGNMENT_SCOPE_BINDING")
+        return registry, assignment
+    except CoordinatorSandboxError:
+        raise
+    except Exception as exc:
+        raise CoordinatorSandboxError("SANDBOX_ASSIGNMENT_SCOPE") from exc
+
+
 def buildwrap_coordinator_command(
     root: Path, run_dir: Path, argv: list[str], *,
     environment: Mapping[str, str] | None = None,
@@ -149,6 +192,8 @@ def buildwrap_coordinator_command(
                   and all(ord(c) >= 32 for c in value), "SANDBOX_SCOPE_ENV")
             scope_env[name] = value
 
+    assignment_controls = _assignment_control_mounts(root, common, scope_env)
+
     state = run_dir / "coordinator-qoder-state"
     _private_directory(state)
     for relative in (".auth", "cache", ".cache", "logs", "projects", "tmp"):
@@ -171,6 +216,10 @@ def buildwrap_coordinator_command(
     command += ["--bind", str(root), str(root)]
     if not common.is_relative_to(root):
         command += ["--bind", str(common), str(common)]
+    # Public shared controls remain file-scoped; Main and its .local directory
+    # are never mounted. The validated active Assignment is the only document.
+    for control in assignment_controls:
+        command += ["--ro-bind", str(control), str(control)]
     # A pinned CLI inside the writable worktree must remain read-only too.
     if not executable.is_relative_to(Path("/usr")):
         command += ["--ro-bind", str(executable), str(executable)]

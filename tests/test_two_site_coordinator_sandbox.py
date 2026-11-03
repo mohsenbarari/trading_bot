@@ -7,6 +7,9 @@ import tempfile
 from unittest.mock import patch
 
 import pytest
+import yaml
+
+from scripts import two_site_assignment_scope as assignment_scope
 
 from scripts import two_site_coordinator_sandbox as sandbox
 
@@ -143,6 +146,7 @@ def test_malformed_paths_and_root_escapes_are_rejected(workspace, tmp_path, vari
                     reason="Native namespace canary is explicitly run outside the tool sandbox")
 def test_real_offline_sandbox_hides_host_root_and_allows_workspace_write(tmp_path):
     root = Path(sandbox.__file__).resolve().parents[1]
+    active_scope = assignment_scope.load_active_assignment_scope(root)
     # Public synthetic sentinel only; no host credential bytes are accessed.
     with tempfile.TemporaryDirectory(prefix="coordinator-sandbox-forbidden-", dir="/root") as outside, \
             tempfile.TemporaryDirectory(prefix="coordinator-sandbox-canary-", dir=root / ".local") as run:
@@ -160,25 +164,36 @@ for name in ['/srv','/root/.ssh','/root/secure-envs','/var/run/docker.sock','/et
  assert not pathlib.Path(name).exists(),name
 assert 'QODER_PERSONAL_ACCESS_TOKEN' not in os.environ
 assert 'AWS_SECRET_ACCESS_KEY' not in os.environ
-assert os.environ['TWO_SITE_ASSIGNMENT_ID']=='canary'
+from scripts.two_site_assignment_scope import load_active_assignment_scope
+scope=load_active_assignment_scope(pathlib.Path(os.environ['PYTHONPATH']))
+assert scope.assignment_id==os.environ['TWO_SITE_ASSIGNMENT_ID']
+assert scope.sha256==os.environ['TWO_SITE_ASSIGNMENT_SHA256']
+assert scope.allowed_paths
+root=pathlib.Path(os.environ['PYTHONPATH'])
+common=pathlib.Path(subprocess.check_output(['/usr/bin/git','-C',str(root),'rev-parse','--path-format=absolute','--git-common-dir'],text=True).strip())
+registry=common.parent/'.local/two-site-refactor/worktrees.yaml'
+assignment=registry.parent/'assignments'/(scope.assignment_id+'.md')
+assert not (common.parent/'AGENTS.md').exists()
+assert list(assignment.parent.iterdir())==[assignment]
 assert os.environ['APP_ENV_FILE']=='config/unit-test.env.example'
 status=pathlib.Path('/proc/self/status').read_text()
 assert 'CapEff:\\t0000000000000000' in status
 assert 'NoNewPrivs:\\t1' in status
-for filename in ['/usr/bin/true','/root/.qoder/.auth/user']:
+for filename in ['/usr/bin/true','/root/.qoder/.auth/user',str(registry),str(assignment)]:
  try:
   with open(filename,'ab'):pass
  except OSError as error:
   assert error.errno in (errno.EROFS,errno.EACCES,errno.EPERM)
  else:raise AssertionError('read-only mount was writable')
 pathlib.Path(output).write_text('sandbox-write-ok')
-print(json.dumps({'outside_hidden':True,'workspace_write':True,'readonly_mounts':True,'zero_capabilities':True,'no_new_privileges':True}))
+print(json.dumps({'outside_hidden':True,'workspace_write':True,'readonly_mounts':True,'zero_capabilities':True,'no_new_privileges':True,'active_scope_loaded':True,'scope_controls_readonly':True}))
 '''
         with patch.object(sandbox, "_AUTH_ROOT", auth):
             command = sandbox.buildwrap_coordinator_command(
-                root, Path(run), ["/usr/bin/python3", "-I", "-S", "-B", "-c", script,
+                root, Path(run), ["/usr/bin/python3", "-B", "-c", script,
                                   str(sentinel), str(output)],
-                environment={"TWO_SITE_ASSIGNMENT_ID": "canary",
+                environment={"TWO_SITE_ASSIGNMENT_ID": active_scope.assignment_id,
+                             "TWO_SITE_ASSIGNMENT_SHA256": active_scope.sha256,
                              "QODER_PERSONAL_ACCESS_TOKEN": "SYNTHETIC_FORBIDDEN",
                              "AWS_SECRET_ACCESS_KEY": "SYNTHETIC_FORBIDDEN"},
             )
@@ -187,3 +202,144 @@ print(json.dumps({'outside_hidden':True,'workspace_write':True,'readonly_mounts'
         assert result.returncode == 0, result.stderr.decode(errors="replace")[:1000]
         assert json.loads(result.stdout)["outside_hidden"] is True
         assert output.read_text() == "sandbox-write-ok"
+
+
+@pytest.fixture
+def registered(tmp_path, monkeypatch):
+    shared = tmp_path / "main"
+    common = shared / ".git"
+    common.mkdir(parents=True)
+    controls = shared / ".local/two-site-refactor"
+    root = controls / "integration"
+    root.mkdir(parents=True)
+    run = root / "run"
+    run.mkdir()
+    registry = controls / "worktrees.yaml"
+    registry.write_text(yaml.safe_dump({"integration": {
+        "path": str(root), "branch": "refactor/two-site-architecture",
+        "active_assignment_id": "OFFLINE-ASSIGNMENT-001",
+    }}))
+    document = controls / "assignments/OFFLINE-ASSIGNMENT-001.md"
+    document.parent.mkdir()
+    document.write_text("# Public synthetic Assignment\n```yaml\n" + yaml.safe_dump({
+        "id": "OFFLINE-ASSIGNMENT-001", "status": "READY", "role": "WORKER",
+        "integration_branch": "refactor/two-site-architecture", "external_access": "NONE",
+        "expires_at": "2099-01-01T00:00:00Z", "stage_id": "P1-00b",
+        "allowed_paths": ["tests/test_new.py"], "forbidden_paths": [".env*"],
+    }) + "```\n")
+    order = root / "docs/refactor/two-server/execution-order.yaml"
+    order.parent.mkdir(parents=True)
+    order.write_text("stages:\n  P1-00b: {state: IN_PROGRESS}\n")
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    monkeypatch.setattr(sandbox, "_AUTH_ROOT", auth)
+    monkeypatch.setattr(sandbox, "_commit_signing_required", lambda _root: False)
+    monkeypatch.setattr(sandbox, "_git_path", lambda _root, flag:
+                        root if flag == "--show-toplevel" else common)
+    calls = []
+
+    def public_git(args, cwd, **_kwargs):
+        assert cwd == str(root)
+        calls.append(tuple(args))
+        if args == ["rev-parse", "--path-format=absolute", "--git-common-dir"]:
+            return str(common)
+        if args == ["rev-parse", "--abbrev-ref", "HEAD"]:
+            return "refactor/two-site-architecture"
+        assert args == ["ls-files", "--error-unmatch", "docs/refactor/two-server/execution-order.yaml"]
+        return "docs/refactor/two-server/execution-order.yaml"
+
+    monkeypatch.setattr(assignment_scope, "_run_git_cmd", public_git)
+    return root, run, common, registry, document, calls
+
+
+def command(registered, environment=None):
+    root, run, *_ = registered
+    return sandbox.buildwrap_coordinator_command(root, run, ["/usr/bin/true"], environment=environment or {})
+
+
+def test_only_two_actual_validated_scope_controls_are_readonly(registered):
+    root, run, common, registry, document, calls = registered
+    scope = assignment_scope.load_active_assignment_scope(root)
+    argv = command(registered, {"TWO_SITE_ASSIGNMENT_ID": scope.assignment_id,
+                                "TWO_SITE_ASSIGNMENT_SHA256": scope.sha256})
+    assert (str(registry), str(registry)) in bindings(argv, "--ro-bind")
+    assert (str(document), str(document)) in bindings(argv, "--ro-bind")
+    assert bindings(argv, "--bind") == [
+        (str(root), str(root)), (str(common), str(common)),
+        (str(run / "coordinator-qoder-state"), "/root/.qoder"),
+    ]
+    exposed = {source for source, _target in bindings(argv, "--bind") + bindings(argv, "--ro-bind")}
+    assert str(common.parent) not in exposed
+    assert str(registry.parent) not in exposed
+    assert str(document.parent) not in exposed
+    assert not any(v in exposed for v in ("/srv", "/root/.ssh", "/root/secure-envs"))
+    assert "--share-net" in argv and "--clearenv" in argv
+    assert argv[argv.index("--cap-drop") + 1] == "ALL"
+    assert dict(bindings(argv, "--setenv"))["TWO_SITE_COORDINATOR_SANDBOX"] == "1"
+    assert len([v for v in calls if v == ("rev-parse", "--abbrev-ref", "HEAD")]) == 3
+
+
+@pytest.mark.parametrize("which", ["registry", "assignment"])
+@pytest.mark.parametrize("bad", ["symlink", "hardlink", "oversize", "writable", "wrong-owner"])
+def test_unsafe_scope_control_rejected(registered, tmp_path, monkeypatch, which, bad):
+    _root, _run, _common, registry, document, _calls = registered
+    target = registry if which == "registry" else document
+    if bad == "symlink":
+        original = tmp_path / "original"
+        target.replace(original)
+        target.symlink_to(original)
+    elif bad == "hardlink":
+        os.link(target, tmp_path / "second-link")
+    elif bad == "oversize":
+        target.write_bytes(b"x" * (assignment_scope.MAX_CONTROL_FILE_BYTES + 1))
+    elif bad == "writable":
+        target.chmod(0o666)
+    else:
+        monkeypatch.setattr(sandbox.os, "geteuid", lambda: target.stat().st_uid + 1)
+    with pytest.raises(sandbox.CoordinatorSandboxError):
+        command(registered)
+
+
+@pytest.mark.parametrize("bad", ["registry-root", "registry-branch", "traversal-id", "expired", "stage"])
+def test_real_loader_rejects_invalid_registered_contract(registered, bad):
+    _root, _run, _common, registry, document, _calls = registered
+    if bad in {"registry-root", "registry-branch", "traversal-id"}:
+        data = yaml.safe_load(registry.read_text())
+        key, value = {"registry-root": ("path", "/tmp"),
+                      "registry-branch": ("branch", "other"),
+                      "traversal-id": ("active_assignment_id", "../escape")}[bad]
+        data["integration"][key] = value
+        registry.write_text(yaml.safe_dump(data))
+    else:
+        text = document.read_text()
+        document.write_text(text.replace("2099-01-01", "2000-01-01") if bad == "expired"
+                            else text.replace("P1-00b", "P9-99"))
+    with pytest.raises(sandbox.CoordinatorSandboxError, match="SANDBOX_ASSIGNMENT_SCOPE"):
+        command(registered)
+
+
+@pytest.mark.parametrize("environment", [
+    {"TWO_SITE_ASSIGNMENT_ID": "WRONG"},
+    {"TWO_SITE_ASSIGNMENT_SHA256": "0" * 64},
+    {"TWO_SITE_ASSIGNMENT_ID": "OFFLINE-ASSIGNMENT-001", "TWO_SITE_ASSIGNMENT_SHA256": "0" * 64},
+])
+def test_controller_scope_binding_remains_exact(registered, environment):
+    with pytest.raises(sandbox.CoordinatorSandboxError, match="SANDBOX_ASSIGNMENT_SCOPE_BINDING"):
+        command(registered, environment)
+
+
+@pytest.mark.parametrize("which", ["registry", "assignment"])
+def test_control_change_during_actual_loader_replay_is_rejected(registered, monkeypatch, which):
+    _root, _run, _common, registry, document, _calls = registered
+    actual = assignment_scope.load_expected_assignment_scope
+
+    def changing(*args):
+        result = actual(*args)
+        target = registry if which == "registry" else document
+        with target.open("a") as handle:
+            handle.write("\n# changed during selection\n")
+        return result
+
+    monkeypatch.setattr(assignment_scope, "load_expected_assignment_scope", changing)
+    with pytest.raises(sandbox.CoordinatorSandboxError, match="SANDBOX_ASSIGNMENT_CONTROL_CHANGED"):
+        command(registered)
