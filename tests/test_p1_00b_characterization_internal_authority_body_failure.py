@@ -1,7 +1,7 @@
 """Bounded P1-00b characterization for internal_session_authority_check request.body() failure.
 
 Stage: P1-00b (IN_PROGRESS; P1-00 COMPLETE)
-Assignment: WA-P1-00B-COMPLETION-20261102-001 (scope SHA256 80208105800094b4904f1d57dfaf3c9873bac20e1fd5a4083366e72f466e4dd1; parent WA-P1-00B-FREEZE-20260904-001)
+Assignment: WA-P1-00B-COMPLETION-20261102-001 (scope SHA256 80208105800094b4904f1d57dfaf3c9873bac20e1fd5a4083366e72f466e4dd1; direct parent WA-P1-00B-AUTHORITY-SECURITY-RESUME-20261102-001; original parent WA-P1-00B-FREEZE-20260904-001)
 Canonical blocker: docs/refactor/two-server/section-1/inventory/scenario-records.json#P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE
 Seed (NOT promoted): API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539
 Scenario: P1-00B-AUTHORITY-BODY-FAILURE-V1.before-headers-verifier-query
