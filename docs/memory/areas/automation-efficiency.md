@@ -11,6 +11,7 @@
 - Containment qualification must load the real active Assignment inside bwrap; mount only the two canonical public registry/Assignment files read-only, never the parent checkout or its whole `.local` tree.
 - Only proven transient late Gemini-Reviewer failures reuse the same Worker/native/reservation with fresh sessions and finite persisted counters. Semantic, quota, source drift, accepted work and uncertain effects never authorize blind replay or counter reset.
 - Qoder REQUEST_CHANGES returns to Gemini through the existing correction loop. Final APPROVE is mechanically checked before apply and checkpoint. Same-SHA final-review recovery must preserve the original Gemini/native chain.
+- Coordinator receipt format uses a system-level closed schema; at most one tool-free, source-bound metadata repair may preserve completed work. Never replay Worker or repair failed semantic/provenance gates.
 
 ## Evidence and progress
 - Actual required scenarios and Stage blockers closed measure progress; commits, test counts and bookkeeping do not substitute. Coherent ordinary business outcomes are allowed; historical V1 batch validation and hard quality gates remain intact.

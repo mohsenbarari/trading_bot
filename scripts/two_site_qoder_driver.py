@@ -18,11 +18,20 @@ MAX_STREAM_BYTES = 16_000_000
 MAX_RESULT_BYTES = 64_000
 SETTINGS = {"general": {"enableAutoUpdate": False}}
 TOOLS = {"coordinator": ("Bash", "Read", "Edit", "Write", "Glob", "Grep"),
-         "final_reviewer": ("Read", "Glob", "Grep")}
+         "final_reviewer": ("Read", "Glob", "Grep"), "receipt_formatter": ()}
+COORDINATOR_SCHEMA_REL = Path("docs/refactor/two-server/templates/codex-autopilot-cycle.schema.json")
 
 
 class QoderError(ValueError):
     """A Qoder identity, lifecycle or result check failed."""
+
+
+class QoderTerminalBodyError(QoderError):
+    """SDK success was validated, but terminal text is not a JSON object.
+
+    This does not assert a normal process exit or authorize acceptance/recovery.
+    The process owner must independently establish its actual exit and custody.
+    """
 
 
 def _need(ok: object, code: str) -> None:
@@ -157,6 +166,28 @@ def _role(roleconfig: dict) -> None:
           and roleconfig["reasoning_effort"] in {"low", "medium", "high", "xhigh", "max"}, "QODER_ROLE_CONFIG")
 
 
+def _coordinator_output_contract(root: Path) -> str:
+    schema = _json(_regular(root / COORDINATOR_SCHEMA_REL, 65536))
+    _need(type(schema) is dict and schema.get("type") == "object"
+          and schema.get("additionalProperties") is False
+          and type(schema.get("properties")) is dict
+          and type(schema.get("required")) is list
+          and all(type(key) is str for key in schema["required"])
+          and len(schema["required"]) == len(set(schema["required"]))
+          and set(schema["required"]) == set(schema["properties"]), "QODER_COORDINATOR_SCHEMA")
+    return ("Your terminal result MUST be ONLY one JSON object matching the complete closed schema below. "
+        "Include every required key exactly once and no additional keys. Do not return human prose, "
+        "Markdown, fences or a summary outside the JSON. Populate values only from actual observed "
+        "work and verified evidence; never invent acceptance, commit or role IDs. A successful bounded "
+        "unit with remaining plan work requires CONTINUE. COMPLETE means the entire canonical approved "
+        "two-site plan is genuinely closed, never merely this unit or one Stage. Use the schema's "
+        "truthful BLOCKED result when work cannot be accepted. Tool calls during the cycle remain "
+        "subject to the existing permissions and repository gates. REQUIRED_KEYS_JSON="
+        + json.dumps(schema["required"], separators=(",", ":"))
+        + "\nTERMINAL_RESULT_SCHEMA_JSON:\n"
+        + json.dumps(schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+
+
 def qoder_command(path: Path, root: Path, run_dir: Path, prompt: str, roleconfig: dict,
                   *, role: str = "coordinator") -> list[str]:
     """Caller supplies exact prompt bytes to stdin and owns bounded capture/exit."""
@@ -166,11 +197,13 @@ def qoder_command(path: Path, root: Path, run_dir: Path, prompt: str, roleconfig
     root = Path(root).resolve(strict=True); run_dir = Path(run_dir).resolve(strict=True)
     _need(run_dir.is_relative_to(root) and run_dir != root, "QODER_RUN_DIRECTORY")
     runtime = _runtime(load_runtime_config(root)); _need(str(path) == runtime["path"], "QODER_RUNTIME_PATH_MISMATCH")
-    return [str(path), *_settings_args(runtime), "--cwd", str(root), "--model", roleconfig["model"],
+    contract = (["--append-system-prompt", _coordinator_output_contract(root)]
+                if role in {"coordinator", "receipt_formatter"} else [])
+    return [str(path), *_settings_args(runtime), *contract, "--cwd", str(root), "--model", roleconfig["model"],
         "--reasoning-effort", roleconfig["reasoning_effort"], "--thinking", "adaptive",
         "--output-format", "stream-json", "--no-session-persistence", "--permission-mode", "auto",
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-        "--tools", *TOOLS[role], "--print"]
+        "--tools", *(TOOLS[role] or ("",)), "--print"]
 
 
 def _tool_blocks(event: dict):
@@ -186,10 +219,9 @@ def _tool_blocks(event: dict):
             yield block
 
 
-def finalize_qoder_output(run_dir: Path, *, stream_filename: str = "stream.jsonl",
-                          expected_model: str | None = None, role: str = "coordinator",
-                          write_result: bool = True) -> dict:
-    _need(type(write_result) is bool, "QODER_WRITE_POLICY")
+def validate_qoder_terminal(run_dir: Path, *, stream_filename: str = "stream.jsonl",
+                            expected_model: str | None = None, role: str = "coordinator") -> dict:
+    """Validate the whole genuine SDK stream without parsing or rewriting its text."""
     _need(role in TOOLS and stream_filename in {"stream.jsonl", "qoder.stdout", "codex.stdout"}, "QODER_STREAM_NAME")
     run_dir = Path(run_dir).resolve(strict=True)
     raw = _regular(run_dir / stream_filename, MAX_STREAM_BYTES)
@@ -234,8 +266,24 @@ def finalize_qoder_output(run_dir: Path, *, stream_filename: str = "stream.jsonl
     if "num_turns" in result:
         _need(type(result["num_turns"]) is int and result["num_turns"] >= 1, "QODER_TURN_COUNT")
     _need(type(result.get("result")) is str, "QODER_MISSING_RESULT")
-    value = _json(result["result"])
-    _need(type(value) is dict, "QODER_RESULT_OBJECT")
+    return {"session_id": session, "text": result["result"]}
+
+
+def finalize_qoder_output(run_dir: Path, *, stream_filename: str = "stream.jsonl",
+                          expected_model: str | None = None, role: str = "coordinator",
+                          write_result: bool = True) -> dict:
+    _need(type(write_result) is bool, "QODER_WRITE_POLICY")
+    terminal = validate_qoder_terminal(run_dir, stream_filename=stream_filename,
+                                       expected_model=expected_model, role=role)
+    run_dir = Path(run_dir).resolve(strict=True)
+    try:
+        value = _json(terminal["text"])
+    except QoderError as error:
+        if type(error.__cause__) is json.JSONDecodeError:
+            raise QoderTerminalBodyError("QODER_TERMINAL_BODY_JSON") from error
+        raise
+    if type(value) is not dict:
+        raise QoderTerminalBodyError("QODER_TERMINAL_BODY_OBJECT")
     payload = (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
     _need(len(payload) <= MAX_RESULT_BYTES, "QODER_RESULT_BOUND")
     if not write_result:

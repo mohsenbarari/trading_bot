@@ -24,11 +24,11 @@ from typing import Callable
 
 try:
     from scripts.two_site_ai_config import AI_CONFIG_REL, load_ai_config, load_runtime_config, role_settings
-    from scripts.two_site_qoder_driver import qoder_identity, qoder_command, finalize_qoder_output
+    from scripts.two_site_qoder_driver import qoder_identity, qoder_command, finalize_qoder_output, QoderTerminalBodyError
     from scripts.two_site_coordinator_sandbox import buildwrap_coordinator_command
 except ModuleNotFoundError:
     from two_site_ai_config import AI_CONFIG_REL, load_ai_config, load_runtime_config, role_settings
-    from two_site_qoder_driver import qoder_identity, qoder_command, finalize_qoder_output
+    from two_site_qoder_driver import qoder_identity, qoder_command, finalize_qoder_output, QoderTerminalBodyError
     from two_site_coordinator_sandbox import buildwrap_coordinator_command
 
 try:
@@ -228,6 +228,7 @@ CONTROL_PATHS = (
     Path("scripts/two_site_cycle_metrics.py"),
     Path("scripts/two_site_proposal_runner.py"),
     Path("scripts/two_site_provider_broker.py"),
+    Path("scripts/two_site_qoder_output_repair.py"),
     Path("scripts/two_site_assignment_scope.py"),
     Path("scripts/two_site_preparation_contract.py"),
     Path("scripts/two_site_preparation_io.py"),
@@ -2981,8 +2982,36 @@ def run_cycle(
                     raise AutopilotError("Codex runtime changed during the cycle")
                 if load_ai_config(root) != cycle_ai_config:
                     raise AutopilotError("Model configuration changed during the cycle")
+                _validate_startup_file(root, startup_file, startup, startup_bytes)
+                repaired_output = None
+
+                def repair_output_contract():
+                    from scripts.two_site_qoder_output_repair import repair_coordinator_output
+                    evidence = None
+                    if quota_ready is not None:
+                        ready = quota_ready["ready"]
+                        evidence = {
+                            "gemini_worker_run_id": ready["final_worker_run_id"],
+                            "gemini_reviewer_run_id": ready["final_reviewer_run_id"],
+                            "proposal_sha256": ready["proposal_sha256"],
+                        }
+                    repaired = repair_coordinator_output(
+                        root, run_dir, before, original_cli=identity, model_config=cycle_ai_config,
+                        observed_returncode=process.returncode, environment=environment,
+                        timeout=min(timeout, 300), business_evidence=evidence,
+                    )
+                    meta["output_contract_repair"] = {
+                        key: repaired[key] for key in (
+                            "receipt_path", "result_path", "repaired_result_path", "original_format_error",
+                        )
+                    }
+                    return repaired["result"]
+
                 if coordinator_settings["provider"] == "qoder":
-                    finalize_qoder_output(run_dir, expected_model=coordinator_settings["model"])
+                    try:
+                        finalize_qoder_output(run_dir, expected_model=coordinator_settings["model"])
+                    except QoderTerminalBodyError:
+                        repaired_output = repair_output_contract()
                 _validate_startup_file(root, startup_file, startup, startup_bytes)
                 result_path = run_dir / "result.json"
                 raw_result = unique_json(
@@ -2991,8 +3020,15 @@ def run_cycle(
                 try:
                     validated_receipt = validate_result(raw_result)
                     advisories: list[str] = []
-                except AutopilotError as exc:
-                    if str(exc) == "non-blocked state cannot report blockers":
+                except (AutopilotError, TypeError) as exc:
+                    if coordinator_settings["provider"] == "qoder" and repaired_output is None:
+                        from scripts.two_site_qoder_output_repair import shape_only_failure
+                        if shape_only_failure(root, raw_result):
+                            repaired_output = repair_output_contract()
+                    if repaired_output is not None:
+                        validated_receipt = validate_result(repaired_output)
+                        advisories = []
+                    elif str(exc) == "non-blocked state cannot report blockers":
                         validated_receipt, advisories = recover_committed_advisory_result(raw_result, exc)
                     elif (
                         str(exc) == "HALT requires null commit and Gemini acceptance evidence"

@@ -142,6 +142,9 @@ def test_prompt_size_remains_bounded():
 
 def test_active_coordinator_command_uses_configured_qoder_without_codex_js(tmp_path):
     install_current_contract(tmp_path)
+    schema = tmp_path / ap.SCHEMA_REL
+    schema.parent.mkdir(parents=True, exist_ok=True)
+    schema.write_bytes((ROOT / ap.SCHEMA_REL).read_bytes())
     tool = tmp_path / "qoder-fixture"
     tool.write_text("#!/bin/sh\nexit 0\n")
     run = tmp_path / "run"
@@ -158,4 +161,6 @@ def test_active_coordinator_command_uses_configured_qoder_without_codex_js(tmp_p
     assert command[command.index("--reasoning-effort") + 1] == settings["reasoning_effort"]
     assert command[-1] == "--print" and "bounded coordinator prompt" not in command
     assert "--no-session-persistence" in command and "--strict-mcp-config" in command
+    system = command[command.index("--append-system-prompt") + 1]
+    assert "TERMINAL_RESULT_SCHEMA_JSON:" in system
     assert "code_mode" not in command and "--approve-for-me" not in command

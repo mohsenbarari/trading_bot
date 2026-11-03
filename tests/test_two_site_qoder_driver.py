@@ -11,7 +11,8 @@ import pytest
 from scripts import two_site_ai_config as config
 from scripts import two_site_qoder_driver as driver
 
-TEMPLATE = Path(__file__).resolve().parents[1] / config.AI_CONFIG_REL
+PROJECT = Path(__file__).resolve().parents[1]
+TEMPLATE = PROJECT / config.AI_CONFIG_REL
 FINAL = {"schema_version": "1.0", "state": "BLOCKED", "disposition": "HALT",
     "category": "EXTERNAL_GATE", "summary": "Synthetic test", "commit": None,
     "next_action": None, "blockers": ["Synthetic gate"], "gemini_worker_run_id": None,
@@ -23,6 +24,9 @@ def role():
 
 
 def setup_runtime(root):
+    schema = root / driver.COORDINATOR_SCHEMA_REL
+    schema.parent.mkdir(parents=True, exist_ok=True)
+    schema.write_bytes((PROJECT / driver.COORDINATOR_SCHEMA_REL).read_bytes())
     binary = root / "fake-qodercli"
     binary.write_text('#!/usr/bin/python3\nimport json,sys\n'
         'assert \'{"general":{"enableAutoUpdate":false}}\' in sys.argv\n'
@@ -106,7 +110,7 @@ def test_json_only_new_qoder_model_max_effort_reaches_real_argv_builder(tmp_path
     binary, _ = setup_runtime(tmp_path); run_dir = tmp_path / "run"; run_dir.mkdir()
     policy = json.loads(TEMPLATE.read_text())
     policy["roles"]["coordinator"].update(model="synthetic-new-model", reasoning_effort="max")
-    path = tmp_path / config.AI_CONFIG_REL; path.parent.mkdir(parents=True)
+    path = tmp_path / config.AI_CONFIG_REL; path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(policy)); path.chmod(0o600)
     selected = config.role_settings(tmp_path, "coordinator")
     argv = driver.qoder_command(binary, tmp_path, run_dir, "Synthetic prompt", selected)
@@ -187,3 +191,100 @@ def test_final_reviewer_cannot_use_coordinator_edit_tool(tmp_path):
     stream(tmp_path, values)
     with pytest.raises(driver.QoderError, match="QODER_FORBIDDEN_TOOL"):
         driver.finalize_qoder_output(tmp_path, role="final_reviewer")
+
+
+def test_coordinator_system_instruction_embeds_actual_complete_closed_schema(tmp_path):
+    from scripts.two_site_codex_autopilot import SCHEMA_REL
+    assert driver.COORDINATOR_SCHEMA_REL == SCHEMA_REL
+    binary, _ = setup_runtime(tmp_path); run_dir = tmp_path / "run"; run_dir.mkdir()
+    argv = driver.qoder_command(binary, tmp_path, run_dir, "STDIN PRIVATE SYNTHETIC", role())
+    assert argv.count("--append-system-prompt") == 1
+    system = argv[argv.index("--append-system-prompt") + 1]
+    schema = json.loads(system.split("TERMINAL_RESULT_SCHEMA_JSON:\n", 1)[1])
+    assert schema == json.loads((PROJECT / SCHEMA_REL).read_bytes())
+    assert schema["additionalProperties"] is False and len(schema["required"]) == 11
+    keys = json.loads(system.split("REQUIRED_KEYS_JSON=", 1)[1].split("\n", 1)[0])
+    assert keys == schema["required"] and set(keys) == set(FINAL)
+    assert "ONLY one JSON object" in system and "never invent acceptance" in system
+    assert "remaining plan work requires CONTINUE" in system
+    assert "entire canonical approved two-site plan" in system
+    assert "STDIN PRIVATE SYNTHETIC" not in " ".join(argv)
+    final_argv = driver.qoder_command(binary, tmp_path, run_dir, "Final role's own four-key contract", role(), role="final_reviewer")
+    assert "--append-system-prompt" not in final_argv
+
+
+def test_formatter_is_a_tool_free_capability_profile_using_configured_coordinator(tmp_path):
+    binary, _ = setup_runtime(tmp_path); run_dir = tmp_path / "run"; run_dir.mkdir()
+    argv = driver.qoder_command(binary, tmp_path, run_dir, "Synthetic format-only request", role(), role="receipt_formatter")
+    assert argv[argv.index("--tools") + 1:-1] == [""]
+    assert argv[argv.index("--model") + 1] == role()["model"]
+    assert argv[argv.index("--reasoning-effort") + 1] == role()["reasoning_effort"]
+    assert "--append-system-prompt" in argv
+    values = events(); values[0]["tools"] = ["mcp_call", "mcp_get", "mcp_list"]
+    stream(tmp_path, values)
+    assert driver.finalize_qoder_output(tmp_path, role="receipt_formatter", write_result=False) == FINAL
+
+
+@pytest.mark.parametrize("name", ["Read", "Bash", "Write", "Grep", "mcp_call"])
+def test_formatter_rejects_any_actual_tool_execution(tmp_path, name):
+    values = events(); values[0]["tools"] = ["mcp_list"]
+    values[2]["message"]["content"] = [{"type": "tool_use", "name": name, "input": {}}]
+    stream(tmp_path, values)
+    with pytest.raises(driver.QoderError, match="QODER_FORBIDDEN_TOOL"):
+        driver.finalize_qoder_output(tmp_path, role="receipt_formatter")
+    assert not (tmp_path / "result.json").exists()
+
+
+@pytest.mark.parametrize("bad", ["missing", "open-shape", "incomplete-required", "duplicate-required"])
+def test_missing_or_unsafe_coordinator_schema_fails_before_any_provider(tmp_path, bad):
+    binary, _ = setup_runtime(tmp_path); run_dir = tmp_path / "run"; run_dir.mkdir()
+    path = tmp_path / driver.COORDINATOR_SCHEMA_REL
+    if bad == "missing": path.unlink()
+    else:
+        value = json.loads(path.read_bytes())
+        if bad == "open-shape": value["additionalProperties"] = True
+        elif bad == "incomplete-required": value["required"].pop()
+        else: value["required"].append(value["required"][0])
+        path.write_text(json.dumps(value))
+    with pytest.raises(driver.QoderError):
+        driver.qoder_command(binary, tmp_path, run_dir, "Synthetic", role())
+    assert list(run_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize("text", ["The work is complete.", "```json\n{}\n```", '{"incomplete":', "[]", "null"])
+def test_contract_only_body_error_is_typed_after_genuine_full_sdk_validation(tmp_path, text):
+    values = events(); values[-1]["result"] = text
+    path = stream(tmp_path, values); original = path.read_bytes()
+    assert driver.validate_qoder_terminal(tmp_path, expected_model=role()["model"]) == {
+        "session_id": "synthetic-session-1", "text": text}
+    with pytest.raises(driver.QoderTerminalBodyError) as caught:
+        driver.finalize_qoder_output(tmp_path, expected_model=role()["model"])
+    assert type(caught.value) is driver.QoderTerminalBodyError
+    assert path.read_bytes() == original and not (tmp_path / "result.json").exists()
+
+
+@pytest.mark.parametrize("fault", ["sdk-json", "truncated-capture", "failed-terminal", "bad-session", "wrong-model", "tool-denial", "forbidden-tool", "output-limit"])
+def test_invalid_sdk_is_never_classified_as_terminal_body_only_failure(tmp_path, fault):
+    values = events(); values[-1]["result"] = "Human prose cannot hide an invalid envelope"
+    if fault == "failed-terminal": values[-1]["is_error"] = True
+    elif fault == "bad-session": values[-1]["session_id"] = "other"
+    elif fault == "wrong-model": values[0]["model"] = "other"
+    elif fault == "tool-denial": values[-1]["permission_denials"] = ["Synthetic"]
+    elif fault == "forbidden-tool": values[2]["message"]["content"] = [{"type": "tool_use", "name": "Task"}]
+    elif fault == "output-limit": values[-1]["stop_reason"] = "max_tokens"
+    path = stream(tmp_path, values)
+    if fault == "sdk-json": path.write_bytes(path.read_bytes() + b"not-json\n")
+    elif fault == "truncated-capture": path.write_bytes(path.read_bytes().rstrip(b"\n"))
+    with pytest.raises(driver.QoderError) as caught:
+        driver.finalize_qoder_output(tmp_path, expected_model=role()["model"])
+    assert type(caught.value) is driver.QoderError
+    assert not (tmp_path / "result.json").exists()
+
+
+@pytest.mark.parametrize("text", ['{"x":1,"x":2}', '{"x":NaN}', '{"x":Infinity}', json.dumps({"x":"x"*64000})])
+def test_noncanonical_or_oversized_body_is_not_a_prose_format_repair_case(tmp_path, text):
+    values = events(); values[-1]["result"] = text; stream(tmp_path, values)
+    with pytest.raises(driver.QoderError) as caught:
+        driver.finalize_qoder_output(tmp_path)
+    assert type(caught.value) is driver.QoderError
+    assert not (tmp_path / "result.json").exists()
