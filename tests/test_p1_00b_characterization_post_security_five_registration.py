@@ -16,6 +16,8 @@ import unittest
 
 import tests.test_p1_00b_characterization_current_session_group_ledger_closeout as group_closeout
 
+from tests.p1_00b_membership_history import historical_manifest, read_pin
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 PACKET_REL_PATH = (
@@ -512,7 +514,7 @@ def _reconstruct_pre_registration_manifest(manifest: dict[str, Any]) -> dict[str
         if not extra_bytes:
             raise AssertionError(f"Additive manifest target {extra_val} is empty")
 
-    reconstructed = copy.deepcopy(manifest)
+    reconstructed = historical_manifest(manifest)
     reconstructed["evidence_sources"] = {
         k: evidence_sources[k] for k in PRE_REGISTRATION_EVIDENCE_KEYS
     }
@@ -733,7 +735,7 @@ def assert_post_security_five_registration(
 
     _reconstruct_pre_registration_manifest(manifest)
 
-    old_mod_bytes = _read_bytes(OLD_CLOSEOUT_MODULE_REL_PATH)
+    old_mod_bytes = read_pin(OLD_CLOSEOUT_MODULE_REL_PATH, OLD_CLOSEOUT_MODULE_SHA256, OLD_CLOSEOUT_MODULE_UTF8_BYTES, root=REPO_ROOT)
     if len(old_mod_bytes) != OLD_CLOSEOUT_MODULE_UTF8_BYTES:
         raise AssertionError("Frozen BL module byte length mismatch")
     if hashlib.sha256(old_mod_bytes).hexdigest() != OLD_CLOSEOUT_MODULE_SHA256:

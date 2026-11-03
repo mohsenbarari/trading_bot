@@ -14,6 +14,8 @@ import unittest
 
 import tests.test_p1_00b_characterization_current_session_group_union as group_union
 
+from tests.p1_00b_membership_history import historical_manifest, read_pin
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 CLOSEOUT_PACKET_REL_PATH = (
@@ -287,7 +289,7 @@ def _reconstruct_pre_bl_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         if type(doc) is not dict:
             raise AssertionError(f"future evidence source {rel_path!r} is not a JSON dict")
 
-    pre_bl = copy.deepcopy(manifest)
+    pre_bl = historical_manifest(manifest)
     pre_bl["evidence_sources"] = {k: copy.deepcopy(ev[k]) for k in keys[: union_idx + 1]}
     raw_pre_bl = (json.dumps(pre_bl, indent=2) + "\n").encode("utf-8")
     if len(raw_pre_bl) != PRE_BL_MANIFEST_UTF8_BYTES:
@@ -355,7 +357,7 @@ def assert_current_group_ledger_closeout(
             f"final_packet top keys {list(final_packet.keys())!r} != {list(CLOSEOUT_PACKET_TOP_KEYS)!r}"
         )
 
-    union_mod_bytes = _read_bytes(UNION_MODULE_REL_PATH)
+    union_mod_bytes = read_pin(UNION_MODULE_REL_PATH, UNION_MODULE_SHA256, UNION_MODULE_UTF8_BYTES, root=REPO_ROOT)
     if len(union_mod_bytes) != UNION_MODULE_UTF8_BYTES:
         raise AssertionError("accepted B-U module byte length mismatch")
     if hashlib.sha256(union_mod_bytes).hexdigest() != UNION_MODULE_SHA256:

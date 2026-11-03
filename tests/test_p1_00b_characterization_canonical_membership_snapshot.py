@@ -14,6 +14,7 @@ import unittest
 from unittest import mock
 
 import tests.test_p1_00b_characterization_notification_mark_all_accounting as accounting_module
+from tests import p1_00b_membership_history as membership_history
 
 SURFACE_SEED_COUNT = 465
 BASELINE_SEED_COUNT = 135
@@ -140,6 +141,14 @@ def make_canonical_membership_snapshot() -> dict:
     receipt = _READER._json(accounting_module.RECEIPT)
     if type(manifest) is not dict or type(receipt) is not dict:
         raise AssertionError("manifest and receipt must be JSON objects")
+
+    # Validate actual current accounting (including injected bad _json inputs)
+    # before returning this oracle's immutable accepted398 membership snapshot.
+    manifest = membership_history.historical_manifest(manifest)
+    # This physical snapshot requires the full accepted33 mapping prefix;
+    # earlier prefixes are reserved for nested historical owner assertions.
+    if len(manifest["evidence_sources"]) != 33:
+        raise AssertionError("current historical evidence mapping removed")
 
     manifest_counts = _assert_exact_int_counts_mapping(manifest.get("counts"))
     surface, baseline, evidenced = _READER._derive(manifest, receipt)

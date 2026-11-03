@@ -13,6 +13,8 @@ import unittest
 
 import tests.test_p1_00b_characterization_post_security_five_registration as registration
 
+from tests.p1_00b_membership_history import historical_manifest, read_pin
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 CLOSEOUT_PACKET_REL_PATH = (
@@ -290,7 +292,7 @@ def _validate_and_reconstruct_pre_closeout_manifest(full_manifest: dict[str, Any
             raise AssertionError(f"Duplicate evidence_sources path {val!r}")
         seen_paths.add(val)
 
-    reconstructed = copy.deepcopy(full_manifest)
+    reconstructed = historical_manifest(full_manifest)
     reconstructed["evidence_sources"] = {
         k: evidence_sources[k] for k in source_keys[: reg_idx + 1]
     }
@@ -341,7 +343,7 @@ def assert_post_security_five_closeout(
     if disk_closeout_bytes != expected_closeout_bytes:
         raise AssertionError("Physical closeout packet on disk does not match canonical JSON")
 
-    reg_mod_bytes = _read_bytes(REGISTRATION_MODULE_REL_PATH)
+    reg_mod_bytes = read_pin(REGISTRATION_MODULE_REL_PATH, REGISTRATION_MODULE_SHA256, REGISTRATION_MODULE_UTF8_BYTES, root=REPO_ROOT)
     if len(reg_mod_bytes) != REGISTRATION_MODULE_UTF8_BYTES:
         raise AssertionError("Accepted registration module byte length mismatch")
     if hashlib.sha256(reg_mod_bytes).hexdigest() != REGISTRATION_MODULE_SHA256:

@@ -1,20 +1,19 @@
 # Automation Efficiency
 
 ## Current authority — 2026-11-03
-- Owner approved replacing Codex with Qoder and prioritizing correct refactor delivery, fewer errors/stops and continuation above token-saving policies. Use the smallest sufficient design; do not reopen AE projects or economic cohorts as delivery prerequisites.
-- `docs/refactor/two-server/templates/automation-models.json` is the sole fresh role-model/effort policy. Qoder coordinates; Gemini authors and independently reviews; a separate read-only Qoder session gives final acceptance. CLI path/version/SHA are local runtime configuration, not model selection.
-- User Stage approval remains removed. Human Web Writer, protected refs, production/external-action scope, exact bytes, truthful evidence and independent review remain mandatory.
+- Owner replaced Codex with Qoder. Correct delivery, fewer errors/stops and continuation outrank token savings; use the smallest sufficient design and do not reopen AE cohorts as prerequisites.
+- `docs/refactor/two-server/templates/automation-models.json` owns fresh role models/efforts: Qoder coordinates and independently accepts; Gemini authors and separately reviews. CLI identity is local runtime configuration.
+- Current roles: Qwen3.8-Max/xhigh and Argon High/high. Models freeze per unit; historical runtime JSON preserves old provenance.
+- No user Stage approval. Human Web Writer, protected refs, production/external-action scope, exact bytes and independent review remain mandatory.
 
 ## Runtime
-- Current requested roles: Qwen3.8-Max/xhigh for Qoder coordination/final review; Argon High/high for both Gemini roles. Fresh Gemini status/proof binds its captured configuration; unchanged historical runtime JSON retains old proof provenance only.
-- Native execution belongs to the outside Broker. Its launcher requires final-Qoder-review policy; Coordinator applies only approved bytes and reuses native PASS only for identical source/task/candidate/selectors/environment. No nested bwrap or duplicate native execution inside its contained shell.
-- Containment qualification must load the real active Assignment inside bwrap; mount only the two canonical public registry/Assignment files read-only, never the parent checkout or its whole `.local` tree.
-- Only proven transient late Gemini-Reviewer failures reuse the same Worker/native/reservation with fresh sessions and finite persisted counters. Semantic, quota, source drift, accepted work and uncertain effects never authorize blind replay or counter reset.
-- Qoder REQUEST_CHANGES returns to Gemini through the existing correction loop. Final APPROVE is mechanically checked before apply and checkpoint. Same-SHA final-review recovery must preserve the original Gemini/native chain.
-- Coordinator receipt format uses a system-level closed schema; at most one tool-free, source-bound metadata repair may preserve completed work. Never replay Worker or repair failed semantic/provenance gates.
+- Outside Broker owns native/network-isolated tests and requires final-Qoder-review policy. Reuse native PASS only for identical source/task/candidate/selectors/environment; no nested or duplicate execution.
+- Contained Coordinator must load the actual Assignment through two exact public read-only control mounts, never the parent checkout or whole `.local` tree.
+- Only proven transient late Reviewer failures reuse Worker/native/reservation in finite persisted fresh-session batches. Semantic/quota failures, Source drift, accepted work or uncertain effects never permit blind replay or counter reset.
+- Qoder REQUEST_CHANGES returns to Gemini correction. Same-SHA final-review recovery preserves the original chain. Coordinator JSON has a closed system schema and at most one tool-free metadata repair; no semantic/provenance repair or Worker replay.
 
 ## Evidence and progress
-- Actual required scenarios and Stage blockers closed measure progress; commits, test counts and bookkeeping do not substitute. Coherent ordinary business outcomes are allowed; historical V1 batch validation and hard quality gates remain intact.
-- Model/config changes occur at clean unit boundaries. Old accepted checkpoints, failed attempts and historical AE00–AE06 evidence are retained; migration is not fabricated work acceptance or proof of savings.
-- Qoder SDK zero-token placeholders remain UNKNOWN; reported Credits are separate. Observe real work without paid baseline replay or telemetry collection gates.
-- Live activation and health require genuine unit evidence, not tests or historical receipts. See `docs/refactor/two-server/QODER_AUTOMATION.md`.
+- Historical witnesses first validate live accounting, then reconstruct their accepted epoch from original SHA-pinned inert fixture DATA. New `records.seed_ids` require matching live counts; PENDING data belongs outside canonical records. Never execute archived blobs or rewrite old receipts/ledger.
+- Actual scenarios and Stage blockers closed measure progress; commits, test counts or bookkeeping do not. Preserve historical batch and High/origin gates.
+- Keep accepted checkpoints and failed attempts. Model migration is neither invented work acceptance nor savings. Qoder zero-token placeholders are UNKNOWN; Credits are separate. No paid baseline replay or telemetry-collection gate.
+- Qualify activation with genuine units. See `docs/refactor/two-server/QODER_AUTOMATION.md`.

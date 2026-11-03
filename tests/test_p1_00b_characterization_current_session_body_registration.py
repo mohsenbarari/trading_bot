@@ -21,6 +21,8 @@ import unittest
 
 import tests.test_p1_00b_characterization_authority_registration_after_security as primary
 
+from tests.p1_00b_membership_history import historical_manifest, read_pin
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 BODY_PACKET_REL_PATH = (
@@ -484,7 +486,7 @@ def _reconstruct_pre_body_manifest(manifest: dict[str, Any]) -> tuple[dict[str, 
     if BODY_PACKET_REL_PATH in prefix_sources.values():
         raise AssertionError("body packet path must not appear in pre-body prefix")
 
-    reconstructed = copy.deepcopy(manifest)
+    reconstructed = historical_manifest(manifest)
     reconstructed["evidence_sources"] = prefix_sources
     serialized = (json.dumps(reconstructed, indent=2) + "\n").encode("utf-8")
     if len(serialized) != PRE_BODY_MANIFEST_UTF8_BYTES:
@@ -590,7 +592,7 @@ def assert_body_registration(packet: dict[str, Any], manifest: dict[str, Any]) -
             raise AssertionError(f"prior packet sha256 mismatch for {ref['path']}")
         prior_doc = json.loads(raw_prior.decode("utf-8"))
         prior_rec = prior_doc["records"][0]
-        source_bytes = _read_bytes(prior_rec["path"])
+        source_bytes = read_pin(prior_rec["path"], prior_rec["sha256"], prior_rec["utf8_bytes"], root=ROOT)
         if len(source_bytes) != prior_rec["utf8_bytes"]:
             raise AssertionError(f"prior source size mismatch for {prior_rec['path']}")
         if hashlib.sha256(source_bytes).hexdigest() != prior_rec["sha256"]:

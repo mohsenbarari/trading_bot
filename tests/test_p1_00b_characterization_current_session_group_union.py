@@ -16,6 +16,8 @@ import unittest
 
 import tests.test_p1_00b_characterization_current_session_body_registration as body_reg
 
+from tests.p1_00b_membership_history import historical_manifest, read_pin
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 UNION_PACKET_REL_PATH = "docs/refactor/two-server/section-1/inventory/current-session-five-source-union.json"
 MANIFEST_REL_PATH = "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json"
@@ -256,7 +258,7 @@ def _reconstruct_pre_union_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         ):
             raise AssertionError(f"invalid or duplicate future manifest path {after_v!r}")
         seen_paths.add(after_v)
-    pre_manifest = copy.deepcopy(manifest)
+    pre_manifest = historical_manifest(manifest)
     pre_manifest["evidence_sources"] = dict(items[: body_idx + 1])
     serialized_pre = (json.dumps(pre_manifest, indent=2) + "\n").encode("utf-8")
     if len(serialized_pre) != PRE_UNION_MANIFEST_UTF8_BYTES:
@@ -282,7 +284,7 @@ def assert_current_group_union(packet: dict[str, Any], manifest: dict[str, Any])
     if list(packet.keys()) != list(PACKET_TOP_KEYS):
         raise AssertionError(f"packet top keys {list(packet.keys())!r} != {list(PACKET_TOP_KEYS)!r}")
 
-    body_mod_bytes = _read_bytes(BODY_MODULE_REL_PATH)
+    body_mod_bytes = read_pin(BODY_MODULE_REL_PATH, BODY_MODULE_SHA256, BODY_MODULE_UTF8_BYTES, root=REPO_ROOT)
     if len(body_mod_bytes) != BODY_MODULE_UTF8_BYTES:
         raise AssertionError("accepted body registration module byte length mismatch")
     if hashlib.sha256(body_mod_bytes).hexdigest() != BODY_MODULE_SHA256:

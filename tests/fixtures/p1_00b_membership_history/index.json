@@ -1,0 +1,46 @@
+{
+  "accepted_source_commit": "3ac62a6396f92d5c4d330b76843ca88cfdcb4ae0",
+  "blobs": {
+    "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json": {
+      "bytes": 5300,
+      "git_blob": "339ca2f7cee8361fa957252a7b09abc19b61f77d",
+      "sha256": "104bd90d521a6c113b95220dd501d9e556cd93183f5f0cf484f1983710e1089a"
+    },
+    "tests/test_p1_00b_characterization_authority_registration_after_security.py": {
+      "bytes": 21749,
+      "git_blob": "d833ee8b816d2ff00867d558769b9e6608132eab",
+      "sha256": "5062aed299647658e75b1ebbdb1a9bd2649053aa02d49e796a45b8badf76e1f0"
+    },
+    "tests/test_p1_00b_characterization_canonical_membership_snapshot.py": {
+      "bytes": 11785,
+      "git_blob": "722a35bb84c2405e81f248f6c6ad39b593fbe981",
+      "sha256": "7186a5eb551f50a8b35b6eceec38f896b58e7340cc0c5d6ac80086624d217deb"
+    },
+    "tests/test_p1_00b_characterization_current_session_body_registration.py": {
+      "bytes": 33864,
+      "git_blob": "f5808593da7ab6612367107637db15dfff2b8a60",
+      "sha256": "b9a9550bddaa0f4e84886ff72a2c104a02cbfd53dd116eb72aede36a416b849b"
+    },
+    "tests/test_p1_00b_characterization_current_session_group_ledger_closeout.py": {
+      "bytes": 29707,
+      "git_blob": "3c4e50236321520a87303dc7dbd7e81d95eb8313",
+      "sha256": "b901faa9502d86bc95dd6a9ce0c3adeb9d9ca0b2eb9afeb971f6addc04560fec"
+    },
+    "tests/test_p1_00b_characterization_current_session_group_union.py": {
+      "bytes": 32117,
+      "git_blob": "f1289c251aae27f5c1466e0249365523fd762de5",
+      "sha256": "b8813da90ae2462d33dff4cd0e4566a04b288edd5ee4b5ed53b0c871895e71fe"
+    },
+    "tests/test_p1_00b_characterization_post_security_five_ledger_closeout.py": {
+      "bytes": 26295,
+      "git_blob": "b2324140c54670dde667f2f8422ffb8f564bab9d",
+      "sha256": "82726142bf59976b6b44a410c9801f7ea0caa219d429698f1462f1f22d1da1b5"
+    },
+    "tests/test_p1_00b_characterization_post_security_five_registration.py": {
+      "bytes": 40982,
+      "git_blob": "a18eab4a1893fa451412473f72c1e25bab2252d6",
+      "sha256": "2f45dfc6d051e684da6a16c9002168c2e6c2a236b10a6dcc3de7a54524a7f780"
+    }
+  },
+  "schema_version": 1
+}

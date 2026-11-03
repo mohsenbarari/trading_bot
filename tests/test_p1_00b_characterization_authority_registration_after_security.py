@@ -20,6 +20,7 @@ import tests.test_p1_00b_characterization_authority_record_contract_oracle as re
 import tests.test_p1_00b_characterization_canonical_membership_snapshot as snapshot_oracle
 import tests.test_p1_00b_characterization_ledger_prefix_helper as ledger_prefix
 import tests.test_p1_00b_characterization_notification_mark_all_accounting as accounting
+from tests import p1_00b_membership_history as membership_history
 
 PACKET_REL_PATH = (
     "docs/refactor/two-server/section-1/inventory/"
@@ -256,9 +257,9 @@ def load_physical_controls() -> tuple[dict[str, Any], dict[str, Any]]:
     return packet, manifest
 
 
-def _reconstruct_pre_registration_manifest(
+def _build_pre_registration_views(
     manifest: dict[str, Any],
-) -> tuple[dict[str, Any], bytes]:
+) -> tuple[dict[str, Any], bytes, dict[str, Any]]:
     if type(manifest) is not dict:
         raise AssertionError("manifest must be a dict")
     evidence_sources = manifest.get("evidence_sources")
@@ -290,7 +291,8 @@ def _reconstruct_pre_registration_manifest(
     if PACKET_REL_PATH in prefix_sources.values():
         raise AssertionError("authority packet path must not appear in pre-registration prefix")
 
-    reconstructed = copy.deepcopy(manifest)
+    historical = membership_history.historical_manifest(manifest)
+    reconstructed = copy.deepcopy(historical)
     reconstructed["evidence_sources"] = prefix_sources
     serialized = (json.dumps(reconstructed, indent=2) + "\n").encode("utf-8")
     if len(serialized) != PRE_REGISTRATION_MANIFEST_UTF8_BYTES:
@@ -304,6 +306,13 @@ def _reconstruct_pre_registration_manifest(
             f"pre-registration manifest SHA256 {actual_sha} != "
             f"{PRE_REGISTRATION_MANIFEST_SHA256}"
         )
+    return reconstructed, serialized, historical
+
+
+def _reconstruct_pre_registration_manifest(
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any], bytes]:
+    reconstructed, serialized, _ = _build_pre_registration_views(manifest)
     return reconstructed, serialized
 
 
@@ -396,7 +405,7 @@ def assert_authority_registration(packet: dict, manifest: dict) -> None:
         "packet.stages",
     )
 
-    reconstructed_before, _ = _reconstruct_pre_registration_manifest(manifest)
+    reconstructed_before, _, historical = _build_pre_registration_views(manifest)
     _assert_typed_equal(manifest["schema_version"], 1, "manifest.schema_version")
     _assert_typed_equal(manifest["stage"], "P1-00b", "manifest.stage")
     _assert_typed_equal(
@@ -411,13 +420,13 @@ def assert_authority_registration(packet: dict, manifest: dict) -> None:
         "manifest.canonical_blockers",
     )
     _assert_typed_equal(
-        manifest["counts"],
+        historical["counts"],
         correspondence.EXPECTED_COUNTS_AFTER_UNION,
         "manifest.counts",
     )
 
     for helper_pin in EXPECTED_HELPER_PINS:
-        helper_bytes = _READER._read(helper_pin["path"])
+        helper_bytes = membership_history.read_pin(helper_pin["path"], helper_pin["sha256"], helper_pin["bytes"], root=accounting.ROOT)
         if len(helper_bytes) != helper_pin["bytes"]:
             raise AssertionError(f"helper size mismatch for {helper_pin['path']}")
         if hashlib.sha256(helper_bytes).hexdigest() != helper_pin["sha256"]:
@@ -464,7 +473,7 @@ def assert_authority_registration(packet: dict, manifest: dict) -> None:
         receipt,
     )
     after_surface, after_baseline, after_evidenced = _READER._derive(
-        manifest,
+        historical,
         receipt,
         extra_documents={PACKET_REL_PATH: packet},
     )

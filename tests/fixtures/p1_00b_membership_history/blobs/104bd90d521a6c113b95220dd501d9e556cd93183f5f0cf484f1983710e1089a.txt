@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "inventory": {
+    "expected_seed_count": 465,
+    "paths": [
+      "docs/refactor/two-server/section-1/inventory/surface-api.json",
+      "docs/refactor/two-server/section-1/inventory/surface-bot.json",
+      "docs/refactor/two-server/section-1/inventory/surface-web.json",
+      "docs/refactor/two-server/section-1/inventory/surface-jobs.json"
+    ]
+  },
+  "evidence_sources": {
+    "baseline_path": "docs/refactor/two-server/section-1/inventory/scenario-records.json",
+    "base_path": "docs/refactor/two-server/section-1/inventory/recent-characterization.json",
+    "continuation_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation.json",
+    "continuation_2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-2.json",
+    "continuation_3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-3.json",
+    "continuation_4_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-4.json",
+    "continuation_5_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-5.json",
+    "continuation_6_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-6.json",
+    "continuation_7_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-7.json",
+    "continuation_8_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-8.json",
+    "continuation_9_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-9.json",
+    "continuation_10_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-10.json",
+    "continuation_11_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-11.json",
+    "continuation_13_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-13.json",
+    "continuation_16_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-16.json",
+    "continuation_17_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-continuation-17.json",
+    "notification_mark_all_750_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-notification-mark-all-accounting-751.json",
+    "trade_read_prequery_757_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-trade-read-prequery-accounting-757.json",
+    "business_766_a2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-766-a2.json",
+    "business_766_b3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-766-b3.json",
+    "business_768_market_overrides_a2_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-market-overrides-a2.json",
+    "business_768_market_overrides_b3_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-market-overrides-b3.json",
+    "business_768_live786_manual783_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-manual783-provenance.json",
+    "business_768_live786_five_source_closeout_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-five-source-closeout-manual.json",
+    "business_768_live786_reset_execute_singleton_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-reset-execute-singleton.json",
+    "business_768_live786_replace_execute_singleton_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-replace-execute-singleton.json",
+    "business_768_live786_verifier_only_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-verifier-only.json",
+    "business_768_live786_authority_registration_after_security_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-authority-registration-security.json",
+    "business_768_current_session_body_registration_path": "docs/refactor/two-server/section-1/inventory/current-session-body-registration.json",
+    "business_768_current_session_group_union_path": "docs/refactor/two-server/section-1/inventory/current-session-five-source-union.json",
+    "business_768_current_session_group_closeout_path": "docs/refactor/two-server/section-1/inventory/current-session-five-source-closeout.json",
+    "business_768_post_security_five_registration_path": "docs/refactor/two-server/section-1/inventory/post-security-five-source-registration.json",
+    "business_768_post_security_five_closeout_path": "docs/refactor/two-server/section-1/inventory/post-security-five-source-closeout.json"
+  },
+  "counts": {
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 263,
+    "evidenced_seed_count": 398,
+    "remaining_seed_count": 67
+  },
+  "coverage_status": "PARTIAL",
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ]
+}
