@@ -38,11 +38,13 @@ try:
     from scripts.two_site_quota_resume_worker_feedback import (
         load_bound_correction_feedback,
         load_bound_test_gate_feedback,
+        load_bound_qoder_correction_feedback,
     )
 except ImportError:
     from two_site_quota_resume_worker_feedback import (  # type: ignore[no-redef]
         load_bound_correction_feedback,
         load_bound_test_gate_feedback,
+        load_bound_qoder_correction_feedback,
     )
 
 
@@ -62,13 +64,23 @@ def load_worker_correction_evidence(
     if origin is None:
         origin = "REVIEWER"
 
+    extra = {}
     if origin == "REVIEWER":
-        reviewer_result, reviewer_status, reviewer_sha = validate_bound_prior_reviewer(
-            root, artifacts, worker_info, receipt, task, sources
-        )
-        feedback, feedback_sha, feedback_path = load_bound_correction_feedback(
-            root, artifacts, reviewer_result, receipt
-        )
+        try:
+            reviewer_result, reviewer_status, reviewer_sha = validate_bound_prior_reviewer(
+                root, artifacts, worker_info, receipt, task, sources
+            )
+        except ProposalError as error:
+            if str(error) != "reviewer must be CHANGES_REQUIRED, got result status 'VERIFIED' and state 'VERIFIED'":
+                raise
+            bundle = load_bound_qoder_correction_feedback(root, admitted_task_path, artifacts, worker_info, receipt)
+            feedback, feedback_sha, feedback_path = (bundle[key] for key in ("feedback", "feedback_sha", "feedback_path"))
+            reviewer_result, reviewer_status, reviewer_sha = (bundle[key] for key in ("reviewer_result", "reviewer_status", "reviewer_sha"))
+            extra["qoder_review"] = bundle["qoder_review"]
+        else:
+            feedback, feedback_sha, feedback_path = load_bound_correction_feedback(
+                root, artifacts, reviewer_result, receipt
+            )
         detached_reviewer_result = copy.deepcopy(reviewer_result)
         detached_reviewer_status = copy.deepcopy(reviewer_status)
         detached_reviewer_sha: str | None = str(reviewer_sha)
@@ -104,4 +116,5 @@ def load_worker_correction_evidence(
         "sources": copy.deepcopy(sources),
         "task": copy.deepcopy(task),
         "worker_info": copy.deepcopy(worker_info),
+        **extra,
     }

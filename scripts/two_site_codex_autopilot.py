@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run bounded non-interactive Codex cycles until completion or a real blocker."""
+"""Run configured non-interactive AI cycles until completion or a real blocker."""
 from __future__ import annotations
 
 import argparse
@@ -21,6 +21,15 @@ import threading
 import time
 from types import MappingProxyType
 from typing import Callable
+
+try:
+    from scripts.two_site_ai_config import AI_CONFIG_REL, load_ai_config, load_runtime_config, role_settings
+    from scripts.two_site_qoder_driver import qoder_identity, qoder_command, finalize_qoder_output
+    from scripts.two_site_coordinator_sandbox import buildwrap_coordinator_command
+except ModuleNotFoundError:
+    from two_site_ai_config import AI_CONFIG_REL, load_ai_config, load_runtime_config, role_settings
+    from two_site_qoder_driver import qoder_identity, qoder_command, finalize_qoder_output
+    from two_site_coordinator_sandbox import buildwrap_coordinator_command
 
 try:
     from scripts.two_site_proposal_runner import (
@@ -100,8 +109,8 @@ except ModuleNotFoundError:  # Direct `python scripts/...` execution.
 
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "refactor/two-site-architecture"
-MODEL = "gpt-6.1-sol"
-REASONING = "xhigh"
+MODEL = role_settings(ROOT, "coordinator")["model"]
+REASONING = role_settings(ROOT, "coordinator")["reasoning_effort"]
 EXPECTED_CODEX_CLI_VERSION = "codex-cli 0.159.2"
 EXPECTED_CODEX_CLI_SHA256 = "1748767b230ebfc3d4ab7e4e254920d0c0ad9691fd8c11f190e7d44511a4a92e"
 CODEX_RUNTIME_FILES = {
@@ -201,6 +210,18 @@ RESCOPE_RESULT_KEYS_ORDER = ACCEPTED_RESULT_KEYS_ORDER
 PROPOSAL_RUN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}")
 PRUNABLE_RUN_STATES = {"CONTINUE", "COMPLETE", "FAILED", "RETRYABLE_FAILURE", "STOPPED"}
 CONTROL_PATHS = (
+    AI_CONFIG_REL,
+    Path("scripts/two_site_ai_config.py"),
+    Path("scripts/two_site_qoder_driver.py"),
+    Path("scripts/two_site_autopilot.py"),
+    Path("scripts/two_site_coordinator_sandbox.py"),
+    Path("scripts/two_site_qoder_review.py"),
+    Path("scripts/two_site_apply_reviewed.py"),
+    Path("scripts/two_site_review_bridge.py"),
+    Path("scripts/two_site_model_transition.py"),
+    Path("scripts/two_site_codex_final_review.sh"),
+    Path("scripts/two_site_codex_closeout_review.sh"),
+    Path("scripts/two_site_codex_governance_review.sh"),
     Path("scripts/two_site_codex_autopilot.py"),
     Path("scripts/two_site_cycle_packet.py"),
     Path("scripts/two_site_cycle_tools.py"),
@@ -422,6 +443,24 @@ def codex_identity(codex: Path, temporary: Path) -> dict[str, object]:
         "path": str(codex), "version": version, "sha256": digest,
         "model": MODEL, "reasoning": REASONING, "runtime": runtime,
     }
+
+
+def coordinator_identity(root: Path, executable: Path, temporary: Path) -> dict[str, object]:
+    """Select the configured driver while retaining legacy receipt compatibility."""
+    settings = role_settings(root, "coordinator")
+    if settings["provider"] == "qoder":
+        runtime = load_runtime_config(root)["coordinator"]
+        if executable.resolve(strict=True) != Path(runtime["path"]).resolve(strict=True):
+            raise AutopilotError("coordinator executable differs from configured runtime")
+        return qoder_identity(executable, runtime, temporary, settings)
+    return codex_identity(executable, temporary)
+
+
+def coordinator_command(root: Path, executable: Path, run_dir: Path, prompt: str) -> list[str]:
+    settings = role_settings(root, "coordinator")
+    if settings["provider"] == "qoder":
+        return qoder_command(executable, root, run_dir, prompt, settings)
+    return codex_command(executable, root, run_dir, prompt)
 
 
 def validate_result(result: object) -> dict:
@@ -2065,6 +2104,10 @@ def validate_rescope_epoch_startup(
         checkpoint = _load_accepted_checkpoint(state_root)
         if checkpoint is not None and _accepted_checkpoint_matches_repository(checkpoint, repository):
             return
+        if checkpoint is not None and root is not None:
+            from scripts.two_site_model_transition import is_reviewed_model_config_transition
+            if is_reviewed_model_config_transition(root, checkpoint, repository):
+                return
         if root is None:
             raise AutopilotError("prior epoch requires matching accepted checkpoint")
         if len(prior_epoch_names) > 1 or current_epoch_exists:
@@ -2396,7 +2439,7 @@ def _validate_gemini_chain(
             or reviewer_status.get("run_id") != result["gemini_reviewer_run_id"]
             or reviewer_status.get("role") != "verifier"
             or reviewer_status.get("state") != "VERIFIED"
-            or reviewer_status.get("model") != GEMINI_MODEL
+            or reviewer_status.get("model") != expected_bound_role_model(root, "verifier", result["gemini_reviewer_run_id"], source_head, task, sources, reviewer_status)
             or reviewer_status.get("head") != source_head
             or reviewer_status.get("input_worker_run_id") != result["gemini_worker_run_id"]
             or reviewer_status.get("input_proposal_sha256") != proposal_sha256
@@ -2747,12 +2790,15 @@ def run_cycle(
     before_model: Callable[[dict[str, object]], None] | None = None,
     quota_original_controller_run_id: str | None = None,
 ) -> tuple[Path, dict]:
+    cycle_ai_config = load_ai_config(root)
+    coordinator_settings = cycle_ai_config["roles"]["coordinator"]
     try:
         try:
             from scripts.two_site_cycle_metrics import _observe_cycle
         except ModuleNotFoundError:
             from two_site_cycle_metrics import _observe_cycle
-        telemetry = _observe_cycle(root, state_root, MODEL, REASONING)
+        telemetry = _observe_cycle(root, state_root, coordinator_settings["model"],
+                                   coordinator_settings["reasoning_effort"])
     except Exception:
         telemetry = nullcontext({})
     with telemetry as _observation:
@@ -2823,7 +2869,7 @@ def run_cycle(
         phase_seconds["task_context"] = elapsed_seconds(context_started_at)
         readiness_started_at = time.monotonic()
         codex = codex.resolve(strict=True)
-        identity = codex_identity(codex, run_dir)
+        identity = coordinator_identity(root, codex, run_dir)
         phase_seconds["codex_readiness"] = elapsed_seconds(readiness_started_at)
         meta = {
             "cycle": cycle,
@@ -2835,6 +2881,9 @@ def run_cycle(
             "head_before": before["head"],
             "protected_refs": before["protected_refs"],
             "codex": identity,
+            "coordinator": identity,
+            "coordinator_provider": coordinator_settings["provider"],
+            "model_config": cycle_ai_config,
             "assignment_scope": {
                 "assignment_id": scope.assignment_id,
                 "stage_id": scope.stage_id,
@@ -2850,7 +2899,7 @@ def run_cycle(
         if recovery is not None:
             meta["recovery"] = recovery
         write_json(run_dir / "status.json", meta)
-        command = codex_command(codex, root, run_dir, prompt)
+        command = coordinator_command(root, codex, run_dir, prompt)
         environment = os.environ.copy()
         environment["APP_ENV_FILE"] = "config/unit-test.env.example"
         environment["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -2859,6 +2908,13 @@ def run_cycle(
         environment["TWO_SITE_ASSIGNMENT_SHA256"] = scope.sha256
         environment["TWO_SITE_AUTOPILOT_RUN_ID"] = run_dir.name
         environment["TWO_SITE_PREPARATION_STARTUP_SHA256"] = startup.fingerprint
+        if coordinator_settings["provider"] == "qoder":
+            for key, git_key in (("NAME", "user.name"), ("EMAIL", "user.email")):
+                value = git(root, "config", "--get", git_key)
+                if not value or any(ord(c) < 32 for c in value):
+                    raise AutopilotError("configured Git identity is unavailable")
+                environment["GIT_AUTHOR_" + key] = value
+                environment["GIT_COMMITTER_" + key] = value
         coordinator_started_at: float | None = None
         post_validation_started_at: float | None = None
         try:
@@ -2876,9 +2932,11 @@ def run_cycle(
                     prompt = prompt_for_cycle(root, cycle, before, preparation_startup=startup, quota_ready=quota_ready)
                     (run_dir / "prompt.txt").write_text(prompt)
                     phase_seconds["task_context"] = elapsed_seconds(quota_context_started)
-                    command = codex_command(codex, root, run_dir, prompt)
+                    command = coordinator_command(root, codex, run_dir, prompt)
                 if before_model is not None:
                     before_model(before)
+                if coordinator_settings["provider"] == "qoder":
+                    command = buildwrap_coordinator_command(root, run_dir, command, environment=environment)
                 coordinator_started_at = time.monotonic()
                 if quota_original_controller_run_id is not None:
                     from scripts.two_site_quota_supervisor_bridge import quota_codex_process
@@ -2898,7 +2956,7 @@ def run_cycle(
                         state_root, "RUNNING", announce=False, cycle=cycle,
                         head=before["head"], phase="COORDINATOR",
                         phase_started_at=phase_started_at, heartbeat_at=phase_started_at,
-                        summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
+                        summary="Executing configured Worker -> independent Reviewer -> Coordinator final gate.",
                         blockers=[],
                     )
                     heartbeat_thread = threading.Thread(
@@ -2909,17 +2967,22 @@ def run_cycle(
                     )
                     heartbeat_thread.start()
                     capture_bounded_process(
-                        process, b"", run_dir / "stream.jsonl", run_dir / "stderr.txt",
+                        process, (prompt.encode("utf-8") if coordinator_settings["provider"] == "qoder" else b""),
+                        run_dir / "stream.jsonl", run_dir / "stderr.txt",
                         timeout, max_output=MAX_CODEX_OUTPUT,
                     )
                 phase_seconds["coordinator"] = elapsed_seconds(coordinator_started_at)
                 post_validation_started_at = time.monotonic()
                 if process.returncode:
-                    raise AutopilotError(f"Codex CLI exited with status {process.returncode}")
+                    raise AutopilotError(f"Coordinator CLI exited with status {process.returncode}")
                 if file_sha256(codex) != identity["sha256"]:
-                    raise AutopilotError("Codex CLI identity changed during the cycle")
-                if codex_runtime_identity(codex) != identity["runtime"]:
+                    raise AutopilotError("Coordinator CLI identity changed during the cycle")
+                if coordinator_settings["provider"] != "qoder" and codex_runtime_identity(codex) != identity["runtime"]:
                     raise AutopilotError("Codex runtime changed during the cycle")
+                if load_ai_config(root) != cycle_ai_config:
+                    raise AutopilotError("Model configuration changed during the cycle")
+                if coordinator_settings["provider"] == "qoder":
+                    finalize_qoder_output(run_dir, expected_model=coordinator_settings["model"])
                 _validate_startup_file(root, startup_file, startup, startup_bytes)
                 result_path = run_dir / "result.json"
                 raw_result = unique_json(
@@ -2940,6 +3003,9 @@ def run_cycle(
                     else:
                         raise
                 result = validate_transition(root, before, validated_receipt)
+                if coordinator_settings["provider"] == "qoder" and result.get("commit") is not None:
+                    from scripts.two_site_qoder_review import validate_result_review
+                    validate_result_review(root, before["head"], result)
                 if quota_original_controller_run_id is not None:
                     try:
                         if result["state"] not in {"CONTINUE", "COMPLETE"}:
@@ -3101,7 +3167,7 @@ def _heartbeat_running_cycle(
                 state_root, "RUNNING", announce=False, cycle=cycle, head=head,
                 phase="COORDINATOR", phase_started_at=phase_started_at,
                 heartbeat_at=now,
-                summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
+                summary="Executing configured Worker -> independent Reviewer -> Qoder final gate.",
                 blockers=[],
             )
         except OSError:
@@ -3461,7 +3527,7 @@ def run_loop(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--codex", type=Path, default=None)
+    parser.add_argument("--coordinator", "--codex", dest="codex", type=Path, default=None)
     parser.add_argument("--max-cycles", type=int, default=DEFAULT_MAX_CYCLES)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--once", action="store_true")
@@ -3474,7 +3540,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     if args.codex is None:
-        args.codex = args.root.resolve() / ".local/tools/codex-0.159.2-1748767b230ebfc3/codex"
+        args.codex = Path(load_runtime_config(args.root)["coordinator"]["path"])
     if not 1 <= args.max_cycles <= DEFAULT_MAX_CYCLES or not 300 <= args.timeout <= 14_400:
         raise SystemExit("invalid max-cycles or timeout")
     for handled in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
@@ -3488,10 +3554,12 @@ def main() -> int:
             with exclusive_supervisor_lock(lock_path):
                 _validate_legacy_preparation_startup(resolved_root, state_root)
         with tempfile.TemporaryDirectory(prefix="two-site-autopilot-check-") as temporary:
-            identity = codex_identity(args.codex, Path(temporary))
+            identity = coordinator_identity(args.root, args.codex, Path(temporary))
         print(json.dumps({
             "state": "READY", "branch": BRANCH, "head": state["head"],
             "codex": identity,
+            "coordinator": identity,
+            "model_config": load_ai_config(args.root),
             "assignment_scope": assignment_scope_context(state.get("assignment_scope")),
         }))
         return 0

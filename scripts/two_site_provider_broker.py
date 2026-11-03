@@ -82,6 +82,7 @@ try:
         MODEL,
         WORKER_MODEL,
         ProposalError,
+        bound_gemini_role,
         bounded_file_bytes,
         capture_bounded_process,
         git,
@@ -109,6 +110,7 @@ except ModuleNotFoundError:  # Direct ``python scripts/...`` execution.
         MODEL,
         WORKER_MODEL,
         ProposalError,
+        bound_gemini_role,
         bounded_file_bytes,
         capture_bounded_process,
         git,
@@ -731,6 +733,9 @@ def execute_pipeline(root: Path, request: dict, task_path: Path, scope: Assignme
         "--task", str(task_path), "--run-prefix", request["run_prefix"],
         "--timeout", str(request["timeout"]),
     ]
+    # This policy is supplied by the trusted launcher, never by a queued request.
+    if os.environ.get("TWO_SITE_QODER_FINAL_REVIEW_REQUIRED") == "1":
+        command.append("--qoder-final-review")
     environment = os.environ.copy()
     environment.pop("TWO_SITE_AUTOPILOT_RUN_ID", None)
     environment.pop("TWO_SITE_MAINTENANCE_RUN_ID", None)
@@ -808,6 +813,7 @@ def _write_status(path: Path, state: str, **fields: object) -> None:
     value = {
         "schema_version": "1.0", "state": state, "pid": os.getpid(),
         "updated_at": time.time(), **fields,
+        "qoder_final_review_required": os.environ.get("TWO_SITE_QODER_FINAL_REVIEW_REQUIRED") == "1",
     }
     encoded = json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
@@ -1533,8 +1539,9 @@ def detect_quota_response(
         if not isinstance(run_prefix, str) or not RUN_PREFIX_RE.fullmatch(run_prefix):
             return None
 
-        role_pattern = r"worker" if role == "worker" else r"(?:reviewer|verifier)"
-        run_pattern = rf"^{re.escape(run_prefix)}-{role_pattern}-[0-2](?:-retry-[1-2])?$"
+        role_pattern = (r"worker-[0-2]" if role == "worker"
+                        else r"(?:(?:reviewer|verifier)-[0-2]|v[0-2]r[1-2])")
+        run_pattern = rf"^{re.escape(run_prefix)}-{role_pattern}(?:-retry-[1-2])?$"
         if not re.fullmatch(run_pattern, run_id):
             return None
 
@@ -1559,7 +1566,14 @@ def detect_quota_response(
         if not isinstance(status, dict):
             return None
 
-        expected_model = expected_role_model(role, task_id)
+        bound_role = bound_gemini_role(status, role)
+        if bound_role is None:
+            expected_model = expected_role_model(role, task_id)
+        else:
+            if (status.get("effort") != bound_role["reasoning_effort"]
+                    or "fallback_from_run_id" in status or "fallback_receipt" in status):
+                return None
+            expected_model = bound_role["model"]
         if status.get("run_id") != run_id:
             return None
         if status.get("role") != role:

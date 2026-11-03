@@ -386,7 +386,9 @@ def test_standing_quota_flags_remain_opt_in_across_monitor_tmux_broker():
     assert 'serve \\\n            "${broker_quota_args[@]}"' in SCRIPT_TEXT
     assert '"${1:-}" == "start" && "${2:-}" == "--quota-wait-enabled"' in tmux
     assert 'serve "${broker_quota_args[@]}"' in tmux
-    assert 'two_site_codex_autopilot.py" --root "$root" "${quota_args[@]}"' in tmux
+    assert 'two_site_autopilot.py" --root "$root" "${quota_args[@]}"' in tmux
+    assert "TWO_SITE_QODER_FINAL_REVIEW_REQUIRED=1" in tmux
+    assert "qoder_final_review_required" in tmux
     assert 'existing Broker is not quota-enabled; no live Broker will be replaced' in tmux
     # Existing monitor excludes live Supervisor/tmux and still holds its monitor
     # flock; an eligible observation never claims, reserves, or enqueues itself.

@@ -1,5 +1,8 @@
 # اجرای خودکار ریفکتور دوسایته با Google Antigravity
 
+> Runtime migration 2026-11-03: active role models and reasoning are read from `docs/refactor/two-server/templates/automation-models.json`. Qoder owns coordination and final acceptance; Gemini owns proposal generation and independent first review. `gemini-runtime-contract.json` retains historical provenance and CLI/completion pins; its historical role-model fields do not select new runs. Source/proposal binding, native tests, independent sessions, serial Git and explicit STOP remain required.
+
+
 وضعیت در ۲۰۲۶-۰۹-۰۵: `BOUNDED_CYCLE_VALIDATED / GATEWAY_NOT_ACCEPTED / NOT_INSTALLED`
 
 برای ادامهٔ فعلی فقط [`PROPOSAL_AUTOMATION.md`](PROPOSAL_AUTOMATION.md) را دنبال کنید:

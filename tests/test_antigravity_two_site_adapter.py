@@ -1759,9 +1759,7 @@ integration_head_at_issue: {next_head}
         with tempfile.TemporaryDirectory() as directory:
             sandbox = Path(directory)
             repo = sandbox / "repo"
-            fake_bin = sandbox / "bin"
             repo.mkdir()
-            fake_bin.mkdir()
             git(repo, "init", "-q")
             git(repo, "config", "user.name", "Governance Test")
             git(repo, "config", "user.email", "governance@example.invalid")
@@ -1786,6 +1784,16 @@ integration_head_at_issue: {next_head}
                 encoding="utf-8",
             )
             script.chmod(0o755)
+            # Stub only the generic bridge readiness boundary. The shell must
+            # reject the Stage change before any review/provider invocation.
+            bridge = script.parent / "two_site_review_bridge.py"
+            bridge.write_text(
+                "import json, sys\nfrom pathlib import Path\n"
+                "root = Path(__file__).resolve().parents[1]\n"
+                "assert sys.argv[1:] == ['--root', str(root), '--check']\n"
+                "(root / '.local/two-site-refactor/bridge-call.json').write_text(json.dumps(sys.argv[1:]))\n",
+                encoding="utf-8",
+            )
             schema.write_text(
                 (
                     ROOT
@@ -1812,9 +1820,6 @@ integration_head_at_issue: {next_head}
             git(repo, "commit", "-qm", "illicit state change")
             head = git(repo, "rev-parse", "HEAD")
 
-            fake_codex = fake_bin / "codex"
-            fake_codex.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
-            fake_codex.chmod(0o755)
             amendment = "TEST-GOV-1"
             local = repo / ".local" / "two-site-refactor"
             bundle = local / "governance-bundles" / amendment
@@ -1824,15 +1829,14 @@ integration_head_at_issue: {next_head}
             identity = f"base={base}\nhead={head}\n"
             (bundle / "commit.txt").write_text(identity, encoding="utf-8")
             (bundle / "FINAL_REVIEW_REQUEST.md").write_text(identity, encoding="utf-8")
-            authorization = local / "authorizations" / "CODEX_SOURCE_REVIEW.md"
+            authorization = local / "authorizations" / "QODER_SOURCE_REVIEW.md"
             authorization.parent.mkdir(parents=True)
             authorization.write_text(
                 "authorization: APPROVED\n"
-                "scope: TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_OPENAI_CODEX\n",
+                "scope: TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_QODER\n",
                 encoding="utf-8",
             )
             environment = dict(os.environ)
-            environment["PATH"] = f"{fake_bin}:{environment['PATH']}"
             result = subprocess.run(
                 [
                     "bash",
@@ -1854,6 +1858,10 @@ integration_head_at_issue: {next_head}
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("changed authoritative Stage state", result.stderr)
+            self.assertEqual(
+                ["--root", str(repo), "--check"],
+                json.loads((local / "bridge-call.json").read_text(encoding="utf-8")),
+            )
 
 
 if __name__ == "__main__":

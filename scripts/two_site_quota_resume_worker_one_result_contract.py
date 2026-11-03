@@ -175,13 +175,29 @@ def bind_worker_one_result(
         if len({prior_worker_conv, reviewer_conv, curr_conv}) != 3:
             raise ProposalError("conversation IDs must be distinct across prior worker, reviewer, and current worker")
 
-        if feedback.get("reviewer") != "gemini":
-            raise ProposalError("feedback reviewer must be 'gemini'")
         reviewer_result = evidence.get("reviewer_result")
         if not isinstance(reviewer_result, dict):
             raise ProposalError("evidence missing or invalid reviewer_result")
         feedback_findings = feedback.get("findings")
-        reviewer_findings = reviewer_result.get("findings")
+        qoder_session = None
+        if feedback.get("reviewer") == "qoder":
+            qoder = evidence.get("qoder_review")
+            qvalue = qoder.get("result", {}) if isinstance(qoder, dict) else {}
+            bindings = qoder.get("bindings", {}) if isinstance(qoder, dict) else {}
+            qoder_session = qoder.get("proof", {}).get("session_id") if isinstance(qoder, dict) else None
+            if (qvalue.get("decision") != "REQUEST_CHANGES"
+                    or qvalue.get("proposal_sha256") != artifacts.get("proposal_sha256")
+                    or qvalue.get("source_head") != artifacts.get("source_head")
+                    or bindings.get("worker_run_id") != prior_run_id
+                    or bindings.get("reviewer_run_id") != artifacts.get("final_reviewer_run_id")
+                    or reviewer_result.get("status") != "VERIFIED" or reviewer_result.get("findings")
+                    or not isinstance(qoder_session, str) or not qoder_session.strip()):
+                raise ProposalError("Qoder correction evidence is not bound to genuine Gemini VERIFIED")
+            reviewer_findings = qvalue.get("findings")
+        elif feedback.get("reviewer") == "gemini":
+            reviewer_findings = reviewer_result.get("findings")
+        else:
+            raise ProposalError("feedback reviewer must be 'gemini' or validated 'qoder'")
         if feedback_findings != reviewer_findings:
             raise ProposalError("feedback findings do not equal reviewer_result findings")
         if not isinstance(feedback_findings, list):
@@ -196,6 +212,10 @@ def bind_worker_one_result(
             seen_norm_findings.add(norm)
 
         seen_convs = {prior_worker_conv, reviewer_conv, curr_conv}
+        if qoder_session is not None:
+            if qoder_session in seen_convs:
+                raise ProposalError("Qoder correction conversation must remain distinct")
+            seen_convs.add(qoder_session)
     else:
         if curr_conv == prior_worker_conv:
             raise ProposalError("current worker conversation must differ from prior Worker conversation")

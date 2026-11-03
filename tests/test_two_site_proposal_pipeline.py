@@ -24,6 +24,7 @@ try:
     from scripts.two_site_proposal_runner import (
         MAX_CONTEXT, MODEL, WORKER_MODEL, RetryableProviderOutputError,
         bounded_file_bytes, file_sha256, relative_file, write_json,
+        configured_gemini_roles, serialize_json,
     )
     from scripts.two_site_semantic_attempts import MARKER
     from scripts.two_site_semantic_task import build_identity
@@ -36,6 +37,7 @@ except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
         MAX_CONTEXT, MODEL, WORKER_MODEL, RetryableProviderOutputError,
         bounded_file_bytes, file_sha256, relative_file, write_json,
+        configured_gemini_roles, serialize_json,
     )
     from two_site_semantic_attempts import MARKER  # type: ignore[no-redef]
     from two_site_semantic_task import build_identity  # type: ignore[no-redef]
@@ -43,6 +45,12 @@ except ModuleNotFoundError:
 from tests.two_site_generation_fixture import seal_completion_fixture
 
 HEAD = "a" * 40
+
+
+def quota_model_snapshot() -> dict:
+    """These synthetic quota attempts use the configured roles, not legacy models."""
+    roles = configured_gemini_roles(pipeline.ROOT)
+    return {"model_config": roles, "model_config_sha256": hashlib.sha256(serialize_json(roles)).hexdigest()}
 
 
 def fake_git(_root: Path, *args: str) -> str:
@@ -558,6 +566,7 @@ class TestPipeline(unittest.TestCase):
                 "model": WORKER_MODEL,
                 "state": "BLOCKED",
                 "quota_evidence": evidence,
+                **quota_model_snapshot(),
             })
             raise ProposalError("Gemini quota stream exhausted")
 
@@ -615,6 +624,7 @@ class TestPipeline(unittest.TestCase):
                 "model": WORKER_MODEL,
                 "state": "BLOCKED",
                 "quota_evidence": evidence,
+                **quota_model_snapshot(),
             })
             raise ProposalError("Gemini quota stream exhausted")
 
@@ -657,6 +667,7 @@ class TestPipeline(unittest.TestCase):
                 "model": MODEL,
                 "state": "BLOCKED",
                 "quota_evidence": evidence,
+                **quota_model_snapshot(),
             })
             raise ProposalError("reviewer Gemini quota limit reached")
 
@@ -708,6 +719,7 @@ class TestPipeline(unittest.TestCase):
                 "model": WORKER_MODEL,
                 "state": "BLOCKED",
                 "quota_evidence": evidence,
+                **quota_model_snapshot(),
             })
             raise ProposalError("worker correction Gemini quota stream exhausted")
 
@@ -759,6 +771,7 @@ class TestPipeline(unittest.TestCase):
                 "conversation_id": "conv-worker-matching",
                 "state": "BLOCKED",
                 "quota_evidence": evidence,
+                **quota_model_snapshot(),
             })
             raise ProposalError("Gemini quota stream exhausted")
 
@@ -932,6 +945,7 @@ class TestPipeline(unittest.TestCase):
                 "model": WORKER_MODEL,
                 "state": "BLOCKED",
                 "quota_evidence": evidence,
+                **quota_model_snapshot(),
             })
             raise ProposalError("error during drift")
 

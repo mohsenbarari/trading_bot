@@ -36,7 +36,7 @@ def validate_prior_worker_paths(
             f"prior_worker_id {prior_worker_id!r} does not match expected pattern for index {prior_index}"
         )
 
-    reviewer_re = rf"^{prefix_esc}-reviewer-{prior_index}(-retry-[12])?$"
+    reviewer_re = rf"^{prefix_esc}(?:-reviewer-{prior_index}|-v{prior_index}r[12])(-retry-[12])?$"
     if not re.fullmatch(reviewer_re, prior_reviewer_id):
         raise ValueError(
             f"prior_reviewer_id {prior_reviewer_id!r} does not match expected pattern for index {prior_index}"

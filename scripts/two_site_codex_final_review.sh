@@ -10,7 +10,7 @@ Usage:
     --stage <STAGE_ID> --assignment <ASSIGNMENT_ID> \
     --bundle <RELATIVE_BUNDLE_PATH> --base <FULL_SHA> --head <FULL_SHA>
 
-Runs a fresh Codex final reviewer in a read-only sandbox and writes an atomic JSON
+Runs a fresh Qoder final reviewer in a read-only sandbox and writes an atomic JSON
 receipt plus a Markdown audit view into the ignored review bundle.
 EOF
 }
@@ -28,10 +28,10 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Gi
 repo_root="$(realpath -e "$repo_root")"
 schema_rel="docs/refactor/two-server/templates/final-review.schema.json"
 schema_path="$repo_root/$schema_rel"
-source_authorization="$repo_root/.local/two-site-refactor/authorizations/CODEX_SOURCE_REVIEW.md"
-codex_bin="$(command -v codex 2>/dev/null || true)"
-codex_model="gpt-6-sol"
-codex_reasoning_effort="xhigh"
+source_authorization="$repo_root/.local/two-site-refactor/authorizations/QODER_SOURCE_REVIEW.md"
+review_bridge="$repo_root/scripts/two_site_review_bridge.py"
+# CODEX_FINAL_REVIEWER is a historical SCHEMA_ROLE; execution is Qoder.
+
 check_only=false
 stage_id=""
 assignment_id=""
@@ -70,25 +70,27 @@ require_command git
 require_command jq
 require_command realpath
 require_command date
-test -n "$codex_bin" && test -x "$codex_bin" || die "required command is unavailable: codex"
+require_command sha256sum
+require_command awk
+test -f "$review_bridge" || die "Qoder review bridge is missing"
 test -f "$schema_path" || die "review schema is missing: $schema_path"
 jq -e . "$schema_path" >/dev/null || die "review schema is not valid JSON"
 
 validate_source_authorization() {
   test -s "$source_authorization" &&
     grep -Fxq 'authorization: APPROVED' "$source_authorization" &&
-    grep -Fxq 'scope: TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_OPENAI_CODEX' "$source_authorization"
+    grep -Fxq 'scope: TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_QODER' "$source_authorization"
 }
 
 if $check_only; then
-  "$codex_bin" login status >/dev/null 2>&1 || die "Codex CLI is not authenticated"
+  /usr/bin/python3 "$review_bridge" --root "$repo_root" --check >/dev/null || die "Qoder CLI is not ready"
   validate_source_authorization || die "explicit source-review authorization is missing: $source_authorization"
   test -z "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" || \
     die "repository must be fully clean, including untracked files"
   git -C "$repo_root" cat-file -e "HEAD:${schema_rel}" || die "review schema is not tracked at HEAD"
   git -C "$repo_root" cat-file -e "HEAD:scripts/two_site_codex_final_review.sh" || \
     die "review bridge is not tracked at HEAD"
-  printf 'READY: Codex CLI, authentication, Git, jq, and review schema are available.\n'
+  printf 'READY: Qoder CLI, authentication, Git, jq, and review schema are available.\n'
   exit 0
 fi
 
@@ -128,10 +130,12 @@ grep -Fq "$base_sha" "$bundle_abs/FINAL_REVIEW_REQUEST.md" || die "review reques
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/two-site-codex-review.XXXXXX")"
 receipt_tmp=""
 markdown_tmp=""
+execution_tmp=""
 cleanup() {
   rm -rf -- "$tmp_dir"
   if test -n "$receipt_tmp"; then rm -f -- "$receipt_tmp"; fi
   if test -n "$markdown_tmp"; then rm -f -- "$markdown_tmp"; fi
+  if test -n "$execution_tmp"; then rm -f -- "$execution_tmp"; fi
 }
 trap cleanup EXIT
 raw_receipt="$tmp_dir/receipt.json"
@@ -160,18 +164,15 @@ adequate. For APPROVE, decision.accepted_commit must equal $head_sha. For every 
 verdict it must be null. Never infer approval from missing evidence.
 EOF
 
-PYTHONDONTWRITEBYTECODE=1 TMPDIR="$tmp_dir" "$codex_bin" exec \
-  --model "$codex_model" \
-  --config "model_reasoning_effort=\"$codex_reasoning_effort\"" \
-  --cd "$repo_root" \
-  --sandbox read-only \
-  --ephemeral \
-  --output-schema "$schema_path" \
-  --output-last-message "$raw_receipt" \
-  "$review_prompt"
+{
+  printf '%s\n' "$review_prompt"
+  printf '\nMACHINE_GENERATED_EXACT_REVIEW_DIFF:\n'
+  git -C "$repo_root" diff --binary --full-index --no-ext-diff "$base_sha" "$head_sha"
+} | PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$review_bridge" --root "$repo_root" \
+  --schema "$schema_path" --output-last-message "$raw_receipt"
 
-test -s "$raw_receipt" || die "Codex did not produce a receipt"
-jq -e . "$raw_receipt" >/dev/null || die "Codex receipt is not valid JSON"
+test -s "$raw_receipt" || die "Qoder did not produce a receipt"
+jq -e . "$raw_receipt" >/dev/null || die "Qoder receipt is not valid JSON"
 jq -e \
   --arg stage "$stage_id" \
   --arg assignment "$assignment_id" \
@@ -186,7 +187,7 @@ jq -e \
     .reviewed_head_sha == $head and
     ((.verdict == "APPROVE" and .decision.accepted_commit == $head) or
      (.verdict != "APPROVE" and .decision.accepted_commit == null))
-  ' "$raw_receipt" >/dev/null || die "Codex receipt identity or acceptance binding is invalid"
+  ' "$raw_receipt" >/dev/null || die "Qoder receipt identity or acceptance binding is invalid"
 
 jq -e '
   if .verdict == "APPROVE" then
@@ -210,12 +211,16 @@ review_age="$((now_epoch - reviewed_epoch))"
 
 receipt_tmp="$bundle_abs/.CODEX_FINAL_REVIEW.json.tmp"
 markdown_tmp="$bundle_abs/.CODEX_FINAL_REVIEW.md.tmp"
+execution_tmp="$bundle_abs/.CODEX_FINAL_REVIEW.execution.json.tmp"
 jq -S . "$raw_receipt" >"$receipt_tmp"
+jq --arg published "$(sha256sum "$receipt_tmp" | awk '{print $1}')" \
+  '. + {published_receipt_sha256: $published}' "$raw_receipt.execution.json" >"$execution_tmp"
 
 jq -r '
   def safe: tostring | gsub("[|\\r\\n]"; " ");
-  "# Codex Final Review — `\(.stage_id)` / `\(.reviewed_head_sha)`\n",
+  "# Qoder Final Review — `\(.stage_id)` / `\(.reviewed_head_sha)`\n",
   "- Reviewer authority: `\(.reviewer_authority)`",
+  "- Execution provider: Qoder; authority label is a historical SCHEMA_ROLE alias. See `CODEX_FINAL_REVIEW.execution.json`.",
   "- Assignment ID: `\(.assignment_id)`",
   "- Integration base SHA: `\(.integration_base_sha)`",
   "- Reviewed head SHA: `\(.reviewed_head_sha)`",
@@ -241,8 +246,9 @@ jq -r '
   "\nOnly `APPROVE` for this exact integration commit permits Stage completion."
 ' "$raw_receipt" >"$markdown_tmp"
 
-mv -f -- "$receipt_tmp" "$bundle_abs/CODEX_FINAL_REVIEW.json"
+mv -f -- "$execution_tmp" "$bundle_abs/CODEX_FINAL_REVIEW.execution.json"
 mv -f -- "$markdown_tmp" "$bundle_abs/CODEX_FINAL_REVIEW.md"
+mv -f -- "$receipt_tmp" "$bundle_abs/CODEX_FINAL_REVIEW.json"
 
 verdict="$(jq -r .verdict "$bundle_abs/CODEX_FINAL_REVIEW.json")"
 printf 'CODEX_FINAL_REVIEW=%s\n' "$verdict"

@@ -154,6 +154,8 @@ def complete_worker_two_history(
         f"{orig_prefix}-reviewer-0",
         f"{orig_prefix}-reviewer-0-retry-1",
         f"{orig_prefix}-reviewer-0-retry-2",
+        *(f"{orig_prefix}-v0r{batch}{retry}" for batch in (1, 2)
+          for retry in ("", "-retry-1", "-retry-2")),
     )
 
     fb_kind = base.get("feedback1_kind")
@@ -175,6 +177,11 @@ def complete_worker_two_history(
             ordered_convs = [w0_conv, w1_conv, r1_conv]
         else:
             ordered_convs = [w0_conv, w1_conv]
+        if "qoder_review1" in base:
+            qoder1_session = base["qoder_review1"].get("proof", {}).get("session_id")
+            if not isinstance(qoder1_session, str) or not qoder1_session.strip():
+                raise ProposalError("Qoder1 history session is missing")
+            ordered_convs.append(qoder1_session)
 
         if len(set(ordered_convs)) != len(ordered_convs):
             raise ProposalError(
@@ -189,7 +196,7 @@ def complete_worker_two_history(
         out["ordered_conversation_ids"] = list(ordered_convs)
         return out
 
-    if fb_kind == "gemini":
+    if fb_kind in ("gemini", "qoder"):
         if needs_reviewer0 is not True:
             raise ProposalError(
                 f"gemini history requires needs_reviewer0 True, got {needs_reviewer0!r}"
@@ -258,7 +265,7 @@ def complete_worker_two_history(
 
         task, sources = load_task(root_path, admitted_task_path)
 
-        valid_candidates: list[tuple[str, dict[str, Any], dict[str, Any], str]] = []
+        valid_candidates = []
         for cid in candidate_ids:
             cand_rel_path = f".local/two-site-refactor/proposals/{cid}/result.json"
             cand_full_path = root_path / ".local" / "two-site-refactor" / "proposals" / cid / "result.json"
@@ -278,15 +285,24 @@ def complete_worker_two_history(
                 "source_head": str(source_head),
             }
 
-            rev_result, rev_status, rev_result_sha = validate_bound_prior_reviewer(
-                root=root_path,
-                artifacts=rev_artifacts,
-                worker_info=worker0_info,
-                test_receipt=test_receipt,
-                task=task,
-                sources=sources,
-            )
-            valid_candidates.append((cid, rev_result, rev_status, rev_result_sha))
+            qoder = None
+            if fb_kind == "qoder":
+                from scripts.two_site_quota_resume_worker_feedback import load_bound_qoder_correction_feedback
+                rev_artifacts.update(pre_review_test_state="PASSED",
+                    expected_feedback_path=f".local/two-site-refactor/pipeline/{orig_prefix}/feedback-correction-1.json")
+                bundle = load_bound_qoder_correction_feedback(root_path, admitted_task_path, rev_artifacts, worker0_info, test_receipt)
+                rev_result, rev_status, rev_result_sha = (bundle[key] for key in ("reviewer_result", "reviewer_status", "reviewer_sha"))
+                qoder = bundle["qoder_review"]
+            else:
+                rev_result, rev_status, rev_result_sha = validate_bound_prior_reviewer(
+                    root=root_path,
+                    artifacts=rev_artifacts,
+                    worker_info=worker0_info,
+                    test_receipt=test_receipt,
+                    task=task,
+                    sources=sources,
+                )
+            valid_candidates.append((cid, rev_result, rev_status, rev_result_sha, qoder))
 
         if len(valid_candidates) == 0:
             raise ProposalError(f"no valid Reviewer0 candidate found for prefix {orig_prefix!r}")
@@ -294,10 +310,10 @@ def complete_worker_two_history(
             found_cids = [c[0] for c in valid_candidates]
             raise ProposalError(f"multiple valid Reviewer0 candidates found: {found_cids}")
 
-        chosen_cid, rev_result, rev_status, rev_result_sha = valid_candidates[0]
+        chosen_cid, rev_result, rev_status, rev_result_sha, qoder = valid_candidates[0]
 
         expected_findings = base.get("feedback1", {}).get("findings")
-        actual_findings = rev_result.get("findings")
+        actual_findings = qoder["result"]["findings"] if qoder is not None else rev_result.get("findings")
         if actual_findings != expected_findings:
             raise ProposalError(
                 f"Reviewer0 findings mismatch: validated reviewer findings {actual_findings!r} "
@@ -312,6 +328,16 @@ def complete_worker_two_history(
             ordered_convs = [w0_conv, rev_conv_id, w1_conv, r1_conv]
         else:
             ordered_convs = [w0_conv, rev_conv_id, w1_conv]
+        if qoder is not None:
+            qoder_session = qoder.get("proof", {}).get("session_id")
+            if not isinstance(qoder_session, str) or not qoder_session.strip():
+                raise ProposalError("Qoder history session is missing")
+            ordered_convs.insert(2, qoder_session)
+        if "qoder_review1" in base:
+            qoder1_session = base["qoder_review1"].get("proof", {}).get("session_id")
+            if not isinstance(qoder1_session, str) or not qoder1_session.strip():
+                raise ProposalError("Qoder1 history session is missing")
+            ordered_convs.append(qoder1_session)
 
         if len(set(ordered_convs)) != len(ordered_convs):
             raise ProposalError(
@@ -330,6 +356,8 @@ def complete_worker_two_history(
         out["reviewer0_result"] = copy.deepcopy(rev_result)
         out["reviewer0_status"] = copy.deepcopy(rev_status)
         out["reviewer0_result_sha"] = str(rev_result_sha)
+        if qoder is not None:
+            out["qoder_review0"] = copy.deepcopy(qoder)
         return out
 
     raise ProposalError(f"unsupported feedback1_kind: {fb_kind!r}")

@@ -400,18 +400,33 @@ class HostTests(unittest.TestCase):
                 outer_timeout,
             )
 
-    def test_all_codex_review_bridges_pin_model_and_reasoning(self):
+    def test_all_review_bridges_use_configured_readonly_qoder_role(self):
+        from scripts import two_site_ai_config as ai_config
+        from scripts import two_site_qoder_driver as qoder
+
         root = Path(__file__).resolve().parents[1]
+        configured = ai_config.role_settings(root, 'final_reviewer')
+        policy = json.loads((root / ai_config.AI_CONFIG_REL).read_text())
+        self.assertEqual(policy['roles']['final_reviewer'], configured)
+        self.assertEqual('qoder', configured['provider'])
+        self.assertTrue(configured['model'])
+        self.assertTrue(configured['reasoning_effort'])
+        self.assertEqual(('Read', 'Glob', 'Grep'), qoder.TOOLS['final_reviewer'])
+        bridge = (root / 'scripts/two_site_review_bridge.py').read_text()
+        self.assertIn('config.role_settings(root, "final_reviewer")', bridge)
+        self.assertIn('role="final_reviewer"', bridge)
         for relative in (
             'scripts/two_site_codex_final_review.sh',
             'scripts/two_site_codex_closeout_review.sh',
             'scripts/two_site_codex_governance_review.sh',
         ):
             source = (root / relative).read_text()
-            self.assertIn('codex_model="gpt-6-sol"', source)
-            self.assertIn('codex_reasoning_effort="xhigh"', source)
-            self.assertIn('--model "$codex_model"', source)
-            self.assertIn('model_reasoning_effort=', source)
+            self.assertIn('review_bridge="$repo_root/scripts/two_site_review_bridge.py"', source)
+            self.assertIn('/usr/bin/python3 "$review_bridge" --root "$repo_root"', source)
+            self.assertRegex(source, r'--schema "\$schema_path" --output-last-message "\$raw(?:_receipt)?"')
+            self.assertIn('TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_QODER', source)
+            self.assertNotIn('codex_model=', source)
+            self.assertNotRegex(source, r'\bcodex\s+(?:exec|review)\b')
 
     def final_review_composition(self):
         fixture = GatewayFixture()

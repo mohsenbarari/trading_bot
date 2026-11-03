@@ -24,6 +24,7 @@ if __package__:
         verify_preparation_startup,
     )
     import scripts.two_site_proposal_runner as runner
+    from scripts.two_site_ai_config import AI_CONFIG_REL, load_ai_config
     from scripts.two_site_semantic_task_builder import (
         build_task_identity,
         validate_task_identity,
@@ -43,6 +44,7 @@ else:
         verify_preparation_startup,
     )
     import two_site_proposal_runner as runner
+    from two_site_ai_config import AI_CONFIG_REL, load_ai_config
     from two_site_semantic_task_builder import (
         build_task_identity,
         validate_task_identity,
@@ -229,6 +231,18 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
         task = spec["task"]
         if not isinstance(task, dict) or not isinstance(task.get("goal"), str) or MARKER in task["goal"]:
             raise runner.ProposalError("invalid base task")
+        # New Tasks bind the actual public model policy as a real source input.
+        # Existing issued Tasks are never rewritten or implicitly rebound.
+        if os.path.lexists(root / AI_CONFIG_REL):
+            load_ai_config(root)
+            context = task.get("context_files")
+            if not isinstance(context, list) or any(not isinstance(path, str) for path in context):
+                raise runner.ProposalError("invalid context_files for model-policy source")
+            policy_path = AI_CONFIG_REL.as_posix()
+            if policy_path not in context:
+                if len(context) >= 32:
+                    raise runner.ProposalError("model-policy source requires one context slot; maximum context_files is 32")
+                task = {**task, "context_files": [*context, policy_path]}
         if startup is not None and startup.route == "one_shot":
             try:
                 require_proposal_utf8_budget_profile(
@@ -436,9 +450,9 @@ def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
 def _prior_worker(root: Path, snapshot: dict, worker_dir: Path) -> tuple:
     """Validate final correction input using the existing runner's full prior binding."""
     try:
-        from scripts.two_site_proposal_pipeline import expected_role_model
+        from scripts.two_site_proposal_pipeline import expected_bound_role_model
     except ModuleNotFoundError:
-        from two_site_proposal_pipeline import expected_role_model
+        from two_site_proposal_pipeline import expected_bound_role_model
     status = runner.unique_json(runner.bounded_file_text(root, worker_dir / "status.json", runner.MAX_CONTEXT, "worker status"))
     prior_id = status.get("input_worker_run_id")
     if not isinstance(prior_id, str) or not runner.re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", prior_id):
@@ -447,7 +461,9 @@ def _prior_worker(root: Path, snapshot: dict, worker_dir: Path) -> tuple:
     if runner.bounded_file_text(root, path, runner.MAX_CONTEXT, "prior result") != snapshot["proposal"]:
         raise runner.ProposalError("prior result bytes mismatch")
     _, prior, digest = runner.load_prior_worker(root, path, snapshot["proposal"], snapshot["task"], snapshot["sources"], snapshot["source_head"])
-    if prior.get("run_id") != prior_id or prior.get("model") != expected_role_model("worker", snapshot["task"]["task_id"]):
+    expected_model = expected_bound_role_model(root, "worker", prior_id, snapshot["source_head"],
+        snapshot["task"], snapshot["sources"], prior)
+    if prior.get("run_id") != prior_id or prior.get("model") != expected_model:
         raise runner.ProposalError("prior identity mismatch")
     feedback = snapshot.get("feedback")
     if not isinstance(feedback, dict):

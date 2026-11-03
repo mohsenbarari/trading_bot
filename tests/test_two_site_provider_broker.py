@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import threading
@@ -14,6 +15,7 @@ from unittest import mock
 import pytest
 
 from scripts import two_site_provider_broker as broker
+from scripts import two_site_proposal_runner as runner
 from scripts.two_site_assignment_scope import AssignmentScope
 from scripts.two_site_preparation_contract import PreparationStartup
 
@@ -34,7 +36,10 @@ def broker_repo(tmp_path_factory) -> tuple[Path, Path, AssignmentScope, dict[str
     pipeline = root / broker.PIPELINE_REL
     pipeline.parent.mkdir()
     pipeline.write_text("raise SystemExit(99)\n", encoding="utf-8")
-    subprocess.run(["git", "-C", str(root), "add", ".gitignore", "source.py", str(broker.PIPELINE_REL)], check=True)
+    config = root / runner.AI_CONFIG_REL
+    config.parent.mkdir(parents=True)
+    shutil.copyfile(runner.ROOT / runner.AI_CONFIG_REL, config)
+    subprocess.run(["git", "-C", str(root), "add", ".gitignore", "source.py", str(broker.PIPELINE_REL), str(runner.AI_CONFIG_REL)], check=True)
     subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture"], check=True)
     subprocess.run(["git", "-C", str(root), "branch", "-M", broker.BRANCH], check=True)
 
@@ -199,6 +204,7 @@ def test_filesystem_queue_round_trip_preserves_exact_pipeline_result(
     run_dir = root / ".local/two-site-refactor/autopilot/runs" / cycle_id
     run_dir.mkdir(parents=True, exist_ok=True)
     os.chmod(run_dir, 0o700)
+    os.chmod(run_dir.parent, 0o700)
     startup_payload = PreparationStartup(
         schema_version=1,
         route="one_shot",
@@ -722,6 +728,7 @@ def _write_runner_status(
     conversation_id: str | None = "conv-test",
     state: str = "BLOCKED",
     raw_content: bytes | None = None,
+    historical: bool = False,
 ) -> tuple[Path, str]:
     run_dir = root / ".local/two-site-refactor/proposals" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -738,9 +745,17 @@ def _write_runner_status(
         "task_id": task_id,
         "quota_evidence": quota_evidence,
     }
+    if not historical:
+        roles = runner.configured_gemini_roles(root)
+        status_data.update(model_config=roles,
+                           model_config_sha256=runner.sha(runner.serialize_json(roles)),
+                           effort=roles["worker" if role == "worker" else "reviewer"]["reasoning_effort"])
+    else:
+        status_data["effort"] = runner.RUNTIME_CONTRACT["worker_effort" if role == "worker" else "effort"]
     if conversation_id is not None:
         status_data["conversation_id"] = conversation_id
-    content = json.dumps(status_data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    # Preserve the real Runner's snapshot serialization and digest convention.
+    content = runner.serialize_json(status_data)
     status_path.write_bytes(content)
     status_sha = hashlib.sha256(content).hexdigest()
     return status_path, status_sha
@@ -768,10 +783,12 @@ def _make_quota_payload(
     status_state: str = "BLOCKED",
     create_result_file: bool = False,
     create_patch_file: bool = False,
+    historical: bool = False,
 ) -> dict:
     if role == "worker":
         attempt_role = "worker"
-        model = broker.WORKER_MODEL
+        model = (runner.RUNTIME_CONTRACT["worker_model"] if historical
+                 else runner.configured_gemini_role(root, "worker")["model"])
         if is_correction:
             effective_run_id = run_id or f"{run_prefix}-worker-1"
             worker_run_id = f"{run_prefix}-worker-0"
@@ -787,7 +804,8 @@ def _make_quota_payload(
     else:
         attempt_role = "verifier"
         effective_run_id = run_id or f"{run_prefix}-reviewer-0"
-        model = broker.MODEL
+        model = (runner.RUNTIME_CONTRACT["model"] if historical
+                 else runner.configured_gemini_role(root, "verifier")["model"])
         worker_run_id = f"{run_prefix}-worker-0"
         reviewer_run_id = None
         proposal_sha = "1" * 64
@@ -813,6 +831,7 @@ def _make_quota_payload(
         conversation_id=cid,
         state=status_state,
         raw_content=status_raw_content,
+        historical=historical,
     )
 
     if create_result_file:
@@ -910,6 +929,66 @@ def test_detect_quota_response_positive_initial_worker_reviewer_and_correction_w
     assert broker.detect_terminal_quota_response(root, request, resp_corr) == det_corr
 
 
+@pytest.mark.parametrize("role", ["worker", "verifier"])
+def test_detect_quota_response_preserves_historical_unsnapshotted_role(broker_repo, role):
+    root, task, _scope, environment = broker_repo
+    request = make_valid_request(root, task, environment)
+    payload = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"],
+                                  role=role, historical=True)
+    status = json.loads((root / ".local/two-site-refactor/proposals" /
+                         payload["quota_attempt"]["run_id"] / "status.json").read_text())
+    assert "model_config" not in status and "model_config_sha256" not in status
+    expected = runner.RUNTIME_CONTRACT["worker_model" if role == "worker" else "model"]
+    assert payload["quota_evidence"]["model"] == expected
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, payload)) == payload["quota_evidence"]
+
+
+@pytest.mark.parametrize("suffix", ["v0r1", "v0r2-retry-1", "v1r1-retry-2", "v2r2"])
+def test_detect_quota_response_accepts_bounded_reviewer_continuation_ids(broker_repo, suffix):
+    root, task, _scope, environment = broker_repo
+    request = make_valid_request(root, task, environment)
+    payload = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], role="verifier",
+                                  run_id=f"{request['run_prefix']}-{suffix}")
+    correction = int(suffix[1])
+    payload["correction_count"] = correction
+    payload["final_worker_run_id"] = f"{request['run_prefix']}-worker-{correction}"
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, payload)) == payload["quota_evidence"]
+
+
+@pytest.mark.parametrize("role,suffix", [("worker", "v0r1"), ("verifier", "v3r1"),
+    ("verifier", "v0r0"), ("verifier", "v0r3"), ("verifier", "v01r1"),
+    ("verifier", "v0r1-retry-3"), ("verifier", "v0r1-extra")])
+def test_detect_quota_response_rejects_noncanonical_continuation_ids(broker_repo, role, suffix):
+    root, task, _scope, environment = broker_repo
+    request = make_valid_request(root, task, environment)
+    payload = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], role=role,
+                                  run_id=f"{request['run_prefix']}-{suffix}")
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, payload)) is None
+
+
+@pytest.mark.parametrize("mutation", ["digest", "missing-config", "missing-digest", "effort", "legacy-fallback"])
+def test_detect_quota_response_rejects_malformed_current_role_binding(broker_repo, mutation):
+    root, task, _scope, environment = broker_repo
+    request = make_valid_request(root, task, environment)
+    payload = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"])
+    status_path = root / ".local/two-site-refactor/proposals" / payload["quota_attempt"]["run_id"] / "status.json"
+    status = json.loads(status_path.read_text())
+    if mutation == "digest":
+        status["model_config_sha256"] = "0" * 64
+    elif mutation == "missing-config":
+        del status["model_config"]
+    elif mutation == "missing-digest":
+        del status["model_config_sha256"]
+    elif mutation == "effort":
+        status["effort"] = "low"
+    else:
+        status["fallback_from_run_id"] = "historical-failed-run"
+    raw = json.dumps(status, sort_keys=True, separators=(",", ":")).encode()
+    status_path.write_bytes(raw)
+    payload["quota_attempt"]["status_sha256"] = hashlib.sha256(raw).hexdigest()
+    assert broker.detect_quota_response(root, request, _make_quota_response(request, payload)) is None
+
+
 def test_detect_quota_response_negative_matrix(
     broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
 ) -> None:
@@ -988,11 +1067,12 @@ def test_detect_quota_response_negative_matrix(
     assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_prov)) is None
 
     # Wrong model for worker / verifier / correction worker
-    bad_mod = dict(payload, quota_evidence=dict(payload["quota_evidence"], model=broker.MODEL))
+    wrong_model = "fixture-unconfigured-model"
+    bad_mod = dict(payload, quota_evidence=dict(payload["quota_evidence"], model=wrong_model))
     assert broker.detect_quota_response(root, request, _make_quota_response(request, bad_mod)) is None
-    p_st_mod = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], role="worker", is_correction=True, status_model=broker.MODEL)
+    p_st_mod = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], role="worker", is_correction=True, status_model=wrong_model)
     assert broker.detect_quota_response(root, request, _make_quota_response(request, p_st_mod)) is None
-    p_ver_bad_mod = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], role="verifier", status_model=broker.WORKER_MODEL)
+    p_ver_bad_mod = _make_quota_payload(root, "BROKER-TEST-1", request["source_head"], role="verifier", status_model=wrong_model)
     assert broker.detect_quota_response(root, request, _make_quota_response(request, p_ver_bad_mod)) is None
 
     # Conversation ID variations

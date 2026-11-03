@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import copy
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -12,6 +13,7 @@ try:
         ProposalError,
         RUN_PREFIX_RE,
         SHA_PATTERN,
+        MAX_CONTEXT,
         test_gate_feedback,
     )
 except ImportError:
@@ -19,6 +21,7 @@ except ImportError:
         ProposalError,
         RUN_PREFIX_RE,
         SHA_PATTERN,
+        MAX_CONTEXT,
         test_gate_feedback,
     )
 
@@ -26,11 +29,13 @@ try:
     from scripts.two_site_proposal_runner import (
         bounded_file_bytes,
         validate_correction_feedback,
+        serialize_json, unique_json,
     )
 except ImportError:
     from two_site_proposal_runner import (
         bounded_file_bytes,
         validate_correction_feedback,
+        serialize_json, unique_json,
     )
 
 try:
@@ -90,6 +95,71 @@ REQUIRED_TEST_GATE_ARTIFACT_KEYS = (
     "pre_review_test_sha256",
     "pre_review_test_state",
 )
+
+
+def load_bound_qoder_correction_feedback(root, admitted_task_path, artifacts, worker_info, test_receipt):
+    """Validate the genuine final-Qoder rejection without relabeling Gemini VERIFIED."""
+    root = Path(root).resolve(strict=True)
+    index = artifacts.get("worker_index")
+    if type(index) is not int or index not in (1, 2):
+        raise ProposalError("Qoder correction requires Worker index 1 or 2")
+    prefix, worker, reviewer = (artifacts.get(key) for key in
+                               ("original_run_prefix", "final_worker_run_id", "final_reviewer_run_id"))
+    try:
+        paths = validate_prior_worker_paths(prefix, index, worker, reviewer)
+    except (TypeError, ValueError) as error:
+        raise ProposalError("invalid Qoder correction lineage") from error
+    if any(artifacts.get(key) != value for key, value in paths.items()):
+        raise ProposalError("Qoder correction path binding mismatch")
+    sha = artifacts.get("proposal_sha256")
+    if (type(sha) is not str or not SHA_PATTERN.fullmatch(sha)
+            or worker_info.get("result_sha") != sha or worker_info.get("status", {}).get("run_id") != worker):
+        raise ProposalError("Qoder correction prior Worker mismatch")
+    native_bytes = bounded_file_bytes(root, Path(paths["pre_review_test_path"]), MAX_CONTEXT, "Qoder correction native")
+    if hashlib.sha256(native_bytes).hexdigest() != artifacts.get("pre_review_test_sha256"):
+        raise ProposalError("Qoder correction native receipt hash mismatch")
+    native = validate_test_receipt(unique_json(native_bytes.decode()), sha, require_passed=True)
+    if native != test_receipt:
+        raise ProposalError("Qoder correction native receipt changed")
+    from scripts.two_site_qoder_review import validate_review_receipt, REVIEW_REL
+    qoder = validate_review_receipt(root, Path(admitted_task_path), worker, reviewer, sha,
+        expected_source_head=artifacts.get("source_head"), require_approve=False)
+    value = qoder.get("result", {})
+    if value.get("decision") != "REQUEST_CHANGES" or not value.get("findings"):
+        raise ProposalError("Qoder correction requires genuine REQUEST_CHANGES")
+    qoder_path = REVIEW_REL / (sha + ".json")
+    raw_qoder = bounded_file_bytes(root, qoder_path, MAX_CONTEXT, "Qoder correction receipt")
+    if unique_json(raw_qoder.decode()) != qoder:
+        raise ProposalError("Qoder correction receipt changed")
+    expected_history = {
+        "schema_version": "1.0", "correction_count": index - 1,
+        "worker_run_id": worker, "gemini_reviewer_run_id": reviewer,
+        "proposal_sha256": sha, "pre_review_test_sha256": artifacts["pre_review_test_sha256"],
+        "qoder_review_receipt": qoder_path.as_posix(),
+        "qoder_review_receipt_sha256": hashlib.sha256(raw_qoder).hexdigest(),
+        "decision": "REQUEST_CHANGES",
+    }
+    history_path = Path(".local/two-site-refactor/pipeline") / prefix / f"qoder-review-{index - 1}.json"
+    if bounded_file_bytes(root, history_path, MAX_FEEDBACK_BYTES, "Qoder correction history") != serialize_json(expected_history):
+        raise ProposalError("Qoder correction history or receipt binding mismatch")
+    feedback_path = paths["expected_feedback_path"]
+    raw_feedback = bounded_file_bytes(root, Path(feedback_path), MAX_FEEDBACK_BYTES, "Qoder correction feedback")
+    feedback = validate_correction_feedback(raw_feedback.decode(), sha)
+    expected_feedback = {
+        "reviewer": "qoder", "reviewed_proposal_sha256": sha, "findings": value["findings"],
+        "test_evidence": [f"receipt_sha256={artifacts['pre_review_test_sha256']} proposal_sha256={sha} selector_count={len(native['selectors'])}"],
+    }
+    if feedback != expected_feedback:
+        raise ProposalError("Qoder correction feedback does not match final receipt findings")
+    reviewer_path = Path(paths["reviewer_path"])
+    result_raw = bounded_file_bytes(root, reviewer_path, MAX_CONTEXT, "Qoder correction Gemini result")
+    result = unique_json(result_raw.decode())
+    status = unique_json(bounded_file_bytes(root, reviewer_path.parent / "status.json", MAX_CONTEXT, "Qoder correction Gemini status").decode())
+    if result.get("status") != "VERIFIED" or result.get("findings") or status.get("state") != "VERIFIED":
+        raise ProposalError("Qoder correction must preserve real Gemini VERIFIED")
+    return copy.deepcopy({"feedback": feedback, "feedback_sha": hashlib.sha256(raw_feedback).hexdigest(),
+        "feedback_path": feedback_path, "reviewer_result": result, "reviewer_status": status,
+        "reviewer_sha": hashlib.sha256(result_raw).hexdigest(), "qoder_review": qoder})
 
 
 def load_bound_correction_feedback(

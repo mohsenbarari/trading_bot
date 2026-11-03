@@ -89,7 +89,7 @@ def derive_worker_two_history_base(
         final_reviewer_run_id = artifacts.get("final_reviewer_run_id")
         if not isinstance(final_reviewer_run_id, str):
             raise ProposalError(f"missing or non-string final_reviewer_run_id: {final_reviewer_run_id!r}")
-        reviewer1_id_re = re.compile(rf"^{re.escape(orig_prefix)}-reviewer-1(?:-retry-[12])?$")
+        reviewer1_id_re = re.compile(rf"^{re.escape(orig_prefix)}(?:-reviewer-1|-v1r[12])(?:-retry-[12])?$")
         if not reviewer1_id_re.fullmatch(final_reviewer_run_id):
             raise ProposalError(f"invalid final_reviewer_run_id: {final_reviewer_run_id!r}")
     else:
@@ -208,13 +208,24 @@ def derive_worker_two_history_base(
     fb_reviewer = feedback1.get("reviewer")
     if fb_reviewer == "test-gate":
         needs_reviewer0 = False
-    elif fb_reviewer == "gemini":
+    elif fb_reviewer in ("gemini", "qoder"):
         needs_reviewer0 = True
     elif fb_reviewer == "codex":
         raise ProposalError(f"unsupported original-pipeline history reviewer: {fb_reviewer!r}")
     else:
         raise ProposalError(f"unsupported feedback1 reviewer: {fb_reviewer!r}")
 
+    extra = {}
+    if origin == "REVIEWER" and evidence.get("feedback", {}).get("reviewer") == "qoder":
+        qoder = evidence.get("qoder_review", {})
+        value, bindings = qoder.get("result", {}), qoder.get("bindings", {})
+        if (value.get("decision") != "REQUEST_CHANGES" or value.get("proposal_sha256") != proposal_sha256
+                or value.get("findings") != evidence["feedback"].get("findings")
+                or bindings.get("worker_run_id") != final_worker_run_id
+                or bindings.get("reviewer_run_id") != final_reviewer_run_id
+                or evidence.get("reviewer_result", {}).get("status") != "VERIFIED"):
+            raise ProposalError("Worker2 Qoder correction history is not bound")
+        extra["qoder_review1"] = copy.deepcopy(qoder)
     return {
         "worker0_id": str(worker0_run_id),
         "worker0_run_id": str(worker0_run_id),
@@ -232,4 +243,5 @@ def derive_worker_two_history_base(
         "needs_reviewer0": needs_reviewer0,
         "correction_origin": str(origin),
         "needs_reviewer1": origin == "REVIEWER",
+        **extra,
     }

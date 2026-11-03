@@ -24,11 +24,9 @@ class GenerationCompletionContracts(unittest.TestCase):
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
         self.root, self.task, self.sources = self.fixture.root, self.fixture.task, self.fixture.sources
-        # Keep the existing independently tested router real, choose its Gemini cohort.
-        self.task["task_id"] = next(
-            f"COMPLETION-FIXTURE-{index}" for index in range(1000)
-            if pipeline.expected_role_model("worker", f"COMPLETION-FIXTURE-{index}") == runner.WORKER_MODEL
-        )
+        # Current fixtures carry configured-role snapshots; legacy routing is
+        # exercised separately with the original runtime model and no snapshot.
+        self.task["task_id"] = "COMPLETION-FIXTURE-CONFIGURED"
         self.fixture.save_task()
         self.base = self.root / ".local/two-site-refactor/proposals"
         self.base.mkdir(parents=True)
@@ -191,10 +189,11 @@ class GenerationCompletionContracts(unittest.TestCase):
             proof, status = self.proof(self.worker), self.status(self.worker)
             if mutation == "role-model":
                 events = [json.loads(line) for line in (self.worker / "stream.jsonl").read_text().splitlines()]
-                events[0]["init"]["model"] = runner.MODEL
+                forged_model = "fixture-unconfigured-model"
+                events[0]["init"]["model"] = forged_model
                 raw = ("\n".join(json.dumps(event) for event in events) + "\n").encode()
                 (self.worker / "stream.jsonl").write_bytes(raw)
-                status["model"] = proof["model"] = runner.MODEL
+                status["model"] = proof["model"] = forged_model
                 proof["observations"]["stdout_bytes"] = len(raw)
                 proof["observations"]["stdout_sha256"] = runner.sha(raw)
             else:

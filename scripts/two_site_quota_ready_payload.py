@@ -315,7 +315,7 @@ def validate_quota_ready_payload(
             f"final_reviewer_run_id must be str, got {type(final_reviewer_run_id).__name__}"
         )
     reviewer_match = re.fullmatch(
-        rf"^{re.escape(run_prefix)}-reviewer-{correction_count}(?:-retry-[12])?$",
+        rf"^{re.escape(run_prefix)}(?:-reviewer-{correction_count}|-v{correction_count}r[12])(?:-retry-[12])?$",
         final_reviewer_run_id,
     )
     if not reviewer_match:

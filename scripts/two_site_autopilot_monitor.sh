@@ -52,7 +52,7 @@ else
 fi
 /usr/bin/unlink -- "$tmux_probe" 2>/dev/null || true
 
-supervisor_count="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_codex_autopilot.py --root $integration_root" 2>/dev/null || true)"
+supervisor_count="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_(codex_)?autopilot.py --root $integration_root" 2>/dev/null || true)"
 broker_count="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_provider_broker.py --root $integration_root serve" 2>/dev/null || true)"
 
 state="UNKNOWN"
@@ -96,6 +96,8 @@ if /usr/bin/pgrep -f "$integration_root/scripts/two_site_proposal_pipeline.py" >
   phase="gemini_pipeline"
 elif /usr/bin/pgrep -f "(/codex|/codex-[^/ ]+\.pin) exec .*--cd $integration_root( |$)" >/dev/null 2>&1; then
   phase="codex_coordinator"
+elif /usr/bin/pgrep -f "qodercli .*--cwd $integration_root( |$)" >/dev/null 2>&1; then
+  phase="qoder_coordinator"
 elif [[ "$supervisor_count" -gt 0 ]]; then
   phase="supervisor"
 fi
@@ -459,7 +461,7 @@ if [[ "$restart_eligible" == true ]]; then
     if [[ "$recovery_ok" == true ]]; then
       restart_tmp="$(/usr/bin/mktemp "$report_root/.restart.XXXXXX")"
       if [[ "$recovery_reason" == "provider_broker_missing" ]]; then
-        recheck_supervisor="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_codex_autopilot.py --root $integration_root" 2>/dev/null || true)"
+        recheck_supervisor="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_(codex_)?autopilot.py --root $integration_root" 2>/dev/null || true)"
         recheck_broker="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_provider_broker.py --root $integration_root serve" 2>/dev/null || true)"
         if [[ "$recheck_supervisor" -gt 0 && "$recheck_broker" -eq 0 ]] \
             && /usr/bin/timeout 5 /usr/bin/tmux has-session -t "=$session" 2>/dev/null \
@@ -467,6 +469,7 @@ if [[ "$restart_eligible" == true ]]; then
             && ! [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$integration_root/STOP" || -L "$integration_root/STOP" ]]; then
           printf -v broker_command '%q ' \
             /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
+            TWO_SITE_QODER_FINAL_REVIEW_REQUIRED=1 \
             PYTHONPATH="$integration_root" \
             /usr/bin/python3 "$integration_root/scripts/two_site_provider_broker.py" --root "$integration_root" serve \
             "${broker_quota_args[@]}"

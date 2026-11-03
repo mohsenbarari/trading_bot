@@ -1,285 +1,161 @@
-"""Offline regression tests for zero-echo patch recipe, coordinator prompt guidance, and code_mode."""
+"""Offline zero-echo application contracts for deterministic Qoder helpers."""
+import hashlib
 import json
 from pathlib import Path
-import shutil
-import subprocess
+from unittest.mock import Mock
 
 import pytest
 
+from scripts import two_site_apply_reviewed as apply_helper
 from scripts import two_site_codex_autopilot as ap
+from scripts.two_site_ai_config import AI_CONFIG_REL, AI_RUNTIME_REL
+from tests.two_site_generation_fixture import install_current_contract
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PROMPT_PATH = ROOT / "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md"
-
-NODE_BIN = shutil.which("node")
-if not NODE_BIN:
-    raise RuntimeError("node executable is required but not found in PATH")
-
-REALISTIC_PERSIAN_PATCH = (
-    "*** Begin Patch\n"
-    "*** Update File: config/messages_fa.json\n"
-    "@@\n"
-    '- "greeting": "سلام دنیا",\n'
-    '+ "greeting": "درود به همگی",\n'
-    '+ "description": "این یک وصله آزمایشی است با حروف فارسی و نشانههای یونیکد: گچپژ ۱۲۳",\n'
-    "*** End Patch\n"
-)
+PERSIAN_CONTENT = '{"greeting":"درود به همگی","description":"گچپژ ۱۲۳ — نشانه‌های یونیکد"}\n'
 
 
-def extract_recipe(prompt_text: str) -> str:
-    start_marker = "// BEGIN_ZERO_ECHO_APPLY"
-    end_marker = "// END_ZERO_ECHO_APPLY"
-    start_idx = prompt_text.find(start_marker)
-    if start_idx == -1:
-        raise ValueError(f"Marker {start_marker} not found in prompt")
-    end_idx = prompt_text.find(end_marker, start_idx)
-    if end_idx == -1:
-        raise ValueError(f"Marker {end_marker} not found in prompt")
-    recipe = prompt_text[start_idx + len(start_marker):end_idx].strip()
-    return recipe
+@pytest.fixture
+def prepared_apply(tmp_path, monkeypatch):
+    target = tmp_path / "messages_fa.json"
+    original = '{"greeting":"سلام دنیا"}\n'.encode()
+    target.write_bytes(original)
+    target.chmod(0o640)
+    item = {"path": target.name, "is_new": False,
+            "orig_sha": hashlib.sha256(original).hexdigest(), "new_content": PERSIAN_CONTENT}
+    prepared = ({"head": "a" * 40}, {}, {}, {}, [item])
+    prepare = Mock(return_value=prepared)
+    approval = Mock(return_value={"result": {"decision": "APPROVE"}})
+
+    def postcheck(*_args, **kwargs):
+        assert kwargs == {"applied": True}
+        assert target.read_bytes() == PERSIAN_CONTENT.encode()
+        return {"state": "BYTES_VALID"}
+
+    checked = Mock(side_effect=postcheck)
+    monkeypatch.setattr(apply_helper.packet, "_prepare_proposal", prepare)
+    monkeypatch.setattr(apply_helper.final_review, "validate_review_receipt", approval)
+    monkeypatch.setattr(apply_helper.ct, "review", checked)
+    return tmp_path, target, original, item, prepare, approval, checked
 
 
-def run_recipe_in_node(
-    recipe_code: str,
-    tmp_path: Path,
-    exec_result: dict | None = None,
-    exec_error: str | None = None,
-    apply_error: str | None = None,
-    task: str = "tasks/task-001.json",
-    worker: str = "worker-w1",
-    reviewer: str = "reviewer-r1",
-    sha: str = "a" * 64,
-) -> tuple[subprocess.CompletedProcess, dict]:
-    applied_file = tmp_path / "applied_patch.txt"
-    harness = f"""
-import fs from 'node:fs';
-
-const execCalls = [];
-const applyCalls = [];
-const emittedText = [];
-
-const text = (val) => {{
-  emittedText.push(typeof val === 'string' ? val : JSON.stringify(val));
-}};
-
-const originalLog = console.log;
-console.log = (...args) => {{
-  const line = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
-  emittedText.push(line);
-}};
-
-const task = {json.dumps(task)};
-const worker = {json.dumps(worker)};
-const reviewer = {json.dumps(reviewer)};
-const sha = {json.dumps(sha)};
-
-const tools = {{
-  exec_command: async (opts) => {{
-    execCalls.push(opts);
-    {"throw new Error(" + json.dumps(exec_error) + ");" if exec_error else ("return " + json.dumps(exec_result) + ";")}
-  }},
-  apply_patch: async (patchStr) => {{
-    applyCalls.push(patchStr);
-    fs.writeFileSync({json.dumps(str(applied_file))}, patchStr, 'utf-8');
-    {"throw new Error(" + json.dumps(apply_error) + ");" if apply_error else "return { success: true };"}
-  }}
-}};
-
-let recipeError = null;
-try {{
-{recipe_code}
-}} catch (err) {{
-  recipeError = err?.message || String(err);
-}}
-
-const report = {{
-  execCalls,
-  applyCount: applyCalls.length,
-  emittedText,
-  recipeError,
-}};
-
-originalLog(JSON.stringify(report));
-if (recipeError) {{
-  process.exit(1);
-}}
-"""
-    proc = subprocess.run(
-        [NODE_BIN, "--input-type=module", "-e", harness],
-        capture_output=True,
-        text=True,
-        timeout=15,
-    )
-    report = {}
-    stdout_lines = proc.stdout.strip().splitlines()
-    if stdout_lines:
-        try:
-            report = json.loads(stdout_lines[-1])
-        except json.JSONDecodeError:
-            pass
-    return proc, report
+def invoke_cli(root, monkeypatch):
+    monkeypatch.setattr("sys.argv", ["two_site_apply_reviewed.py", "--root", str(root),
+        "--task", "task.json", "--worker", "worker", "--reviewer", "reviewer", "--sha", "b" * 64])
+    return apply_helper.main()
 
 
-def test_recipe_applies_persian_unicode_patch_zero_echo(tmp_path):
-    prompt_text = PROMPT_PATH.read_text("utf-8")
-    recipe = extract_recipe(prompt_text)
-    proc, report = run_recipe_in_node(
-        recipe,
-        tmp_path,
-        exec_result={"exit_code": 0, "output": REALISTIC_PERSIAN_PATCH},
-        task="tasks/zero-echo-test.json",
-        worker="worker-persian-1",
-        reviewer="reviewer-persian-1",
-        sha="b" * 64,
-    )
-    assert proc.returncode == 0
-    assert report.get("recipeError") is None
-    assert report.get("applyCount") == 1
-
-    applied_file = tmp_path / "applied_patch.txt"
-    assert applied_file.exists()
-    applied_content = applied_file.read_text("utf-8")
-    assert applied_content == REALISTIC_PERSIAN_PATCH
-    assert applied_file.read_bytes() == REALISTIC_PERSIAN_PATCH.encode("utf-8")
-    assert applied_content.endswith("\n")
-
-    assert report.get("emittedText") == []
-    assert "سلام دنیا" not in proc.stdout
-    assert "درود به همگی" not in proc.stdout
-    assert "گچپژ" not in proc.stdout
-    assert REALISTIC_PERSIAN_PATCH not in proc.stdout
-    assert REALISTIC_PERSIAN_PATCH not in proc.stderr
-
-    exec_calls = report.get("execCalls", [])
-    assert len(exec_calls) == 1
-    call = exec_calls[0]
-    assert call.get("max_output_tokens") >= 200000
-    cmd = call.get("cmd", "")
-    assert "patch" in cmd
-    assert "--task tasks/zero-echo-test.json" in cmd
-    assert "--worker worker-persian-1" in cmd
-    assert "--reviewer reviewer-persian-1" in cmd
-    assert f"--sha {'b' * 64}" in cmd
+def test_helper_applies_exact_persian_unicode_bytes_without_echo(prepared_apply, monkeypatch, capsys):
+    root, target, _original, _item, prepare, approval, checked = prepared_apply
+    assert invoke_cli(root, monkeypatch) == 0
+    output = capsys.readouterr()
+    result = json.loads(output.out)
+    assert result["state"] == "APPLIED_BYTES_VERIFIED" and result["git_committed"] is False
+    assert result["changed_paths"] == [target.name]
+    assert target.read_bytes() == PERSIAN_CONTENT.encode()
+    assert target.stat().st_mode & 0o777 == 0o640
+    assert prepare.call_count == 2 and checked.call_count == 1
+    assert approval.call_args.kwargs == {"expected_source_head": "a" * 40, "require_approve": True}
+    assert output.err == "" and "درود" not in output.out and "گچپژ" not in output.out
+    assert PERSIAN_CONTENT not in output.out
 
 
-@pytest.mark.parametrize("bad_result", [
-    {"exit_code": 1, "output": REALISTIC_PERSIAN_PATCH},
-    {"exit_code": 2, "output": REALISTIC_PERSIAN_PATCH},
-    {"output": REALISTIC_PERSIAN_PATCH},
-    {"exit_code": 0, "session_id": "session-abc-123", "output": REALISTIC_PERSIAN_PATCH},
-    {"exit_code": 0, "sessionId": "session-abc-123", "output": REALISTIC_PERSIAN_PATCH},
-    {"exit_code": 0, "output": 123456},
-    {"exit_code": 0, "output": None},
-    {"exit_code": 0, "output": REALISTIC_PERSIAN_PATCH.replace("*** Begin Patch\n", "")},
-    {"exit_code": 0, "output": REALISTIC_PERSIAN_PATCH.replace("*** End Patch\n", "")},
-    {"exit_code": 0, "output": "random string without patch framing"},
-])
-def test_recipe_rejects_malformed_exec_results_without_apply(tmp_path, bad_result):
-    prompt_text = PROMPT_PATH.read_text("utf-8")
-    recipe = extract_recipe(prompt_text)
-    proc, report = run_recipe_in_node(recipe, tmp_path, exec_result=bad_result)
-    assert proc.returncode != 0
-    assert report.get("recipeError") is not None
-    assert report.get("applyCount") == 0
-    assert not (tmp_path / "applied_patch.txt").exists()
+@pytest.mark.parametrize("failure", ["missing", "stale", "changes-required", "ambiguous"])
+def test_missing_or_rejected_approval_never_applies(prepared_apply, monkeypatch, capsys, failure):
+    root, target, original, _item, prepare, approval, checked = prepared_apply
+    approval.side_effect = apply_helper.final_review.QoderReviewError(failure)
+    assert invoke_cli(root, monkeypatch) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "APPLY_FAILED" and result["applied_paths"] == []
+    assert result["requires_reconciliation"] is False
+    assert target.read_bytes() == original and prepare.call_count == 1
+    checked.assert_not_called()
 
 
-def test_recipe_fails_on_rejected_exec_promise_without_apply(tmp_path):
-    prompt_text = PROMPT_PATH.read_text("utf-8")
-    recipe = extract_recipe(prompt_text)
-    proc, report = run_recipe_in_node(recipe, tmp_path, exec_error="helper execution failed")
-    assert proc.returncode != 0
-    assert "helper execution failed" in str(report.get("recipeError"))
-    assert report.get("applyCount") == 0
-    assert not (tmp_path / "applied_patch.txt").exists()
+@pytest.mark.parametrize("mutation", ["path-escape", "absolute-path", "wrong-sha", "wrong-type", "invalid-utf8"])
+def test_malformed_prepared_bytes_are_not_applied(prepared_apply, monkeypatch, capsys, mutation):
+    root, target, original, item, _prepare, _approval, checked = prepared_apply
+    if mutation == "path-escape":
+        item["path"] = "../escape.json"
+    elif mutation == "absolute-path":
+        item["path"] = str(target)
+    elif mutation == "wrong-sha":
+        item["orig_sha"] = "c" * 64
+    elif mutation == "wrong-type":
+        item["new_content"] = 123
+    else:
+        item["new_content"] = "\ud800"
+    assert invoke_cli(root, monkeypatch) == 2
+    output = capsys.readouterr()
+    result = json.loads(output.out)
+    assert result["state"] == "APPLY_FAILED" and result["attempted_paths"] == []
+    assert target.read_bytes() == original and PERSIAN_CONTENT not in output.out
+    checked.assert_not_called()
 
 
-def test_recipe_propagates_rejected_apply_promise(tmp_path):
-    prompt_text = PROMPT_PATH.read_text("utf-8")
-    recipe = extract_recipe(prompt_text)
-    proc, report = run_recipe_in_node(
-        recipe,
-        tmp_path,
-        exec_result={"exit_code": 0, "output": REALISTIC_PERSIAN_PATCH},
-        apply_error="disk read-only on apply",
-    )
-    assert proc.returncode != 0
-    assert "disk read-only on apply" in str(report.get("recipeError"))
-    assert report.get("applyCount") == 1
+def test_helper_failure_is_propagated_without_payload_echo(prepared_apply, monkeypatch, capsys):
+    root, target, original, _item, prepare, approval, checked = prepared_apply
+    prepare.side_effect = RuntimeError(PERSIAN_CONTENT)
+    assert invoke_cli(root, monkeypatch) == 2
+    output = capsys.readouterr()
+    assert json.loads(output.out)["code"] == "RuntimeError"
+    assert target.read_bytes() == original and PERSIAN_CONTENT not in output.out + output.err
+    approval.assert_not_called()
+    checked.assert_not_called()
 
 
-def test_prompt_contains_coordinator_guidance_and_preserves_gates():
-    prompt_text = PROMPT_PATH.read_text("utf-8")
-
-    assert "Do not repeatedly discover already-documented helper APIs by reading helper source" in prompt_text
-    assert "use\n   documented commands, inspect exact source only for an actual error or missing contract" in prompt_text or \
-           "use documented commands, inspect exact source only for an actual error or missing contract" in prompt_text.replace("\n   ", " ")
-    assert "For coverage discovery, start with exact files from previous next_action and bounded" in prompt_text
-    assert "not broad matches of common words that dump many fixture/assertion lines" in prompt_text
-    assert "Preserve all mandatory skill/memory/Stage/Assignment startup and dependency-source reads" in prompt_text
-
-    assert "BEGIN_ZERO_ECHO_APPLY" in prompt_text
-    assert "END_ZERO_ECHO_APPLY" in prompt_text
-    assert "tools.exec_command" in prompt_text
-    assert "max_output_tokens: 200000" in prompt_text
-    assert "tools.apply_patch(result.output)" in prompt_text
-    assert "Never call text(result), text(result.output), console.log, shell cat/tee" in prompt_text
-
-    assert "python3 scripts/two_site_cycle_packet.py packet --task <path> --worker <id>" in prompt_text
-    assert "(use --full only when full candidate context is needed; all changed code must be reviewed)" in prompt_text
-    assert "Rerun python3 scripts/two_site_cycle_tools.py review --task <path> --worker <id>" in prompt_text
-    assert "--reviewer <id> --sha <sha> --applied BEFORE staging" in prompt_text
-    assert "inspect git diff --stat / --name-status / --check and exact staged paths/modes, without reprinting" in prompt_text
-    assert "Run actual focused tests plus proportional regression" in prompt_text
-    assert "Never claim tests not run" in prompt_text
-    assert "Use gpt-6.1-sol/xhigh" in prompt_text
-
-    assert "Use final Git metadata escalation only for narrowly scoped git add -- <exact accepted proposal paths>" in prompt_text
-    assert "Prohibit git add -A, git add ., globs, unrelated paths" in prompt_text
-    assert "single-parent commit on refactor/two-site-architecture" in prompt_text
+def test_write_failure_is_propagated_without_source_echo(prepared_apply, monkeypatch, capsys):
+    root, target, original, _item, _prepare, _approval, checked = prepared_apply
+    monkeypatch.setattr(apply_helper, "_stage", Mock(side_effect=OSError(PERSIAN_CONTENT)))
+    assert invoke_cli(root, monkeypatch) == 2
+    output = capsys.readouterr()
+    assert json.loads(output.out)["code"] == "OSError"
+    assert target.read_bytes() == original and PERSIAN_CONTENT not in output.out + output.err
+    checked.assert_not_called()
 
 
-def test_prompt_size_growth_is_bounded():
-    prompt_text = PROMPT_PATH.read_text("utf-8")
-    prompt_bytes = len(prompt_text.encode("utf-8"))
-    assert prompt_bytes < ap.MAX_PROMPT_BYTES
-    # Current mandatory safety/workflow clauses measure 17262 bytes; leaves <738 bytes headroom.
-    assert prompt_bytes < 18000
-    recipe = extract_recipe(prompt_text)
-    assert len(recipe.encode("utf-8")) < 2000
+def test_prompt_uses_deterministic_helpers_and_preserves_gates():
+    prompt = PROMPT_PATH.read_text()
+    assert "Do not repeatedly discover already-documented helper APIs by reading helper source" in prompt
+    assert "Preserve all mandatory skill/memory/Stage/Assignment startup and dependency-source reads" in prompt
+    review = prompt.index("python3 scripts/two_site_qoder_review.py --task")
+    apply = prompt.index("python3 scripts/two_site_apply_reviewed.py --task")
+    staging = prompt.index("Use ordinary Bash git add -- <exact accepted proposal paths>")
+    assert review < apply < staging
+    assert "bound APPROVE verdict" in prompt and "missing, stale or ambiguous approval" in prompt
+    assert "Never print, manually rewrite or regenerate" in prompt
+    assert "--reviewer <id> --sha <sha> --applied BEFORE staging" in prompt
+    assert "Never claim tests not run" in prompt
+    assert "Supervisor exact-proposal validation" in prompt
+    assert "functions.exec" not in prompt and "tools.apply_patch" not in prompt
+    assert "require_escalated" not in prompt and "code_mode" not in prompt
+    assert "signing-policy bypass" in prompt and "hooks bypass" in prompt
 
 
-def test_codex_command_enables_code_mode_and_preserves_arguments(tmp_path):
-    codex_bin = tmp_path / "codex"
-    root_dir = tmp_path / "repo"
-    run_dir = tmp_path / "run"
-    prompt_str = "prompt instructions for test"
+def test_prompt_size_remains_bounded():
+    # The old 18KB snapshot budget predated independent Qoder review and its
+    # containment/native-ownership contracts. The runtime bound stays enforced.
+    assert len(PROMPT_PATH.read_bytes()) < ap.MAX_PROMPT_BYTES
 
-    cmd = ap.codex_command(codex_bin, root_dir, run_dir, prompt_str)
 
-    assert cmd.count("--enable") == 1
-    enable_idx = cmd.index("--enable")
-    assert cmd[enable_idx + 1] == "code_mode"
-
-    assert cmd[0] == str(codex_bin)
-    assert cmd[1] == "exec"
-    assert "--model" in cmd
-    model_idx = cmd.index("--model")
-    assert cmd[model_idx + 1] == ap.MODEL
-    assert f'model_reasoning_effort="{ap.REASONING}"' in cmd
-    assert ap.MODEL == "gpt-6.1-sol"
-    assert ap.REASONING == "xhigh"
-
-    assert "--approve-for-me" in cmd
-    assert "--ephemeral" in cmd
-    assert "--json" in cmd
-    assert "--cd" in cmd
-    cd_idx = cmd.index("--cd")
-    assert cmd[cd_idx + 1] == str(root_dir)
-    assert "--output-schema" in cmd
-    schema_idx = cmd.index("--output-schema")
-    assert cmd[schema_idx + 1] == str(root_dir / ap.SCHEMA_REL)
-    assert "--output-last-message" in cmd
-    output_idx = cmd.index("--output-last-message")
-    assert cmd[output_idx + 1] == str(run_dir / "result.json")
-    assert cmd[-1] == prompt_str
+def test_active_coordinator_command_uses_configured_qoder_without_codex_js(tmp_path):
+    install_current_contract(tmp_path)
+    tool = tmp_path / "qoder-fixture"
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    run = tmp_path / "run"
+    run.mkdir()
+    runtime = tmp_path / AI_RUNTIME_REL
+    runtime.parent.mkdir(parents=True, exist_ok=True)
+    runtime.write_text(json.dumps({"schema_version": 1, "coordinator": {
+        "path": str(tool), "version": "fixture", "sha256": "a" * 64}}))
+    runtime.chmod(0o600)
+    settings = json.loads((tmp_path / AI_CONFIG_REL).read_text())["roles"]["coordinator"]
+    command = ap.coordinator_command(tmp_path, tool, run, "bounded coordinator prompt")
+    assert command[0] == str(tool)
+    assert command[command.index("--model") + 1] == settings["model"]
+    assert command[command.index("--reasoning-effort") + 1] == settings["reasoning_effort"]
+    assert command[-1] == "--print" and "bounded coordinator prompt" not in command
+    assert "--no-session-persistence" in command and "--strict-mcp-config" in command
+    assert "code_mode" not in command and "--approve-for-me" not in command

@@ -14,7 +14,7 @@ Usage:
     --bundle <RELATIVE_BUNDLE_PATH> --accepted-head <FULL_SHA> \
     --closeout-head <FULL_SHA>
 
-The review mode asks a fresh read-only Codex reviewer to authorize the exact staged
+The review mode asks a fresh read-only Qoder reviewer to authorize the exact staged
 mechanical closeout patch. The verification mode proves that the resulting commit is
 the unchanged, single-parent child authorized by that receipt.
 EOF
@@ -33,10 +33,10 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Gi
 repo_root="$(realpath -e "$repo_root")"
 schema_rel="docs/refactor/two-server/templates/closeout-review.schema.json"
 schema_path="$repo_root/$schema_rel"
-source_authorization="$repo_root/.local/two-site-refactor/authorizations/CODEX_SOURCE_REVIEW.md"
-codex_bin="$(command -v codex 2>/dev/null || true)"
-codex_model="gpt-6-sol"
-codex_reasoning_effort="xhigh"
+source_authorization="$repo_root/.local/two-site-refactor/authorizations/QODER_SOURCE_REVIEW.md"
+review_bridge="$repo_root/scripts/two_site_review_bridge.py"
+# CODEX_FINAL_REVIEWER is a historical SCHEMA_ROLE; execution is Qoder.
+
 verify_commit=false
 stage_id=""
 assignment_id=""
@@ -106,7 +106,7 @@ jq -e --arg stage "$stage_id" --arg assignment "$assignment_id" --arg head "$acc
 validate_source_authorization() {
   test -s "$source_authorization" &&
     grep -Fxq 'authorization: APPROVED' "$source_authorization" &&
-    grep -Fxq 'scope: TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_OPENAI_CODEX' "$source_authorization"
+    grep -Fxq 'scope: TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_QODER' "$source_authorization"
 }
 
 validate_exact_paths() {
@@ -205,8 +205,8 @@ if $verify_commit; then
 fi
 
 test -z "$closeout_head" || die "--closeout-head is valid only with --verify-commit"
-test -n "$codex_bin" && test -x "$codex_bin" || die "required command is unavailable: codex"
-"$codex_bin" login status >/dev/null 2>&1 || die "Codex CLI is not authenticated"
+test -f "$review_bridge" || die "Qoder review bridge is missing"
+/usr/bin/python3 "$review_bridge" --root "$repo_root" --check >/dev/null || die "Qoder CLI is not ready"
 validate_source_authorization || die "explicit source-review authorization is missing"
 test -f "$schema_path" || die "closeout schema is missing"
 jq -e . "$schema_path" >/dev/null || die "closeout schema is not valid JSON"
@@ -249,14 +249,15 @@ and no source/test/runtime/external action is included. Return only schema-valid
 The proposed_patch_sha256 must equal $patch_sha256. Any uncertainty fails closed.
 EOF
 
-PYTHONDONTWRITEBYTECODE=1 TMPDIR="$tmp_dir" "$codex_bin" exec \
-  --model "$codex_model" \
-  --config "model_reasoning_effort=\"$codex_reasoning_effort\"" \
-  --cd "$repo_root" --sandbox read-only --ephemeral \
-  --output-schema "$schema_path" --output-last-message "$raw_receipt" "$review_prompt"
+{
+  printf '%s\n' "$review_prompt"
+  printf '\nMACHINE_GENERATED_EXACT_STAGED_CLOSEOUT_DIFF:\n'
+  git -C "$repo_root" diff --cached --binary --full-index --no-ext-diff "$accepted_head"
+} | PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$review_bridge" --root "$repo_root" \
+  --schema "$schema_path" --output-last-message "$raw_receipt"
 
-test -s "$raw_receipt" || die "Codex did not produce a closeout receipt"
-jq -e . "$raw_receipt" >/dev/null || die "Codex closeout receipt is not valid JSON"
+test -s "$raw_receipt" || die "Qoder did not produce a closeout receipt"
+jq -e . "$raw_receipt" >/dev/null || die "Qoder closeout receipt is not valid JSON"
 jq -e --arg stage "$stage_id" --arg assignment "$assignment_id" \
   --arg head "$accepted_head" --arg patch "$patch_sha256" '
     .schema_version == "1.0" and
@@ -272,7 +273,7 @@ jq -e --arg stage "$stage_id" --arg assignment "$assignment_id" \
       .decision.commit_authorized == true and
       all(.findings[]; .severity != "CRITICAL" and .severity != "HIGH")
     else .decision.commit_authorized == false end)
-  ' "$raw_receipt" >/dev/null || die "Codex closeout receipt contradicts mandatory gates"
+  ' "$raw_receipt" >/dev/null || die "Qoder closeout receipt contradicts mandatory gates"
 
 reviewed_at="$(jq -r .reviewed_at_utc "$raw_receipt")"
 reviewed_epoch="$(date -u -d "$reviewed_at" +%s 2>/dev/null)" || die "review timestamp is invalid"
@@ -284,6 +285,10 @@ validate_exact_paths cached
 
 receipt_tmp="$bundle_abs/.CODEX_CLOSEOUT_PREACTION.json.tmp"
 jq -S . "$raw_receipt" >"$receipt_tmp"
+execution_tmp="$bundle_abs/.CODEX_CLOSEOUT_PREACTION.execution.json.tmp"
+jq --arg published "$(sha256sum "$receipt_tmp" | awk '{print $1}')" \
+  '. + {published_receipt_sha256: $published}' "$raw_receipt.execution.json" >"$execution_tmp"
+mv -f -- "$execution_tmp" "$bundle_abs/CODEX_CLOSEOUT_PREACTION.execution.json"
 mv -f -- "$receipt_tmp" "$closeout_receipt"
 printf 'STAGE_CLOSEOUT_PREACTION=%s\n' "$(jq -r .verdict "$closeout_receipt")"
 printf 'PATCH_SHA256=%s\n' "$patch_sha256"

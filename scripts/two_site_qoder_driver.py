@@ -1,0 +1,257 @@
+"""Narrow Qoder headless adapter; acceptance and Git remain controller gates."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import selectors
+import signal
+import stat
+import subprocess
+import time
+
+from scripts.two_site_ai_config import load_runtime_config
+
+MAX_STREAM_BYTES = 16_000_000
+MAX_RESULT_BYTES = 64_000
+SETTINGS = {"general": {"enableAutoUpdate": False}}
+TOOLS = {"coordinator": ("Bash", "Read", "Edit", "Write", "Glob", "Grep"),
+         "final_reviewer": ("Read", "Glob", "Grep")}
+
+
+class QoderError(ValueError):
+    """A Qoder identity, lifecycle or result check failed."""
+
+
+def _need(ok: object, code: str) -> None:
+    if not ok:
+        raise QoderError(code)
+
+
+def _pairs(items):
+    value = {}
+    for key, item in items:
+        _need(key not in value, "QODER_DUPLICATE_JSON_KEY")
+        value[key] = item
+    return value
+
+
+def _json(raw: str | bytes):
+    def reject(_value):
+        raise QoderError("QODER_NONFINITE_JSON")
+    try:
+        return json.loads(raw, object_pairs_hook=_pairs, parse_constant=reject)
+    except (ValueError, UnicodeError) as error:
+        raise QoderError("QODER_INVALID_JSON") from error
+
+
+def _regular(path: Path, maximum: int, *, executable: bool = False) -> bytes:
+    path = Path(path)
+    descriptor = None
+    try:
+        _need(path.is_absolute() and path.resolve(strict=True) == path, "QODER_PATH_ALIAS")
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        before = os.fstat(descriptor)
+        _need(stat.S_ISREG(before.st_mode) and before.st_uid == os.geteuid()
+              and before.st_nlink == 1 and not before.st_mode & 0o022
+              and 0 < before.st_size <= maximum, "QODER_FILE_CUSTODY")
+        _need(not executable or bool(before.st_mode & 0o111), "QODER_NOT_EXECUTABLE")
+        parts = []
+        remaining = maximum + 1
+        while remaining:
+            block = os.read(descriptor, min(1024 * 1024, remaining))
+            if not block:
+                break
+            parts.append(block); remaining -= len(block)
+        raw = b"".join(parts)
+        fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns")
+        after = os.fstat(descriptor); final = path.lstat()
+        _need(len(raw) == before.st_size and all(getattr(before, k) == getattr(after, k)
+              == getattr(final, k) for k in fields), "QODER_FILE_CHANGED")
+        return raw
+    except QoderError:
+        raise
+    except OSError as error:
+        raise QoderError("QODER_FILE_UNREADABLE") from error
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def _probe(command: list[str], temporary: Path) -> bytes:
+    """Bound status/version in RAM; never retain account metadata or diagnostics."""
+    process = subprocess.Popen(command, cwd=temporary, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    selector = selectors.DefaultSelector(); output = bytearray(); total = 0
+    try:
+        for stream in (process.stdout, process.stderr):
+            selector.register(stream, selectors.EVENT_READ)
+        deadline = time.monotonic() + 15
+        while selector.get_map():
+            _need(time.monotonic() < deadline, "QODER_PROBE_TIMEOUT")
+            for key, _ in selector.select(min(0.1, max(0, deadline-time.monotonic()))):
+                block = os.read(key.fileobj.fileno(), 4096)
+                if not block:
+                    selector.unregister(key.fileobj); continue
+                total += len(block)
+                _need(total <= 65536, "QODER_PROBE_OUTPUT_BOUND")
+                if key.fileobj is process.stdout:
+                    output.extend(block)
+        _need(process.wait(timeout=max(0.1, deadline-time.monotonic())) == 0, "QODER_PROBE_FAILED")
+        return bytes(output)
+    finally:
+        selector.close()
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=10)
+        process.stdout.close(); process.stderr.close()
+
+
+def _runtime(runtime: dict) -> dict:
+    _need(type(runtime) is dict, "QODER_RUNTIME_SHAPE")
+    value = runtime.get("coordinator", runtime)
+    _need(type(value) is dict and {"path", "version", "sha256"} <= set(value)
+          and set(value) <= {"path", "version", "sha256", "config_dir"}, "QODER_RUNTIME_FIELDS")
+    _need(all(type(value[k]) is str and value[k] for k in ("path", "version", "sha256"))
+          and re.fullmatch(r"[0-9a-f]{64}", value["sha256"]), "QODER_RUNTIME_IDENTITY")
+    return value
+
+
+def _settings_args(runtime: dict) -> list[str]:
+    result = ["--settings", json.dumps(SETTINGS, separators=(",", ":"))]
+    if runtime.get("config_dir"):
+        directory = Path(runtime["config_dir"])
+        _need(directory.is_absolute() and directory.resolve(strict=True) == directory
+              and directory.is_dir(), "QODER_CONFIG_DIRECTORY")
+        result += ["--config-dir", str(directory)]
+    return result
+
+
+def qoder_identity(path: Path, runtime: dict, temporary: Path, roleconfig: dict | None = None) -> dict:
+    runtime = _runtime(runtime); path = Path(path)
+    _need(str(path) == runtime["path"], "QODER_RUNTIME_PATH_MISMATCH")
+    before = _regular(path, 512 * 1024 * 1024, executable=True)
+    digest = hashlib.sha256(before).hexdigest(); del before
+    _need(digest == runtime["sha256"], "QODER_BINARY_PIN")
+    prefix = [str(path), *_settings_args(runtime)]
+    version = _probe(prefix + ["--version"], temporary).decode("utf-8").strip()
+    _need(version == runtime["version"], "QODER_VERSION_PIN")
+    status = _json(_probe(prefix + ["status", "--output", "json"], temporary))
+    _need(type(status) is dict and status.get("logged_in") is True, "QODER_NOT_LOGGED_IN")
+    _need(hashlib.sha256(_regular(path, 512 * 1024 * 1024, executable=True)).hexdigest() == digest,
+          "QODER_BINARY_CHANGED")
+    identity = {"provider": "qoder", "path": str(path), "version": version,
+                "sha256": digest, "logged_in": True, "auto_update_enabled": False}
+    if roleconfig is not None:
+        _role(roleconfig)
+        identity.update(model=roleconfig["model"], reasoning=roleconfig["reasoning_effort"])
+    return identity
+
+
+def _role(roleconfig: dict) -> None:
+    _need(type(roleconfig) is dict and roleconfig.get("provider") == "qoder"
+          and type(roleconfig.get("model")) is str and roleconfig["model"]
+          and type(roleconfig.get("reasoning_effort")) is str
+          and roleconfig["reasoning_effort"] in {"low", "medium", "high", "xhigh", "max"}, "QODER_ROLE_CONFIG")
+
+
+def qoder_command(path: Path, root: Path, run_dir: Path, prompt: str, roleconfig: dict,
+                  *, role: str = "coordinator") -> list[str]:
+    """Caller supplies exact prompt bytes to stdin and owns bounded capture/exit."""
+    _role(roleconfig); _need(role in TOOLS, "QODER_ROLE")
+    limit = 320000 if role == "final_reviewer" else 160000
+    _need(type(prompt) is str and 0 < len(prompt.encode("utf-8")) <= limit, "QODER_PROMPT_BOUND")
+    root = Path(root).resolve(strict=True); run_dir = Path(run_dir).resolve(strict=True)
+    _need(run_dir.is_relative_to(root) and run_dir != root, "QODER_RUN_DIRECTORY")
+    runtime = _runtime(load_runtime_config(root)); _need(str(path) == runtime["path"], "QODER_RUNTIME_PATH_MISMATCH")
+    return [str(path), *_settings_args(runtime), "--cwd", str(root), "--model", roleconfig["model"],
+        "--reasoning-effort", roleconfig["reasoning_effort"], "--thinking", "adaptive",
+        "--output-format", "stream-json", "--no-session-persistence", "--permission-mode", "auto",
+        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+        "--tools", *TOOLS[role], "--print"]
+
+
+def _tool_blocks(event: dict):
+    message = event.get("message", {})
+    if type(message) is dict and type(message.get("content")) is list:
+        for block in message["content"]:
+            if type(block) is dict and block.get("type") == "tool_use":
+                yield block
+    wrapped = event.get("event", {})
+    if type(wrapped) is dict:
+        block = wrapped.get("content_block", {})
+        if type(block) is dict and block.get("type") == "tool_use":
+            yield block
+
+
+def finalize_qoder_output(run_dir: Path, *, stream_filename: str = "stream.jsonl",
+                          expected_model: str | None = None, role: str = "coordinator",
+                          write_result: bool = True) -> dict:
+    _need(type(write_result) is bool, "QODER_WRITE_POLICY")
+    _need(role in TOOLS and stream_filename in {"stream.jsonl", "qoder.stdout", "codex.stdout"}, "QODER_STREAM_NAME")
+    run_dir = Path(run_dir).resolve(strict=True)
+    raw = _regular(run_dir / stream_filename, MAX_STREAM_BYTES)
+    _need(raw.endswith(b"\n"), "QODER_TRUNCATED_STREAM")
+    events = [_json(line) for line in raw.splitlines() if line.strip()]
+    _need(events and all(type(event) is dict for event in events), "QODER_EVENT_SHAPE")
+    initial = [event for event in events if event.get("type") == "system" and event.get("subtype") == "init"]
+    terminal = [event for event in events if event.get("type") == "result"]
+    _need(len(initial) == len(terminal) == 1 and events[0] is initial[0] and events[-1] is terminal[0],
+          "QODER_TERMINAL_CARDINALITY")
+    session = initial[0].get("session_id")
+    _need(type(session) is str and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", session), "QODER_SESSION_ID")
+    if expected_model is not None:
+        _need(initial[0].get("model") == expected_model, "QODER_MODEL_MISMATCH")
+    advertised = initial[0].get("tools")
+    if advertised is not None:
+        # Qoder advertises intrinsic discovery even with an empty tool list.
+        # Advertisement is not permission to execute MCP or delegation tools.
+        discovery = ("mcp_call", "mcp_get", "mcp_list")
+        _need(type(advertised) is list and all(type(name) is str and name in (*TOOLS[role], *discovery) for name in advertised),
+              "QODER_UNEXPECTED_TOOLS")
+    _need(initial[0].get("mcp_servers", []) == [] and initial[0].get("plugins", []) == [],
+          "QODER_UNEXPECTED_EXTENSIONS")
+    for event in events:
+        _need(event.get("type") in {"system", "assistant", "user", "stream_event", "result"},
+              "QODER_EVENT_TYPE")
+        _need(event.get("session_id", session) == session, "QODER_CROSS_SESSION")
+        for nested in (event.get("message"), event.get("event")):
+            if type(nested) is dict:
+                _need(nested.get("session_id", session) == session, "QODER_CROSS_SESSION")
+        if event.get("type") in {"assistant", "user"}:
+            _need(type(event.get("message")) is dict
+                  and type(event["message"].get("content")) is list, "QODER_MESSAGE_SHAPE")
+        _need(event.get("type") not in {"error", "tool_error"}
+              and event.get("subtype") not in {"error", "error_during_execution", "error_max_turns"}, "QODER_ERROR_EVENT")
+        for block in _tool_blocks(event):
+            _need(block.get("name") in TOOLS[role], "QODER_FORBIDDEN_TOOL")
+    result = terminal[0]
+    _need(result.get("subtype") == "success" and result.get("is_error") is False
+          and result.get("session_id") == session and not result.get("permission_denials")
+          and not result.get("error") and result.get("stop_reason") == "end_turn", "QODER_NOT_SUCCESS")
+    if "num_turns" in result:
+        _need(type(result["num_turns"]) is int and result["num_turns"] >= 1, "QODER_TURN_COUNT")
+    _need(type(result.get("result")) is str, "QODER_MISSING_RESULT")
+    value = _json(result["result"])
+    _need(type(value) is dict, "QODER_RESULT_OBJECT")
+    payload = (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    _need(len(payload) <= MAX_RESULT_BYTES, "QODER_RESULT_BOUND")
+    if not write_result:
+        return value
+    _need(not os.path.lexists(run_dir / "result.json"), "QODER_RESULT_EXISTS")
+    descriptor = os.open(run_dir / "result.json", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        view = memoryview(payload)
+        while view:
+            count = os.write(descriptor, view); _need(count > 0, "QODER_RESULT_SHORT_WRITE"); view = view[count:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    descriptor = os.open(run_dir, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return value

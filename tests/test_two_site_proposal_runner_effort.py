@@ -49,10 +49,11 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
     def test_effort_constant_value(self) -> None:
         """Prove that executable constants are derived from the tracked contract."""
         contract = runner.load_runtime_contract(runner.ROOT)
-        self.assertEqual(runner.EFFORT, contract["effort"])
-        self.assertEqual(runner.WORKER_MODEL, contract["worker_model"])
-        self.assertEqual(runner.WORKER_EFFORT, contract["worker_effort"])
-        self.assertEqual(runner.MODEL, contract["model"])
+        roles = runner.configured_gemini_roles(runner.ROOT)
+        self.assertEqual(runner.EFFORT, roles["reviewer"]["reasoning_effort"])
+        self.assertEqual(runner.WORKER_MODEL, roles["worker"]["model"])
+        self.assertEqual(runner.WORKER_EFFORT, roles["worker"]["reasoning_effort"])
+        self.assertEqual(runner.MODEL, roles["reviewer"]["model"])
         self.assertEqual(runner.EXPECTED_CLI_VERSION, contract["cli_version"])
         self.assertEqual(runner.EXPECTED_CLI_SHA256, contract["cli_sha256"])
         self.assertIsInstance(runner.EFFORT, str)
@@ -71,13 +72,18 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         contract = runner.validate_runtime_contract(runner.ROOT)
         self.assertEqual(contract["model"], "gemini-4-argon-high")
         self.assertEqual(contract["effort"], "high")
-        self.assertEqual(contract["worker_model"], "gemini-4-argon-medium")
-        self.assertEqual(contract["worker_effort"], "medium")
+        # Historical model fields remain provenance for retained proof hashes.
+        self.assertEqual(contract, runner.load_runtime_contract(runner.ROOT))
+        roles = runner.configured_gemini_roles(runner.ROOT)
+        self.assertEqual(roles["worker"], roles["reviewer"])
+        self.assertEqual(roles["worker"]["reasoning_effort"], "high")
 
     def _execute_mock_run(
         self,
         role: str = "worker",
         effort_override: str | None = None,
+        model_override: str | None = None,
+        change_config_after_prepare: bool = False,
         simulate_error: bool = False,
         task_id: str = "GEMINI-TEST-EFFORT-001",
         policy: WorkerRoutingPolicy | Exception | type[Exception] | None = None,
@@ -87,6 +93,15 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             install_current_contract(temp_path)
+            if effort_override is not None or model_override is not None:
+                config_path = temp_path / runner.AI_CONFIG_REL
+                config = json.loads(config_path.read_text(encoding="utf-8"))
+                role_config = config["roles"]["reviewer" if role == "verifier" else role]
+                if effort_override is not None:
+                    role_config["reasoning_effort"] = effort_override
+                if model_override is not None:
+                    role_config["model"] = model_override
+                config_path.write_text(json.dumps(config), encoding="utf-8")
             task_file = temp_path / "task.json"
             task_file.write_text("{}", encoding="utf-8")
             cli_file = temp_path / "mock_agy"
@@ -151,6 +166,11 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                 **_kwargs: object,
             ) -> runner.PreparedProfile:
                 self.assertTrue(Path(workspace).is_dir())
+                if change_config_after_prepare:
+                    config_path = temp_path / runner.AI_CONFIG_REL
+                    updated = json.loads(config_path.read_text(encoding="utf-8"))
+                    updated["roles"]["worker"]["model"] = "fixture-late-config"
+                    config_path.write_text(json.dumps(updated), encoding="utf-8")
                 return runner.PreparedProfile(
                     conversation_id="conv-test-effort-42",
                     workspace=Path(workspace),
@@ -199,9 +219,6 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                 mock.patch.object(runner, "validate_runtime_contract", return_value=runner.RUNTIME_CONTRACT),
                 mock.patch("subprocess.Popen", popen_mock),
             ]
-            if effort_override is not None:
-                target = "WORKER_EFFORT" if role == "worker" else "EFFORT"
-                patches.append(mock.patch.object(runner, target, effort_override))
             loader_mock: mock.MagicMock | None = None
             if isinstance(policy, Exception) or (
                 isinstance(policy, type) and issubclass(policy, Exception)
@@ -234,23 +251,6 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                     ])
                     self.assertEqual(popen_mock.call_count, 1)
                     self.assertEqual(capture_mock.call_count, 1)
-                elif isinstance(policy, Exception) or (
-                    isinstance(policy, type) and issubclass(policy, Exception)
-                ):
-                    expected_exc = policy if isinstance(policy, type) else type(policy)
-                    with self.assertRaises(expected_exc):
-                        _invoke_run()
-                    if role == "worker":
-                        self.assertIsNotNone(loader_mock)
-                        loader_mock.assert_called_once()
-                    prepare_profile_mock.assert_not_called()
-                    validate_profile_mock.assert_not_called()
-                    popen_mock.assert_not_called()
-                    capture_mock.assert_not_called()
-                    self.assertEqual(len(captured_commands), 0)
-                    run_dir = proposals_dir / run_id
-                    self.assertFalse(run_dir.exists())
-                    return captured_commands, {}
                 else:
                     out = _invoke_run()
                     self.assertEqual(out, proposals_dir / run_id)
@@ -263,6 +263,8 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
                     ])
                     self.assertEqual(popen_mock.call_count, 1)
                     self.assertEqual(capture_mock.call_count, 1)
+                if loader_mock is not None:
+                    loader_mock.assert_not_called()
 
             self.assertEqual(len(captured_commands), 1)
             cmd = captured_commands[0]
@@ -290,6 +292,9 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
             status_path = proposals_dir / run_id / "status.json"
             self.assertTrue(status_path.is_file())
             status_data = json.loads(status_path.read_text(encoding="utf-8"))
+            if status_data["state"] != "BLOCKED":
+                proof = json.loads((proposals_dir / run_id / runner._GENERATION_PROOF_NAME).read_text())
+                self.assertEqual(proof["model_config_sha256"], status_data["model_config_sha256"])
             return captured_commands, status_data
 
     def test_worker_command_and_metadata_uses_contract_effort(self) -> None:
@@ -300,12 +305,13 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         self.assertIn("--effort", command)
         idx = command.index("--effort")
         model_idx = command.index("--model")
-        self.assertEqual(command[model_idx + 1], runner.RUNTIME_CONTRACT["worker_model"])
-        self.assertEqual(status_data["model"], runner.RUNTIME_CONTRACT["worker_model"])
-        self.assertEqual(command[idx + 1], runner.RUNTIME_CONTRACT["worker_effort"])
+        configured = runner.configured_gemini_role(runner.ROOT, "worker")
+        self.assertEqual(command[model_idx + 1], configured["model"])
+        self.assertEqual(status_data["model"], configured["model"])
+        self.assertEqual(command[idx + 1], configured["reasoning_effort"])
         self.assertEqual(command[idx + 1], runner.WORKER_EFFORT)
         self.assertIn("effort", status_data)
-        self.assertEqual(status_data["effort"], runner.RUNTIME_CONTRACT["worker_effort"])
+        self.assertEqual(status_data["effort"], configured["reasoning_effort"])
         self.assertEqual(status_data["effort"], runner.WORKER_EFFORT)
 
     def test_verifier_command_and_metadata_uses_contract_effort(self) -> None:
@@ -326,7 +332,7 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
 
     def test_dynamic_effort_constant_propagation(self) -> None:
         """Prove that subprocess command and status metadata dynamically track the EFFORT constant."""
-        sentinel_effort = "medium-test-propagate"
+        sentinel_effort = "medium"
         commands, status_data = self._execute_mock_run(role="worker", effort_override=sentinel_effort)
         self.assertEqual(len(commands), 1)
         command = commands[0]
@@ -339,48 +345,21 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         """Prove that status metadata records effort even when CLI execution fails (BLOCKED state)."""
         _commands, status_data = self._execute_mock_run(role="worker", simulate_error=True)
         self.assertEqual(status_data.get("state"), "BLOCKED")
-        self.assertEqual(status_data.get("effort"), runner.RUNTIME_CONTRACT["worker_effort"])
+        self.assertEqual(status_data.get("effort"), runner.configured_gemini_role(runner.ROOT, "worker")["reasoning_effort"])
         self.assertEqual(status_data.get("effort"), runner.WORKER_EFFORT)
 
-    def test_enabled_policy_routes_worker_opus_and_gemini_buckets(self) -> None:
-        """For task_id bucket <22 assert Opus model without --effort; for bucket >=22 assert Gemini pin."""
-        self.assertLess(compute_task_bucket(TASK_ID_OPUS), 22)
-        self.assertGreaterEqual(compute_task_bucket(TASK_ID_GEMINI), 22)
-
-        # Worker with bucket < 22 -> claude-opus-4-6-thinking, model-default effort (omitted from argv)
-        commands_opus, status_opus = self._execute_mock_run(
-            role="worker",
-            task_id=TASK_ID_OPUS,
-            policy=ENABLED_POLICY,
-        )
-        self.assertEqual(len(commands_opus), 1)
-        cmd_opus = commands_opus[0]
-        self.assertIn("--model", cmd_opus)
-        self.assertEqual(cmd_opus[cmd_opus.index("--model") + 1], OPUS_MODEL)
-        self.assertNotIn("--effort", cmd_opus)
-        self.assertEqual(status_opus.get("model"), OPUS_MODEL)
-        self.assertEqual(status_opus.get("effort"), OPUS_EFFORT)
-
-        # Worker with bucket >= 22 -> existing Gemini worker pin
-        commands_gemini, status_gemini = self._execute_mock_run(
-            role="worker",
-            task_id=TASK_ID_GEMINI,
-            policy=ENABLED_POLICY,
-        )
-        self.assertEqual(len(commands_gemini), 1)
-        cmd_gemini = commands_gemini[0]
-        self.assertIn("--model", cmd_gemini)
-        self.assertEqual(
-            cmd_gemini[cmd_gemini.index("--model") + 1],
-            runner.RUNTIME_CONTRACT["worker_model"],
-        )
-        self.assertIn("--effort", cmd_gemini)
-        self.assertEqual(
-            cmd_gemini[cmd_gemini.index("--effort") + 1],
-            runner.RUNTIME_CONTRACT["worker_effort"],
-        )
-        self.assertEqual(status_gemini.get("model"), runner.RUNTIME_CONTRACT["worker_model"])
-        self.assertEqual(status_gemini.get("effort"), runner.RUNTIME_CONTRACT["worker_effort"])
+    def test_legacy_policy_cannot_override_configured_new_worker(self) -> None:
+        """Old rollout buckets remain irrelevant to fresh configured runs."""
+        configured = runner.configured_gemini_role(runner.ROOT, "worker")
+        for task_id in (TASK_ID_OPUS, TASK_ID_GEMINI):
+            commands, status = self._execute_mock_run(
+                role="worker", task_id=task_id, policy=ENABLED_POLICY,
+            )
+            command = commands[0]
+            self.assertEqual(command[command.index("--model") + 1], configured["model"])
+            self.assertEqual(command[command.index("--effort") + 1], configured["reasoning_effort"])
+            self.assertEqual(status["model"], configured["model"])
+            self.assertEqual(status["effort"], configured["reasoning_effort"])
 
     def test_retry_preserves_selected_model_and_reviewer_stays_gemini(self) -> None:
         """Repeat same task ID with distinct run IDs and prove identical model; verifier stays Gemini."""
@@ -404,8 +383,8 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         self.assertEqual(len(commands_run2), 1)
         model_1 = commands_run1[0][commands_run1[0].index("--model") + 1]
         model_2 = commands_run2[0][commands_run2[0].index("--model") + 1]
-        self.assertEqual(model_1, OPUS_MODEL)
-        self.assertEqual(model_2, OPUS_MODEL)
+        self.assertEqual(model_1, runner.configured_gemini_role(runner.ROOT, "worker")["model"])
+        self.assertEqual(model_2, runner.configured_gemini_role(runner.ROOT, "worker")["model"])
         self.assertEqual(model_1, model_2)
         self.assertEqual(status_run1.get("model"), status_run2.get("model"))
         self.assertEqual(status_run1.get("effort"), status_run2.get("effort"))
@@ -427,17 +406,16 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
         self.assertEqual(status_verifier.get("model"), runner.RUNTIME_CONTRACT["model"])
         self.assertEqual(status_verifier.get("effort"), runner.RUNTIME_CONTRACT["effort"])
 
-    def test_invalid_and_missing_policy_prevents_invocation_and_artifact(self) -> None:
-        """With invalid/missing policy loader, assert no subprocess.Popen call and no run artifact created."""
-        # Invalid policy loader error
+    def test_legacy_policy_is_not_loaded_for_new_configured_runs(self) -> None:
+        """A dormant historical policy is not a new-run dependency."""
         commands_invalid, status_invalid = self._execute_mock_run(
             role="worker",
             task_id=TASK_ID_OPUS,
             policy=PolicyValidationError("Corrupt policy schema"),
             run_id="run-invalid-policy",
         )
-        self.assertEqual(len(commands_invalid), 0)
-        self.assertEqual(status_invalid, {})
+        self.assertEqual(len(commands_invalid), 1)
+        self.assertEqual(status_invalid["model"], runner.WORKER_MODEL)
 
         # Missing policy loader error
         commands_missing, status_missing = self._execute_mock_run(
@@ -446,8 +424,8 @@ class TestTwoSiteProposalRunnerEffort(unittest.TestCase):
             policy=FileNotFoundError("Policy file not found"),
             run_id="run-missing-policy",
         )
-        self.assertEqual(len(commands_missing), 0)
-        self.assertEqual(status_missing, {})
+        self.assertEqual(len(commands_missing), 1)
+        self.assertEqual(status_missing["model"], runner.WORKER_MODEL)
 
 
 if __name__ == "__main__":

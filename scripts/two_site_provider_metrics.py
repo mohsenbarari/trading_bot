@@ -21,7 +21,7 @@ except ModuleNotFoundError:
     except ModuleNotFoundError:
         validate_identity = None
 
-SUFFIX = r"(?:-(?:codex-)?(?:worker|reviewer)-\d+(?:-retry-\d+)?|-codex-correction-\d+-(?:worker|reviewer))"
+SUFFIX = r"(?:-(?:codex-)?(?:worker|reviewer)-\d+(?:-retry-\d+)?|-v[0-2]r[12](?:-retry-[12])?|-codex-correction-\d+-(?:worker|reviewer))"
 FINAL = re.compile(r"(.+?)(?:-(?:codex-)?worker-\d+(?:-retry-\d+)?|-codex-correction-\d+-worker)")
 TERMINAL = {"PROPOSAL_READY", "VERIFIED", "CHANGES_REQUIRED", "BLOCKED"}
 TOKEN_KEYS = ("input_tokens", "output_tokens", "total_tokens")

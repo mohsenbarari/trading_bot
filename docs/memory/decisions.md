@@ -8,7 +8,7 @@ Entries are newest first.
 
 - 2026-09-16 | A newly added P1-00 characterization test that imports application code must establish the canonical hermetic bootstrap before candidate tests: `APP_ENV_FILE=config/unit-test.env.example` and the standard network fence precede application imports; direct socket-hook assignments are rejected. A bounded SHA-bound `test-gate` correction returns only those defects to Worker and skips sandbox pytest, Gemini Reviewer, and final Codex review until fixed. This narrows a proven repeated error without weakening any quality gate.
 
-- 2026-09-03 | Codex owns two-site acceptance and external-action receipts; user Stage approval is removed, but human Web Writer action remains. Cursor uses one Coordinator, one writer by default, at most two with Codex pairing, and serial integration.
+- 2026-11-03 | Qoder replaces Codex for two-site coordination and final acceptance. Gemini writes proposals and reviews them in a separate session; Qoder final review is independent and required before exact-byte application/commit. Models/efforts come from automation-models.json. User Stage approval remains removed; human Web Writer action and serial Git ownership remain.
 
 - 2026-09-16 | Provider interruption evidence is distinct from an ambiguous failed session only when one bounded, model/session-bound, tool-free `ERROR` stream says it was interrupted. It receives the existing fresh-session retry budget, retains no provider error prose, and never resumes or applies partial output. Metrics read task snapshots and canonical excerpts only at the runner's existing bounded limits. Patch rendering expands context until each old fragment has one target; otherwise it fails closed.
 

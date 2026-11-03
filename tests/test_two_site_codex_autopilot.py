@@ -19,6 +19,9 @@ class AutopilotContracts(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
+        config = self.root / proposal_runner.AI_CONFIG_REL
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_bytes((proposal_runner.ROOT / proposal_runner.AI_CONFIG_REL).read_bytes())
 
     def result(self, **changes):
         result = {
@@ -458,11 +461,14 @@ class AutopilotContracts(unittest.TestCase):
         worker_status = json.loads((fallback_dir / "status.json").read_text())
         worker_status.update({
             "run_id": fallback_run_id,
-            "model": proposal_runner.WORKER_MODEL,
+            "model": proposal_runner.RUNTIME_CONTRACT["worker_model"],
+            "effort": proposal_runner.RUNTIME_CONTRACT["worker_effort"],
             "controller_run_id": controller_id,
             "fallback_from_run_id": failed_id,
             "fallback_receipt": canonical_receipt,
         })
+        worker_status.pop("model_config", None)
+        worker_status.pop("model_config_sha256", None)
         proposal_runner.write_json(fallback_dir / "status.json", worker_status)
 
         result["gemini_worker_run_id"] = fallback_run_id
@@ -488,18 +494,26 @@ class AutopilotContracts(unittest.TestCase):
         worker_dir = self.root / ".local/two-site-refactor/proposals" / result["gemini_worker_run_id"]
         worker_status = json.loads((worker_dir / "status.json").read_text())
         worker_status["model"] = "claude-opus-4-6-thinking"
+        worker_status["effort"] = "model-default"
+        worker_status.pop("model_config", None)
+        worker_status.pop("model_config_sha256", None)
         proposal_runner.write_json(worker_dir / "status.json", worker_status)
         seal_completion_fixture(self.root, worker_dir)
         worker_status = json.loads((worker_dir / "status.json").read_text())
 
         worker_task = json.loads((worker_dir / "task.json").read_text())
-        with patch.object(autopilot, "expected_bound_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
+        original_expected = autopilot.expected_bound_role_model
+        def expected_model(root, role, *arguments):
+            return ("claude-opus-4-6-thinking" if role == "worker"
+                    else original_expected(root, role, *arguments))
+        with patch.object(autopilot, "expected_bound_role_model", side_effect=expected_model) as mock_expected:
             validated = autopilot.validate_gemini_chain(self.root, "a" * 40, result)
         self.assertEqual(validated, worker_result)
-        mock_expected.assert_called_once_with(
+        mock_expected.assert_any_call(
             self.root, "worker", result["gemini_worker_run_id"], "a" * 40,
             worker_task["task"], worker_task["sources"], worker_status,
         )
+        self.assertEqual(mock_expected.call_count, 2)
 
     def test_gemini_chain_rejects_forged_gemini_worker_status_for_routed_opus_task(self):
         result, _, _ = self.gemini_chain()
@@ -519,17 +533,30 @@ class AutopilotContracts(unittest.TestCase):
         worker_dir = self.root / ".local/two-site-refactor/proposals" / result["gemini_worker_run_id"]
         worker_status = json.loads((worker_dir / "status.json").read_text())
         worker_status["model"] = "claude-opus-4-6-thinking"
+        worker_status["effort"] = "model-default"
+        worker_status.pop("model_config", None)
+        worker_status.pop("model_config_sha256", None)
         proposal_runner.write_json(worker_dir / "status.json", worker_status)
+        seal_completion_fixture(self.root, worker_dir)
+        worker_status = json.loads((worker_dir / "status.json").read_text())
 
         reviewer_status = json.loads((reviewer_dir / "status.json").read_text())
         reviewer_status["model"] = "claude-opus-4-6-thinking"
+        reviewer_status["effort"] = "model-default"
+        reviewer_status.pop("model_config", None)
+        reviewer_status.pop("model_config_sha256", None)
         proposal_runner.write_json(reviewer_dir / "status.json", reviewer_status)
+        seal_completion_fixture(self.root, reviewer_dir)
 
         worker_task = json.loads((worker_dir / "task.json").read_text())
-        with patch.object(autopilot, "expected_bound_role_model", return_value="claude-opus-4-6-thinking") as mock_expected:
+        original_expected = autopilot.expected_bound_role_model
+        def expected_model(root, role, *arguments):
+            return ("claude-opus-4-6-thinking" if role == "worker"
+                    else original_expected(root, role, *arguments))
+        with patch.object(autopilot, "expected_bound_role_model", side_effect=expected_model) as mock_expected:
             with self.assertRaisesRegex(autopilot.AutopilotError, "evidence is not exactly bound"):
                 autopilot.validate_gemini_chain(self.root, "a" * 40, result)
-        mock_expected.assert_called_once_with(
+        mock_expected.assert_any_call(
             self.root, "worker", result["gemini_worker_run_id"], "a" * 40,
             worker_task["task"], worker_task["sources"], worker_status,
         )
@@ -641,16 +668,16 @@ class AutopilotContracts(unittest.TestCase):
         self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", command)
         self.assertNotIn("--dangerously-bypass-hook-trust", command)
 
-    def test_supervisor_prompt_enforces_gemini_author_review_then_codex_gate(self):
+    def test_supervisor_prompt_enforces_gemini_author_review_then_qoder_gate(self):
         prompt = (autopilot.ROOT / autopilot.PROMPT_REL).read_text()
         worker = prompt.index("Gemini Worker is the")
         reviewer = prompt.index("runner role `verifier`")
-        codex = prompt.index("final Codex reviewer")
+        codex = prompt.index("independent final Qoder review")
         self.assertLess(worker, reviewer)
         self.assertLess(reviewer, codex)
         self.assertIn("different conversation ID", prompt)
         self.assertIn("reviewed_proposal_sha256", prompt)
-        self.assertIn("Do not launch a nested", prompt)
+        self.assertIn("Do not launch an arbitrary nested coordinator", prompt)
         self.assertIn("never author or repair implementation", prompt)
         self.assertIn("At most two materially different correction attempts", prompt)
 
@@ -671,7 +698,9 @@ class AutopilotContracts(unittest.TestCase):
         self.assertIn("require BLOCKED/HALT with category EXTERNAL_GATE", codex_prompt)
 
         # Coordinator authoritative-symbol gate and UserRole.BUYER prevention
-        self.assertIn("distinct smaller or context-complete internal unit", codex_prompt)
+        self.assertIn("Classify the actual failure before choosing recovery", codex_prompt)
+        self.assertIn("same-task phase continuation only with unchanged task/Source/HEAD/proposal bindings", codex_prompt)
+        self.assertIn("Do not rerun a valid", codex_prompt)
         self.assertIn("authoritative current definitions", codex_prompt)
         self.assertIn("UserRole.BUYER", codex_prompt)
         self.assertIn("forbidden unless its authoritative definition proves it exists", codex_prompt)
@@ -712,18 +741,20 @@ class AutopilotContracts(unittest.TestCase):
         ):
             self.assertIn(action, gemini_prompt)
 
-    def test_coordinator_prompt_enforces_narrow_git_escalation_and_forbidden_operations(self):
+    def test_coordinator_prompt_enforces_exact_git_scope_without_escalation(self):
         prompt = (autopilot.ROOT / autopilot.PROMPT_REL).read_text()
         self.assertIn(
-            "final Git metadata escalation only for narrowly scoped git add -- <exact accepted proposal paths>",
+            "Use ordinary Bash git add -- <exact accepted proposal paths>",
             prompt,
         )
         self.assertIn("one non-interactive git commit", prompt)
         self.assertIn("Require Git staging to name every and only accepted proposal path", prompt)
         self.assertIn(
-            "read-only worktree Git metadata failure must be retried once through that narrow command-tool require_escalated path",
+            "EXTERNAL_GATE; preserve the evidence and do not bypass the sandbox",
             prompt,
         )
+        self.assertNotIn("require_escalated", prompt)
+        self.assertNotIn("functions.exec", prompt)
         self.assertIn("single-parent commit on refactor/two-site-architecture", prompt)
         self.assertIn("Supervisor exact-proposal validation", prompt)
 
@@ -982,15 +1013,17 @@ class AutopilotContracts(unittest.TestCase):
         contract = self.root / autopilot.GEMINI_RUNTIME_CONTRACT_REL
         contract.parent.mkdir(parents=True, exist_ok=True)
         contract.write_text((proposal_runner.ROOT / proposal_runner.GEMINI_RUNTIME_CONTRACT_REL).read_text())
-        reference = self.root / proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS[0]
+        references = tuple(path for path in proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS
+                           if path != proposal_runner.AI_CONFIG_REL)
+        reference = self.root / references[0]
         reference.parent.mkdir(parents=True, exist_ok=True)
         original_reference = (
-            proposal_runner.ROOT / proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS[0]
+            proposal_runner.ROOT / references[0]
         ).read_text()
-        changed_reference = original_reference.replace("gemini-4-argon-high", "gemini-4-argon-medium")
+        changed_reference = original_reference.replace("automation-models.json", "retired-models.json")
         self.assertNotEqual(changed_reference, original_reference)
         reference.write_text(changed_reference)
-        for relative in proposal_runner.GEMINI_RUNTIME_REFERENCE_PATHS[1:]:
+        for relative in references[1:]:
             path = self.root / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text((proposal_runner.ROOT / relative).read_text())
@@ -1380,8 +1413,12 @@ class AutopilotContracts(unittest.TestCase):
 
         with patch.object(autopilot, "validate_repository", side_effect=[before, final_repo]), \
                 patch.object(autopilot, "prompt_for_cycle", return_value="fake prompt"), \
-                patch.object(autopilot, "codex_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
-                patch.object(autopilot, "codex_command", return_value=["fake-codex"]), \
+                patch.object(autopilot, "coordinator_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
+                patch.object(autopilot, "coordinator_command", return_value=["fake-qoder"]), \
+                patch.object(autopilot, "buildwrap_coordinator_command", side_effect=lambda _root, _run, command, **_kwargs: command), \
+                patch.object(autopilot, "git", return_value="Fixture"), \
+                patch.object(autopilot, "finalize_qoder_output"), \
+                patch("scripts.two_site_qoder_review.validate_result_review"), \
                 patch.object(autopilot.subprocess, "Popen", return_value=FakeProcess()), \
                 patch.object(autopilot, "write_supervisor_state"), \
                 patch.object(autopilot.threading, "Thread", side_effect=FakeHeartbeatThread), \
@@ -1409,6 +1446,52 @@ class AutopilotContracts(unittest.TestCase):
         self.assertIsNone(autopilot._ACTIVE_PROCESS)
         self.assertEqual(result["state"], "CONTINUE")
         self.assertTrue(run_dir.is_dir())
+
+    def test_qoder_cycle_missing_final_approval_never_publishes_checkpoint(self):
+        from scripts import two_site_qoder_review as final_review
+
+        class FakeProcess:
+            pid = 12345
+            returncode = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_arguments):
+                return False
+
+        executable = self.root / "qoder-fixture"
+        executable.write_text("")
+        state = self.root / "state"
+        (state / "runs").mkdir(parents=True)
+        before = self.clean_repository_facts()
+        raw = self.result()
+        transitioned = dict(raw, head_before="a" * 40, head_after="b" * 40, head_changed=True)
+
+        def capture(_process, _stdin, stream, *_arguments, **_keywords):
+            autopilot.write_json(stream.parent / "result.json", raw)
+
+        with patch.object(autopilot, "validate_repository", return_value=before), \
+                patch.object(autopilot, "prompt_for_cycle", return_value="fixture prompt"), \
+                patch.object(autopilot, "coordinator_identity", return_value={"sha256": "s" * 64}), \
+                patch.object(autopilot, "coordinator_command", return_value=["fixture-qoder"]), \
+                patch.object(autopilot, "buildwrap_coordinator_command", side_effect=lambda _root, _run, command, **_kw: command), \
+                patch.object(autopilot, "git", return_value="Fixture"), \
+                patch.object(autopilot, "file_sha256", return_value="s" * 64), \
+                patch.object(autopilot, "finalize_qoder_output"), \
+                patch.object(autopilot.subprocess, "Popen", return_value=FakeProcess()), \
+                patch.object(autopilot.threading, "Thread"), \
+                patch.object(autopilot, "capture_bounded_process", side_effect=capture), \
+                patch.object(autopilot, "write_supervisor_state"), \
+                patch.object(autopilot, "validate_transition", return_value=transitioned), \
+                patch.object(final_review, "validate_result_review", wraps=final_review.validate_result_review) as final_gate, \
+                patch.object(autopilot, "publish_accepted_checkpoint") as checkpoint:
+            with self.assertRaisesRegex(final_review.qoder.QoderError, "QODER_FILE_UNREADABLE"):
+                autopilot.run_cycle(self.root, executable, state, 1, 30)
+        final_gate.assert_called_once_with(self.root, before["head"], transitioned)
+        checkpoint.assert_not_called()
+        status = json.loads(next((state / "runs").iterdir()).joinpath("status.json").read_text())
+        self.assertEqual(status["state"], "FAILED")
 
     def test_run_cycle_preserves_primary_baseexception_when_heartbeat_join_raises(self):
         test_case = self
@@ -1471,8 +1554,12 @@ class AutopilotContracts(unittest.TestCase):
 
         with patch.object(autopilot, "validate_repository", return_value=before), \
                 patch.object(autopilot, "prompt_for_cycle", return_value="fake prompt"), \
-                patch.object(autopilot, "codex_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
-                patch.object(autopilot, "codex_command", return_value=["fake-codex"]), \
+                patch.object(autopilot, "coordinator_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
+                patch.object(autopilot, "coordinator_command", return_value=["fake-qoder"]), \
+                patch.object(autopilot, "buildwrap_coordinator_command", side_effect=lambda _root, _run, command, **_kwargs: command), \
+                patch.object(autopilot, "git", return_value="Fixture"), \
+                patch.object(autopilot, "finalize_qoder_output"), \
+                patch("scripts.two_site_qoder_review.validate_result_review"), \
                 patch.object(autopilot.subprocess, "Popen", return_value=FakeProcess()), \
                 patch.object(autopilot, "write_supervisor_state"), \
                 patch.object(autopilot.threading, "Thread", side_effect=FakeHeartbeatThread), \
@@ -1563,8 +1650,12 @@ class AutopilotContracts(unittest.TestCase):
 
         with patch.object(autopilot, "validate_repository", side_effect=[before, final_repo]), \
                 patch.object(autopilot, "prompt_for_cycle", return_value="fake prompt"), \
-                patch.object(autopilot, "codex_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
-                patch.object(autopilot, "codex_command", return_value=["fake-codex"]), \
+                patch.object(autopilot, "coordinator_identity", return_value={"sha256": "s" * 64, "runtime": {}}), \
+                patch.object(autopilot, "coordinator_command", return_value=["fake-qoder"]), \
+                patch.object(autopilot, "buildwrap_coordinator_command", side_effect=lambda _root, _run, command, **_kwargs: command), \
+                patch.object(autopilot, "git", return_value="Fixture"), \
+                patch.object(autopilot, "finalize_qoder_output"), \
+                patch("scripts.two_site_qoder_review.validate_result_review"), \
                 patch.object(autopilot.subprocess, "Popen", return_value=FakeProcess()), \
                 patch.object(autopilot, "write_supervisor_state"), \
                 patch.object(autopilot.threading, "Thread", side_effect=FakeHeartbeatThread), \

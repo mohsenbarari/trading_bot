@@ -1,22 +1,18 @@
 # Automation Efficiency
 
-## Authority
-- Bounded nonsecret transfers/Codex allowed. Oct19 manual author/nonauthor/Root-Git: exact Scope/bytes/provenance/native PRE+POST/4 holds. Unattended: PROPOSAL_AUTOMATION.md.
-- Named budgets need adapter/boundary/compatibility proof; Root187K and AE04_FULL_V1=224K are exact-unit profiles, not generic overrides.
-- No secrets/user/ops export, main/production/DNS/Writer, replay/reset or fake Worker/Gemini/TASK_READY. Startup needs adoption/ACK/STOP/env permission.
-- [AE05/06](../../refactor/two-server/AE05_AE06_GATE_DECISION_20260924.md): serial/one Worker; cohorts include failures/UNKNOWN before overlap.
+## Current authority — 2026-11-03
+- Owner approved replacing Codex with Qoder and prioritizing correct refactor delivery, fewer errors/stops and continuation above token-saving policies. Use the smallest sufficient design; do not reopen AE projects or economic cohorts as delivery prerequisites.
+- `docs/refactor/two-server/templates/automation-models.json` is the sole fresh role-model/effort policy. Qoder coordinates; Gemini authors and independently reviews; a separate read-only Qoder session gives final acceptance. CLI path/version/SHA are local runtime configuration, not model selection.
+- User Stage approval remains removed. Human Web Writer, protected refs, production/external-action scope, exact bytes, truthful evidence and independent review remain mandatory.
 
-## Custody
-- [Plan](../../refactor/two-server/AUTOMATION_EFFICIENCY_PLAN.md): receipt-first/one-shot; late STOP retains claims; ambiguous crash: no retry.
-- Dormant C5e/run_cycle: CONTINUE/COMPLETE, clean refs/Scope, fresh same-ID IDLE Broker-client hold/empty queues; identity/root/lock/STOP drift blocks.
-- Scanner512/128; quota blocks; checkpoint private/post-link checks. Keep active evidence; cleanup final ACK +>=10days unreferenced.
-- Before effects, bind each caller's complete lazy-import/origin/cache closure; metadata-only seals do not cover Task preflight. Emit actual rows before guards. Frozen bytes immutable; corrections use new artifacts.
+## Runtime
+- Current requested roles: Qwen3.8-Max/xhigh for Qoder coordination/final review; Argon High/high for both Gemini roles. Fresh Gemini status/proof binds its captured configuration; unchanged historical runtime JSON retains old proof provenance only.
+- Native execution belongs to the outside Broker. Its launcher requires final-Qoder-review policy; Coordinator applies only approved bytes and reuses native PASS only for identical source/task/candidate/selectors/environment. No nested bwrap or duplicate native execution inside its contained shell.
+- Only proven transient late Gemini-Reviewer failures reuse the same Worker/native/reservation with fresh sessions and finite persisted counters. Semantic, quota, source drift, accepted work and uncertain effects never authorize blind replay or counter reset.
+- Qoder REQUEST_CHANGES returns to Gemini through the existing correction loop. Final APPROVE is mechanically checked before apply and checkpoint. Same-SHA final-review recovery must preserve the original Gemini/native chain.
 
-## Runtime and remaining
-- [Recovery](../../refactor/two-server/AE03_COLD_START_RECOVERY_CONTRACT_20260929.md): STOP/pending/0700/HEAD/refs/controls, one prior/no current epoch, Root/clean; historical checkpoints are not startup/rebaseline.
-- CLI1.4.2/Argon Worker-medium/Reviewer-high;725B consumed/728Q normal/729A+735H hung. Preserve724D and reservations.
-- Source65/7a688d6e accepted727PRE/POST.742C bare-print and744Q empty-print qualifications FAILED/consumed; no Reviewer/native. Counter/request/generation/usage UNKNOWN; no permanent fix.
-- [CLI correction](../../refactor/two-server/AE03_CLI_PRINT_EMPTY_VALUE_RECOVERY_20261019.md): documented one-event NDJSON/no print, unchanged logical caps plus derived wire bound. Local tests are not live transport proof. R2 iteration UNKNOWN/37 POST UNKNOWN/603 NOT_MACHINE_ADOPTION retained.
-- 737K: original new-test24K UTF8/correction/legacy gates preserved; existing-file manual profiles are separate.
-- Closed:B194/C176/607/selector;738L/739M/740R3/741 APIs; legacy19 unchanged. Actual Root/native/genuine/commit/posthold required.
-- OPEN: real shared declaration/timing/cohorts/value; adoption/Start/Monitor/wake/ACK/STOP/crash/C4c/C5d/C5e. No Stage/goal/health/savings.
+## Evidence and progress
+- Actual required scenarios and Stage blockers closed measure progress; commits, test counts and bookkeeping do not substitute. Coherent ordinary business outcomes are allowed; historical V1 batch validation and hard quality gates remain intact.
+- Model/config changes occur at clean unit boundaries. Old accepted checkpoints, failed attempts and historical AE00–AE06 evidence are retained; migration is not fabricated work acceptance or proof of savings.
+- Qoder SDK zero-token placeholders remain UNKNOWN; reported Credits are separate. Observe real work without paid baseline replay or telemetry collection gates.
+- The Nov3 migration source is qualified; activation, checkpoint admission and health are runtime facts requiring genuine normal-unit evidence. Do not infer live health from memory, tests or historical receipts. See `docs/refactor/two-server/QODER_AUTOMATION.md`.

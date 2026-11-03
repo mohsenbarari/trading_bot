@@ -367,10 +367,16 @@ def test_correction_worker_model_routing_and_forged_prior_gate(repo, monkeypatch
     runner.write_json(prior / "task.json", snapshot)
 
     status = json.loads((worker / "status.json").read_text())
-    prior_model = runner.MODEL if forged_prior else opus_model
+    # These cases exercise the historical Opus routing policy, before role
+    # snapshots became authoritative for newly configured Gemini generations.
+    status.pop("model_config", None)
+    status.pop("model_config_sha256", None)
+    prior_model = runner.RUNTIME_CONTRACT["worker_model"] if forged_prior else opus_model
+    prior_effort = runner.RUNTIME_CONTRACT["worker_effort"] if forged_prior else "model-default"
     runner.write_json(
         prior / "status.json",
-        {**status, "run_id": "w0", "model": prior_model, "result_sha256": prior_sha, "conversation_id": "wc0"},
+        {**status, "run_id": "w0", "model": prior_model, "effort": prior_effort,
+         "result_sha256": prior_sha, "conversation_id": "wc0"},
     )
     feedback = {
         "reviewer": "codex",
@@ -381,6 +387,7 @@ def test_correction_worker_model_routing_and_forged_prior_gate(repo, monkeypatch
     runner.write_json(worker / "task.json", {**snapshot, "proposal": prior_text, "feedback": feedback})
     status.update(
         model=opus_model,
+        effort="model-default",
         input_worker_run_id="w0",
         input_proposal_sha256=prior_sha,
         input_worker_conversation_id="wc0",
@@ -396,11 +403,12 @@ def test_correction_worker_model_routing_and_forged_prior_gate(repo, monkeypatch
     else:
         receipt = ct.review(root, output, "w1", "r1", digest)
         assert receipt["state"] == "BINDINGS_VALID"
+        # The current Reviewer has a bound role snapshot, so only the legacy
+        # Worker generations consult the historical routing policy.
         assert calls == [
             ("worker", expected_task_id),
             ("worker", expected_task_id),
             ("worker", expected_task_id),
-            ("verifier", expected_task_id),
         ]
 
 

@@ -9,6 +9,7 @@ try:
         RUN_PREFIX_RE,
         ProposalError,
         _run_post_worker_remainder,
+        trusted_qoder_final_review_hook,
         _branch_root_failure_factor,
     )
     from scripts.two_site_quota_resume_post_worker_one import (
@@ -19,6 +20,7 @@ except ImportError:
         RUN_PREFIX_RE,
         ProposalError,
         _run_post_worker_remainder,
+        trusted_qoder_final_review_hook,
         _branch_root_failure_factor,
     )
     from two_site_quota_resume_post_worker_one import (  # type: ignore[no-redef]
@@ -232,6 +234,8 @@ def execute_worker_one_post_result_remainder(
             seen_test_signatures=seen_test_signatures,
             seen_bootstrap_signatures=seen_bootstrap_signatures,
             seen_branch_factors=seen_branch_factors,
+            **({"final_review_hook": trusted_qoder_final_review_hook()}
+               if os.environ.get("TWO_SITE_QODER_FINAL_REVIEW_REQUIRED") == "1" else {}),
         )
 
         state_check()

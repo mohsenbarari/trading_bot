@@ -126,6 +126,7 @@ record = {{
     "PYTHONPATH": os.environ.get("PYTHONPATH"),
     "APP_ENV_FILE": os.environ.get("APP_ENV_FILE"),
     "PYTHONDONTWRITEBYTECODE": os.environ.get("PYTHONDONTWRITEBYTECODE"),
+    "TWO_SITE_QODER_FINAL_REVIEW_REQUIRED": os.environ.get("TWO_SITE_QODER_FINAL_REVIEW_REQUIRED"),
 }}
 with open({json.dumps(str(py_log))}, "a", encoding="utf-8") as f:
     f.write(json.dumps(record) + "\\n")
@@ -136,7 +137,11 @@ if "--check" in sys.argv:
         sys.exit(1)
     sys.exit(0)
 if "status" in sys.argv:
+    print(json.dumps({{"qoder_final_review_required": os.environ.get("STUB_QODER_REVIEW_READY", "1") == "1",
+                      "quota_continuation_ready": True}}))
     sys.exit(0)
+if "-c" in sys.argv:
+    exec(sys.argv[sys.argv.index("-c") + 1])
 sys.exit(0)
 """
             python_stub.write_text(py_code, encoding="utf-8")
@@ -154,6 +159,8 @@ with open({json.dumps(str(tmux_log))}, "a", encoding="utf-8") as f:
     f.write(json.dumps(record) + "\\n")
 
 if "has-session" in sys.argv:
+    if "=two-site-provider-broker" in sys.argv and os.environ.get("STUB_BROKER_PRESENT") == "1":
+        sys.exit(0)
     sys.exit(1)
 if "new-session" in sys.argv:
     sys.exit(0)
@@ -214,6 +221,9 @@ sys.exit(0)
 
             self.assertIn("PYTHONPATH=", broker_cmd)
             self.assertIn("PYTHONPATH=", sup_cmd)
+            self.assertIn("TWO_SITE_QODER_FINAL_REVIEW_REQUIRED=1", broker_cmd)
+            self.assertIn("scripts/two_site_autopilot.py", sup_cmd)
+            self.assertNotIn("two_site_codex_autopilot.py", sup_cmd)
             escaped_repo = str(repo_dir).replace(" ", r"\ ")
             self.assertTrue(
                 escaped_repo in broker_cmd or str(repo_dir) in broker_cmd,
@@ -240,6 +250,20 @@ sys.exit(0)
             self.assertEqual(len(eval_records), 2)
             self.assertEqual(eval_records[0]["PYTHONPATH"], str(repo_dir))
             self.assertEqual(eval_records[1]["PYTHONPATH"], str(repo_dir))
+            self.assertEqual(eval_records[0]["TWO_SITE_QODER_FINAL_REVIEW_REQUIRED"], "1")
+
+            # An already-running older Broker cannot be silently reused or
+            # replaced merely because its heartbeat is otherwise healthy.
+            before_count = len(new_sessions)
+            obsolete = subprocess.run(
+                ["bash", str(launcher_dest), "start"], cwd=repo_dir,
+                env=dict(env, STUB_BROKER_PRESENT="1", STUB_QODER_REVIEW_READY="0"),
+                capture_output=True, text=True, timeout=30,
+            )
+            self.assertEqual(obsolete.returncode, 2)
+            self.assertIn("existing Broker lacks required Qoder final review", obsolete.stderr)
+            after_records = [json.loads(line) for line in tmux_log.read_text().splitlines()]
+            self.assertEqual(sum("new-session" in row["argv"] for row in after_records), before_count)
 
             # Unset inherited-path case for direct launcher
             py_log.unlink()
@@ -427,7 +451,10 @@ if any("preflight" in a for a in sys.argv):
     sys.stdout.write("READY\\n")
     sys.exit(0)
 if "status" in sys.argv:
+    print(json.dumps({{"qoder_final_review_required": True, "quota_continuation_ready": True}}))
     sys.exit(0)
+if "-c" in sys.argv:
+    exec(sys.argv[sys.argv.index("-c") + 1])
 sys.exit(0)
 """
             (bin_dir / "python3").write_text(py_code, encoding="utf-8")
@@ -436,7 +463,7 @@ sys.exit(0)
             pgrep_code = f"""#!{sys.executable}
 import sys
 cmd = " ".join(sys.argv)
-if "two_site_codex_autopilot.py" in cmd:
+if "autopilot.py" in cmd:
     sys.stdout.write("1\\n")
     sys.exit(0)
 if "two_site_provider_broker.py" in cmd:
@@ -550,6 +577,7 @@ restart_tmp="$report_root/restart.log"
             self.assertEqual(len(new_sessions), 1)
             broker_cmd = new_sessions[0]["argv"][-1]
             self.assertIn("PYTHONPATH=", broker_cmd)
+            self.assertIn("TWO_SITE_QODER_FINAL_REVIEW_REQUIRED=1", broker_cmd)
             escaped_int_root = str(integration_root).replace(" ", r"\ ")
             self.assertTrue(
                 escaped_int_root in broker_cmd or str(integration_root) in broker_cmd,

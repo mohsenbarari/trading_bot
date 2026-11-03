@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bounded Antigravity proposals. Only Codex applies/reviews/commits them.
+"""Bounded Antigravity proposals. The configured coordinator accepts/applies them.
 
 The controller writes ignored run artifacts only; it does not apply generated code,
 change Git refs/Stage state or deploy. The CLI uses plan/sandbox mode and a deny hook;
@@ -25,6 +25,11 @@ import tempfile
 import time
 from datetime import datetime, timezone
 from typing import Callable, Iterator, Mapping
+
+try:
+    from scripts.two_site_ai_config import AI_CONFIG_REL, AIConfigError, load_ai_config
+except ImportError:
+    from two_site_ai_config import AI_CONFIG_REL, AIConfigError, load_ai_config
 
 try:
     from scripts.two_site_retry_syntax_hint import extract_syntax_hint, validate_retry_hint
@@ -148,6 +153,7 @@ GEMINI_RUNTIME_CONTRACT_REL = Path(
     "docs/refactor/two-server/templates/gemini-runtime-contract.json"
 )
 GEMINI_RUNTIME_REFERENCE_PATHS = (
+    AI_CONFIG_REL,
     Path("docs/refactor/two-server/PROPOSAL_AUTOMATION.md"),
     Path("docs/refactor/two-server/ANTIGRAVITY_EXECUTION.md"),
     Path(".agents/skills/two-site-refactor/resources/AUTONOMOUS_ORCHESTRATION.md"),
@@ -995,56 +1001,74 @@ def load_runtime_contract(root: Path) -> dict[str, str]:
 
 
 def validate_runtime_contract(root: Path) -> dict[str, str]:
-    """Fail before provider invocation when code, docs, or contract drift apart."""
+    """Keep executable pins fixed; role selection belongs to the shared config."""
     contract = load_runtime_contract(root)
     loaded_at_startup = globals().get("RUNTIME_CONTRACT")
     if loaded_at_startup is not None and contract != loaded_at_startup:
         raise ProposalError("Gemini runtime contract changed after runner startup; restart is required")
-    references = tuple((path, "pair" if path.name == "PROPOSAL_AUTOMATION.md" else
-                        "model" if path.name == "TYPED_GATEWAY.md" else "cli")
-                       for path in GEMINI_RUNTIME_REFERENCE_PATHS)
-    model = contract["model"]
-    effort = contract["effort"]
-    worker_model = contract["worker_model"]
-    worker_effort = contract["worker_effort"]
-    for relative, reference_kind in references:
+    configured_gemini_roles(root)
+    for relative in GEMINI_RUNTIME_REFERENCE_PATHS:
+        if relative == AI_CONFIG_REL:
+            continue
         text = bounded_file_text(root, root / relative, MAX_CONTEXT, f"Gemini runtime reference {relative}")
-        if reference_kind == "pair":
-            if (f"Worker=`{worker_model}/{worker_effort}`" not in text
-                    or f"Reviewer=`{model}/{effort}`" not in text):
-                raise ProposalError(f"Gemini runtime reference drift: {relative}")
-        else:
-            marker = model
-            if marker not in text:
-                raise ProposalError(f"Gemini runtime reference drift: {relative}")
-            if reference_kind == "cli" and f"--model {model} --effort {effort}" not in text:
-                raise ProposalError(f"Gemini model/effort reference drift: {relative}")
-        for alternate_model in {"gemini-3.8-flash-high", "gemini-3.8-flash-medium"} - {model, worker_model}:
-            if alternate_model in text:
-                raise ProposalError(f"stale Gemini model reference: {relative}")
-        for alternate_effort in VALID_EFFORTS - {effort}:
-            if f"--model {model} --effort {alternate_effort}" in text:
-                raise ProposalError(f"stale Gemini effort reference: {relative}")
-    automation_contract = bounded_file_text(
-        root,
-        root / Path("docs/refactor/two-server/PROPOSAL_AUTOMATION.md"),
-        MAX_CONTEXT,
-        "Gemini role effort reference",
-    )
-    if (f"Worker=`{worker_model}/{worker_effort}`" not in automation_contract
-            or f"Reviewer=`{model}/{effort}`" not in automation_contract):
-        raise ProposalError("Gemini role effort reference drift")
+        if AI_CONFIG_REL.name not in text:
+            raise ProposalError(f"Gemini model configuration reference drift: {relative}")
     return contract
 
 
-# These values are derived from the tracked contract; no executable file may pin
-# a second model/effort pair. validate_runtime_contract() is repeated per run so
-# an in-process process cannot continue after the contract changes on disk.
+def _validate_gemini_roles(settings: object) -> dict[str, dict[str, str]]:
+    if type(settings) is not dict or set(settings) != {"worker", "reviewer"}:
+        raise ProposalError("Gemini model configuration has invalid roles")
+    result = {}
+    for role in ("worker", "reviewer"):
+        value = settings[role]
+        if (type(value) is not dict or set(value) != {"provider", "model", "reasoning_effort"}
+                or value.get("provider") != "antigravity"
+                or type(value.get("model")) is not str
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", value["model"])
+                or type(value.get("reasoning_effort")) is not str
+                or value.get("reasoning_effort") not in VALID_EFFORTS):
+            raise ProposalError("Gemini model configuration has invalid role settings")
+        result[role] = dict(value)
+    return result
+
+
+def configured_gemini_roles(root: Path) -> dict[str, dict[str, str]]:
+    """Read both Gemini roles from one validated public configuration snapshot."""
+    try:
+        roles = load_ai_config(root)["roles"]
+    except AIConfigError as exc:
+        raise ProposalError(f"Gemini model configuration: {exc}") from None
+    return _validate_gemini_roles({role: roles[role] for role in ("worker", "reviewer")})
+
+
+def configured_gemini_role(root: Path, role: str) -> dict[str, str]:
+    if role not in {"worker", "reviewer", "verifier"}:
+        raise ProposalError("invalid Gemini configuration role")
+    return configured_gemini_roles(root)["reviewer" if role == "verifier" else role]
+
+
+def bound_gemini_role(status: dict, role: str) -> dict[str, str] | None:
+    """Validate a retained role snapshot without applying today's configuration."""
+    if role not in {"worker", "reviewer", "verifier"}:
+        raise ProposalError("invalid Gemini configuration role")
+    if "model_config" not in status and "model_config_sha256" not in status:
+        return None  # Historical proofs retain their original shape and pins.
+    settings = _validate_gemini_roles(status.get("model_config"))
+    if status.get("model_config_sha256") != sha(serialize_json(settings)):
+        raise ProposalError("Gemini model configuration snapshot binding mismatch")
+    return settings["reviewer" if role == "verifier" else role]
+
+
+# Compatibility snapshots for old readers/tests. Fresh invocations resolve the
+# shared role configuration in run(); the runtime JSON remains historical pin
+# provenance so changing a role does not invalidate retained completion proofs.
 RUNTIME_CONTRACT = load_runtime_contract(ROOT)
-MODEL = RUNTIME_CONTRACT["model"]
-EFFORT = RUNTIME_CONTRACT["effort"]
-WORKER_MODEL = RUNTIME_CONTRACT["worker_model"]
-WORKER_EFFORT = RUNTIME_CONTRACT["worker_effort"]
+_STARTUP_GEMINI_ROLES = configured_gemini_roles(ROOT)
+MODEL = _STARTUP_GEMINI_ROLES["reviewer"]["model"]
+EFFORT = _STARTUP_GEMINI_ROLES["reviewer"]["reasoning_effort"]
+WORKER_MODEL = _STARTUP_GEMINI_ROLES["worker"]["model"]
+WORKER_EFFORT = _STARTUP_GEMINI_ROLES["worker"]["reasoning_effort"]
 EXPECTED_CLI_VERSION = RUNTIME_CONTRACT["cli_version"]
 EXPECTED_CLI_SHA256 = RUNTIME_CONTRACT["cli_sha256"]
 ALLOWED_SHELL_SCRIPTS = frozenset({
@@ -2725,7 +2749,7 @@ def validate_correction_feedback(text: str, proposal_sha256: str) -> dict:
     required = {"reviewer", "reviewed_proposal_sha256", "findings", "test_evidence"}
     if not isinstance(feedback, dict) or set(feedback) != required:
         raise ProposalError("correction feedback does not match the exact contract")
-    if feedback["reviewer"] not in {"gemini", "codex", "test-gate"}:
+    if feedback["reviewer"] not in {"gemini", "qoder", "codex", "test-gate"}:
         raise ProposalError("correction feedback reviewer is invalid")
     if feedback["reviewed_proposal_sha256"] != proposal_sha256:
         raise ProposalError("correction feedback targets a different proposal")
@@ -3287,8 +3311,19 @@ def _generation_artifact_bindings(
                                     or requested_effort != status.get("effort")))
             or (not effort_present and requested_effort is not None)):
         raise ProposalError("completion requested/profile effort binding is inconsistent")
-    recovery_model, recovery_effort = ((WORKER_MODEL, WORKER_EFFORT)
-                                       if role == "worker" else (MODEL, EFFORT))
+    bound_role = bound_gemini_role(status, role)
+    if bound_role is not None:
+        recovery_model = bound_role["model"]
+        recovery_effort = bound_role["reasoning_effort"]
+        if (status.get("model") != recovery_model or status.get("effort") != recovery_effort):
+            raise ProposalError("completion selected role differs from its model configuration snapshot")
+    else:
+        # The unchanged runtime contract identifies the original role settings
+        # for retained proofs predating the shared configuration snapshot.
+        recovery_model, recovery_effort = (
+            (RUNTIME_CONTRACT["worker_model"], RUNTIME_CONTRACT["worker_effort"])
+            if role == "worker" else (RUNTIME_CONTRACT["model"], RUNTIME_CONTRACT["effort"])
+        )
     if (normalized_observations["outcome"] == "RECOVERED_COMPLETED_RESULT"
             and (status.get("model") != recovery_model
                  or status.get("prepared_effort") != recovery_effort
@@ -3315,6 +3350,8 @@ def _generation_artifact_bindings(
         "observations": normalized_observations,
         "outer_context_exited_normally": True,
     }
+    if bound_role is not None:
+        proof["model_config_sha256"] = status["model_config_sha256"]
     if framing is not None:
         proof["input_framing"] = framing
     return proof
@@ -3765,29 +3802,11 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     # Contract/document drift must be rejected before task materialization and
     # before the Gemini CLI can consume a token or create a run artifact.
     runtime_contract_sha = _generation_contract_sha(root)
+    model_config = configured_gemini_roles(root)
+    selected_role = model_config["worker" if role == "worker" else "reviewer"]
+    role_model = selected_role["model"]
+    role_effort = selected_role["reasoning_effort"]
     task, sources = load_task(root, task_path)
-    if role == "worker":
-        policy = load_worker_routing_policy(
-            ROOT / "docs/refactor/two-server/templates/worker-model-routing.json",
-            base_dir=ROOT,
-        )
-        route = select_worker_model_route(
-            task["task_id"],
-            policy=policy,
-            default_model=WORKER_MODEL,
-            default_effort=WORKER_EFFORT,
-        )
-        if hasattr(route, "model") and hasattr(route, "effort"):
-            role_model = route.model
-            role_effort = route.effort
-        elif isinstance(route, dict):
-            role_model = route["model"]
-            role_effort = route["effort"]
-        else:
-            role_model, role_effort = route
-    else:
-        role_model = MODEL
-        role_effort = EFFORT
     prep_notes = enrich_repository_dependency_context(
         root, task, sources, task_preparation_notes(task, sources)
     )
@@ -3797,10 +3816,11 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     if fallback_from_run_id is not None:
         if role != "worker":
             raise ProposalError("fallback is only supported for worker role")
+        policy = load_worker_routing_policy(
+            ROOT / "docs/refactor/two-server/templates/worker-model-routing.json", base_dir=ROOT,
+        )
         if not policy.enabled:
             raise ProposalError("worker routing policy is disabled")
-        if role_model != policy.model:
-            raise ProposalError("selected route model does not match policy model")
         if not isinstance(autopilot_run_id, str) or not autopilot_run_id.strip():
             raise ProposalError("nonempty controller ID required for fallback")
         if (
@@ -3813,8 +3833,6 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         fallback_receipt = _load_bound_opus_fallback_receipt(
             root, fallback_from_run_id, task, sources, head, autopilot_run_id
         )
-        role_model = WORKER_MODEL
-        role_effort = WORKER_EFFORT
     initial_status = git(root, "status", "--porcelain=v1", "--untracked-files=all")
     material = {"task": task, "source_head": head, "sources": sources}
     input_hashes = {}
@@ -4000,6 +4018,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                         "authority": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
                         "completion_policy": GENERATION_COMPLETION_POLICY,
                         "runtime_contract_sha256": runtime_contract_sha,
+                        "model_config": model_config,
+                        "model_config_sha256": sha(serialize_json(model_config)),
                         "compact_review": is_compact_review,
                         "cli": initial_cli_identity, "cli_source": cli_source,
                         "session_gate": session_gate}
@@ -4029,10 +4049,6 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 write_json(out / "status.json", meta)
                 active_sources = candidate_sources if candidate_sources is not None else sources
                 effort_args = ["--effort", role_effort]
-                if role == "worker" and policy.enabled and role_model == policy.model:
-                    if role_effort != policy.effort:
-                        raise ProposalError("invalid worker model route effort")
-                    effort_args = []
                 meta["generation_effort_requested"] = role_effort if effort_args else None
                 meta["effort_arg_present"] = bool(effort_args)
                 response_schema_path = out / "response-schema.json"
@@ -4067,6 +4083,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 # Auth belongs to the CLI. No credential files are read or copied here.
                 if pre_provider_check is not None:
                     pre_provider_check()
+                if configured_gemini_roles(root) != model_config:
+                    raise ProposalError("Gemini model configuration changed before dispatch")
                 validate_profile(profile, fresh=True)
                 if bounded_file_bytes(root, response_schema_path, MAX_CONTEXT, "response schema") != response_schema_bytes:
                     raise ProposalError("response schema binding changed before dispatch")
@@ -4077,7 +4095,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                         original_sources=sources,
                     )
 
-                if input_framing is None and role_model in {WORKER_MODEL, MODEL}:
+                if input_framing is None:
                     generation_policy = GenerationRecoveryPolicy(final_frame_check)
                 capture_options = (
                     {"generation_completion": generation_policy}
@@ -4265,6 +4283,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
             raise ProposalError("task/source bytes changed before generation publication")
         if _generation_contract_sha(root) != runtime_contract_sha:
             raise ProposalError("generation contract changed before publication")
+        if configured_gemini_roles(root) != model_config:
+            raise ProposalError("Gemini model configuration changed before publication")
         if capture_outcome is not None and pre_provider_check is not None:
             pre_provider_check()
         if pending_delta is not None:

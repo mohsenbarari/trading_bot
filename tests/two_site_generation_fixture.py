@@ -42,8 +42,16 @@ def seal_completion_fixture(root: Path, run_dir: Path) -> None:
     result_bytes = (run_dir / "result.json").read_bytes()
     result = json.loads(result_bytes)
     role, task, sources = status["role"], snapshot["task"], snapshot["sources"]
-    model = status.setdefault("model", runner.WORKER_MODEL if role == "worker" else runner.MODEL)
-    effort = status.setdefault("effort", runner.WORKER_EFFORT if role == "worker" else runner.EFFORT)
+    roles = runner.configured_gemini_roles(root)
+    configured = roles["worker" if role == "worker" else "reviewer"]
+    model = status.setdefault("model", configured["model"])
+    legacy_model = runner.RUNTIME_CONTRACT["worker_model" if role == "worker" else "model"]
+    legacy_effort = runner.RUNTIME_CONTRACT["worker_effort" if role == "worker" else "effort"]
+    effort = status.setdefault("effort", legacy_effort if model == legacy_model
+                               and model != configured["model"] else configured["reasoning_effort"])
+    if model == configured["model"] and effort == configured["reasoning_effort"]:
+        status.setdefault("model_config", roles)
+        status.setdefault("model_config_sha256", runner.sha(runner.serialize_json(roles)))
     status.setdefault("head", snapshot["source_head"])
     cid = status["conversation_id"]
     active_sources, force_full = sources, ()
@@ -162,6 +170,8 @@ def seal_completion_fixture(root: Path, run_dir: Path) -> None:
         "delta_result_sha256": delta_sha, "result_sha256": runner.sha(result_bytes),
         "observations": observations, "outer_context_exited_normally": True,
     }
+    if "model_config_sha256" in status:
+        proof["model_config_sha256"] = status["model_config_sha256"]
     proof_bytes = runner.serialize_json(proof)
     proof_path = run_dir / "transport-completion.json"
     proof_path.write_bytes(proof_bytes)

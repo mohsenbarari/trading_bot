@@ -1,5 +1,8 @@
 # اتوماسیون Codex و Antigravity — قرارداد جاری
 
+> Runtime migration 2026-11-03: active role models and reasoning are read from `docs/refactor/two-server/templates/automation-models.json`. Qoder owns coordination and final acceptance; Gemini owns proposal generation and independent first review. `gemini-runtime-contract.json` retains historical provenance and CLI/completion pins; its historical role-model fields do not select new runs. Source/proposal binding, native tests, independent sessions, serial Git and explicit STOP remain required.
+
+
 به‌روز: ۲۰۲۶-۱۰-۱۹. مسیر پیش‌فرض توسعهٔ خودکار:
 Gemini Worker → Gemini Reviewer مستقل → Codex review/apply/test/commit.
 تماس provider در مسیر عادی و `submit-maintenance` فقط از Broker محلیِ محدود
@@ -158,14 +161,14 @@ clauseهای محافظت‌شده، assertionهای hash و همهٔ negative v
 قرارداد Runner دقیقاً شش کلید دارد:
 `task_id`, `goal`, `context_files`, `allowed_files`, `requirements`, `test_selectors`.
 
-برای فریز P1-00b، `P1-00B-BATCH-V1` تنها قالب مجاز برای بسته‌کردن کارهای مستقل است:
-۲ تا ۴ handler از **یک** ماژول با fixture واقعاً مشترک و hermetic در یک فایل test. هر
-requirement به‌صورت مستقل handler، scenario و selector را ثبت می‌کند و selectorهای task باید
-دقیقاً با همان‌ها برابر باشند؛ پس دریافت یک commit بسته‌ای هرگز شاهد یکپارچه یا Stage closure
-نمی‌سازد. مسیرهای origin/persistence/retry/session/reload/cross-module بسته نمی‌شوند. builder
-پیش از تماس با مدل، قالب ناقص یا بزرگ‌شده را fail-closed رد می‌کند.
-فهرست‌ها یکتا، غیرخالی و حداکثر ۳۲ عضو هستند. شمارهٔ نیازمندی از ۱ مطابق ترتیب فهرست.
-فایل‌های مجازِ موجود کامل فرستاده می‌شوند؛ فایل جدید content/hash اولیهٔ null دارد.
+سیاست جاری بسته‌بندی، ۳ نوامبر ۲۰۲۶: `P1-00B-BATCH-V1` قرارداد تاریخیِ
+۲ تا ۴ handler از یک ماژول و یک فایل تست باقی می‌ماند و اعتبارسنجی آن تغییر نمی‌کند.
+این قالب تنها شکل مجاز کار جدید نیست. یک Task عادی با همان شش کلید می‌تواند یک
+نتیجهٔ رفتاری منسجم را با چند سناریوی مرتبط، از جمله persistence/retry/reload/origin،
+پوشش دهد؛ به شرط زمینهٔ کامل، assertion و selector مستقل برای هر سناریو، بودجهٔ
+واقعیِ ورودی/خروجی و بازبینی تمام candidate. برای چنین Taskهایی از scenario_key عادی
+و توصیفی استفاده شود. شواهد، پذیرش اتمیک و Git سریال حفظ می‌شوند؛ هیچ شرط پوشش،
+High یا پایان Stage سبک نمی‌شود و Task تاریخی یا reservation قبلی بازنویسی نمی‌شود.
 
 فرمان آماده‌سازی محلی، بدون تماس با مدل:
 

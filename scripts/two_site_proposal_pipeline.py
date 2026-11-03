@@ -2,7 +2,7 @@
 """Proposal-only coordinator for fresh Gemini Worker and Reviewer orchestration.
 
 This pipeline is proposal-only and only removes orchestration repetition:
-Codex still performs final exact task/source/proposal/review inspection,
+The coordinator still performs final exact task/source/proposal/review inspection,
 exact-byte application, tests and all Git operations.
 """
 from __future__ import annotations
@@ -17,20 +17,24 @@ from typing import Any, Callable, Mapping
 
 try:
     from scripts.two_site_proposal_runner import (
-        MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ForbiddenToolAttemptError,
+        MAX_CONTEXT, MAX_OUTPUT, MODEL, WORKER_MODEL, WORKER_EFFORT, RUNTIME_CONTRACT, ForbiddenToolAttemptError,
         CorrectionDeltaError, ProposalError, ProposalProfileError, RetryableProviderOutputError, RetryableProviderSessionError,
         _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task as _load_task,
-        run as runner_run, serialize_json, unique_json,
+        run as runner_run, serialize_json, unique_json, bound_gemini_role,
+        is_retryable_interrupted_stream, is_retryable_zero_token_stream,
+        _framed_input_plan, _framed_stream_projection,
         validate_correction_feedback, validate_generation_completion, validate_result, write_json,
     )
 except ModuleNotFoundError:
     from two_site_proposal_runner import (  # type: ignore[no-redef]
-        MAX_CONTEXT, MODEL, WORKER_MODEL, WORKER_EFFORT, ForbiddenToolAttemptError,
+        MAX_CONTEXT, MAX_OUTPUT, MODEL, WORKER_MODEL, WORKER_EFFORT, RUNTIME_CONTRACT, ForbiddenToolAttemptError,
         CorrectionDeltaError, ProposalError, ProposalProfileError, RetryableProviderOutputError, RetryableProviderSessionError,
         _load_bound_opus_fallback_receipt,
         bounded_file_bytes, bounded_file_text, file_sha256, git, load_task as _load_task,
-        run as runner_run, serialize_json, unique_json,
+        run as runner_run, serialize_json, unique_json, bound_gemini_role,
+        is_retryable_interrupted_stream, is_retryable_zero_token_stream,
+        _framed_input_plan, _framed_stream_projection,
         validate_correction_feedback, validate_generation_completion, validate_result, write_json,
     )
 
@@ -50,9 +54,9 @@ except ImportError:
     )
 
 try:
-    from scripts.two_site_semantic_attempts import reserve_semantic_attempt
+    from scripts.two_site_semantic_attempts import reserve_semantic_attempt, read_existing_semantic_attempt
 except ModuleNotFoundError:
-    from two_site_semantic_attempts import reserve_semantic_attempt
+    from two_site_semantic_attempts import reserve_semantic_attempt, read_existing_semantic_attempt
 
 try:
     from scripts.two_site_quota_evidence import provider_for_model
@@ -253,7 +257,7 @@ def _derive_verifier_resume_artifacts(
     if not isinstance(verifier_run_id, str):
         raise ProposalError(f"quota_attempt.run_id must be str, got {type(verifier_run_id).__name__}")
     verifier_match = re.fullmatch(
-        rf"^{re.escape(orig_run_prefix)}-(?:reviewer|verifier)-([0-2])(?:-retry-[12])?$",
+        rf"^{re.escape(orig_run_prefix)}(?:-(?:reviewer|verifier)-([0-2])|-v([0-2])r[12])(?:-retry-[12])?$",
         verifier_run_id,
     )
     if not verifier_match:
@@ -261,7 +265,7 @@ def _derive_verifier_resume_artifacts(
             f"quota_attempt.run_id {verifier_run_id!r} does not match original run_prefix "
             f"{orig_run_prefix!r} reviewer/verifier pattern"
         )
-    verifier_index = int(verifier_match.group(1))
+    verifier_index = int(verifier_match.group(1) or verifier_match.group(2))
 
     correction_count = pipeline_state.get("correction_count")
     if type(correction_count) is not int or type(correction_count) is bool or not (0 <= correction_count <= 2):
@@ -524,8 +528,16 @@ def _extract_bound_quota_evidence(
     if role not in ("worker", "verifier"):
         return None
 
-    if role == "verifier":
-        expected_model = MODEL
+    try:
+        captured_role = bound_gemini_role(status, role)
+    except ProposalError:
+        return None
+    if captured_role is not None:
+        if expected_task_id is not None and status.get("task_id") != expected_task_id:
+            return None
+        expected_model = captured_role["model"]
+    elif role == "verifier":
+        expected_model = RUNTIME_CONTRACT["model"]
     elif role == "worker":
         if isinstance(expected_task_id, str) and expected_task_id.strip():
             if status.get("task_id") != expected_task_id:
@@ -541,7 +553,7 @@ def _extract_bound_quota_evidence(
                 return None
             if policy.enabled:
                 return None
-            expected_model = WORKER_MODEL
+            expected_model = RUNTIME_CONTRACT["worker_model"]
     else:
         return None
 
@@ -638,15 +650,16 @@ def normalize_finding(text: str) -> str:
 
 
 def expected_role_model(role: str, task_id: str) -> str:
+    """Historical unsnapshotted routing; fresh runs carry their own role snapshot."""
     if role == "verifier":
-        return MODEL
+        return RUNTIME_CONTRACT["model"]
     if role == "worker":
         policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
         route = select_worker_model_route(
             task_id,
             policy=policy,
-            default_model=WORKER_MODEL,
-            default_effort=WORKER_EFFORT,
+            default_model=RUNTIME_CONTRACT["worker_model"],
+            default_effort=RUNTIME_CONTRACT["worker_effort"],
         )
         return route.model
     raise ProposalError(f"unsupported role: {role!r}")
@@ -663,6 +676,11 @@ def expected_bound_role_model(
 ) -> str:
     if not isinstance(status, dict):
         raise ProposalError(f"status must be dict, got {type(status).__name__}")
+    bound_role = bound_gemini_role(status, role)
+    if bound_role is not None:
+        if "fallback_from_run_id" in status or "fallback_receipt" in status:
+            raise ProposalError("configured Gemini role cannot use legacy fallback metadata")
+        return bound_role["model"]
     has_fallback_id = "fallback_from_run_id" in status
     has_fallback_receipt = "fallback_receipt" in status
     if not has_fallback_id and not has_fallback_receipt:
@@ -675,7 +693,7 @@ def expected_bound_role_model(
             policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
             if policy.enabled:
                 raise ProposalError("missing or invalid top-level task_id in expected_task")
-            return WORKER_MODEL
+            return RUNTIME_CONTRACT["worker_model"]
         raise ProposalError(f"unsupported role: {role!r}")
 
     if not (has_fallback_id and has_fallback_receipt):
@@ -702,8 +720,8 @@ def expected_bound_role_model(
     route = select_worker_model_route(
         task_id,
         policy=policy,
-        default_model=WORKER_MODEL,
-        default_effort=WORKER_EFFORT,
+        default_model=RUNTIME_CONTRACT["worker_model"],
+        default_effort=RUNTIME_CONTRACT["worker_effort"],
     )
     if route.model != policy.model:
         raise ProposalError("fallback requires selected route model to match policy model exactly")
@@ -722,7 +740,7 @@ def expected_bound_role_model(
             f"status run_id mismatch: expected {run_id!r}, got {status.get('run_id')!r}"
         )
 
-    if status.get("model") != WORKER_MODEL:
+    if status.get("model") != RUNTIME_CONTRACT["worker_model"]:
         raise ProposalError(
             f"status model mismatch: expected {WORKER_MODEL!r}, got {status.get('model')!r}"
         )
@@ -742,7 +760,7 @@ def expected_bound_role_model(
     if status_receipt != canonical_receipt:
         raise ProposalError("status fallback_receipt does not match canonical receipt")
 
-    return WORKER_MODEL
+    return RUNTIME_CONTRACT["worker_model"]
 
 
 def validate_run(
@@ -1248,6 +1266,11 @@ _EMPTY_INITIAL_PROFILE = (
     "PREP_DIAG phase=SECOND reason=INITIALIZER_FAILED attempts=2 "
     "invalid=0 sqlite=0 multiple=0 ui=NONEMPTY init=OWNED_INIT_ONLY"
 )
+_EMPTY_INITIAL_PROFILE_PRE_SECOND = _EMPTY_INITIAL_PROFILE.replace(
+    "phase=SECOND reason=INITIALIZER_FAILED attempts=2",
+    "phase=PRE_SECOND reason=PRISTINE_RECHECK_PERSISTED_WAL_CONTRACT attempts=1",
+)
+_EMPTY_INITIAL_PROFILES = frozenset({_EMPTY_INITIAL_PROFILE, _EMPTY_INITIAL_PROFILE_PRE_SECOND})
 
 
 def _retryable_profile_preparation(
@@ -1255,7 +1278,7 @@ def _retryable_profile_preparation(
     task: dict, error: ProposalProfileError,
 ) -> bool:
     """Admit only the observed owned failure before any generation dispatch."""
-    if type(error) is not ProposalProfileError or str(error) != _EMPTY_INITIAL_PROFILE:
+    if type(error) is not ProposalProfileError or str(error) not in _EMPTY_INITIAL_PROFILES:
         return False
     allowed = {"task.json", "prompt.txt", "response-schema.json", "status.json", "input-framing.json"}
     forbidden_fields = {
@@ -1287,7 +1310,9 @@ def _retryable_profile_preparation(
         return (
             status.get("run_id") == run_id and status.get("role") == role
             and status.get("head") == head and status.get("task_id") == task["task_id"]
-            and status.get("model") == expected_role_model(role, task["task_id"])
+            and status.get("model") == expected_bound_role_model(
+                root, role, run_id, head, task, snapshot.get("sources", {}), status,
+            )
             and status.get("state") == "BLOCKED"
             and status.get("authority") == "PROPOSAL_ONLY_NOT_ACCEPTANCE"
             and status.get("error") == "ProposalProfileError: " + str(error)
@@ -1438,6 +1463,271 @@ def run_provider_session(
     ) from last_error
 
 
+class ReviewerPhaseExhausted(ProposalError):
+    """Known transient phase failure; prior successful phases remain untouched."""
+
+    def __init__(self, receipt_path: str, failure: dict) -> None:
+        super().__init__("reviewer transient recovery exhausted: two continuation batches used")
+        self.phase = "reviewer"
+        self.failure_code = "REVIEWER_TRANSIENT_BUDGET_EXHAUSTED"
+        self.receipt_path = receipt_path
+        self.phase_failure = copy.deepcopy(failure)
+
+
+_REVIEWER_SUCCESS_ARTIFACTS = ("result.json", "delta-result.json", "transport-completion.json", "proposal.patch")
+
+
+def _reviewer_batch_failure(
+    root: Path, base_run_id: str, error: ProposalError, head: str,
+    task: dict, sources: dict, worker: tuple[str, str, str, str],
+    test_receipt: dict, test_sha: str,
+) -> list[dict] | None:
+    """Recognize only failed, fully retained transient attempts, never outputs."""
+    if (type(error) is not ProposalError
+            or str(error) != f"provider session retry exhausted for {base_run_id} after 3 attempts"
+            or type(error.__cause__) not in {RetryableProviderSessionError, ProposalProfileError}):
+        return None
+    failures = []
+    for run_id in (base_run_id, f"{base_run_id}-retry-1", f"{base_run_id}-retry-2"):
+        run_dir = root / ".local/two-site-refactor/proposals" / run_id
+        try:
+            ds = run_dir.lstat()
+            if (run_dir.resolve(strict=True) != run_dir or not stat.S_ISDIR(ds.st_mode)
+                    or ds.st_uid != os.geteuid() or ds.st_mode & 0o022):
+                return None
+            if any(os.path.lexists(run_dir / name) for name in _REVIEWER_SUCCESS_ARTIFACTS):
+                return None
+            status_bytes = bounded_file_bytes(root, run_dir / "status.json", MAX_CONTEXT, "failed reviewer status")
+            status = unique_json(status_bytes.decode("utf-8"))
+            snapshot_bytes = bounded_file_bytes(root, run_dir / "task.json", 3 * MAX_CONTEXT, "failed reviewer task")
+            snapshot = unique_json(snapshot_bytes.decode("utf-8"))
+            prompt_bytes = bounded_file_bytes(root, run_dir / "prompt.txt", 2 * MAX_CONTEXT, "failed reviewer prompt")
+            framing_path = run_dir / "input-framing.json"
+            framing_bytes = (bounded_file_bytes(root, framing_path, 8192, "failed reviewer framing")
+                             if os.path.lexists(framing_path) else None)
+            if (not isinstance(status, dict) or not isinstance(snapshot, dict)
+                    or status.get("state") != "BLOCKED" or status.get("run_id") != run_id
+                    or status.get("role") != "verifier" or status.get("head") != head
+                    or status.get("task_id") != task["task_id"]
+                    or status.get("authority") != "PROPOSAL_ONLY_NOT_ACCEPTANCE"
+                    or status.get("secondary_context_error_type") is not None
+                    or status.get("quota_evidence") is not None
+                    or snapshot.get("source_head") != head or snapshot.get("task") != task
+                    or snapshot.get("sources") != sources or snapshot.get("proposal") != worker[2]
+                    or snapshot.get("test_evidence") != test_receipt
+                    or status.get("input_worker_run_id") != worker[0]
+                    or status.get("input_worker_conversation_id") != worker[3]
+                    or status.get("input_proposal_sha256") != worker[1]
+                    or status.get("input_test_evidence_sha256") != test_sha):
+                return None
+            model = expected_bound_role_model(root, "verifier", run_id, head, task, sources, status)
+            if status.get("model") != model:
+                return None
+            error_text = status.get("error")
+            kind = None
+            conversation_id = None
+            stream_sha = None
+            for message in _EMPTY_INITIAL_PROFILES:
+                if error_text == "ProposalProfileError: " + message and _retryable_profile_preparation(
+                    root, run_dir, run_id, "verifier", head, task, ProposalProfileError(message),
+                ):
+                    kind = "EMPTY_INITIAL_PROFILE"
+                    break
+            if kind is None:
+                allowed_errors = {
+                    "RetryableProviderSessionError: CLI did not complete one successful session",
+                    "RetryableProviderSessionError: provider stream interrupted before a complete result",
+                    "ProposalError: provider stream interrupted before a complete result",
+                }
+                if error_text not in allowed_errors:
+                    return None
+                raw = bounded_file_text(root, run_dir / "stream.jsonl", MAX_OUTPUT, "failed reviewer stream")
+                stream_sha = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+                events = [unique_json(line) for line in raw.splitlines() if line.strip()]
+                initial = [event for event in events if type(event) is dict and event.get("event") == "init"]
+                if len(initial) != 1 or type(initial[0].get("conversation_id")) is not str:
+                    return None
+                conversation_id = initial[0]["conversation_id"]
+                if status.get("input_transport") == "FULL_INPUT_ACK_V1":
+                    manifest, _wires = _framed_input_plan(prompt_bytes.decode("utf-8"))
+                    if (framing_bytes != serialize_json(manifest)
+                            or hashlib.sha256(framing_bytes).hexdigest() != status.get("input_framing_sha256")):
+                        return None
+                    try:
+                        _framed_stream_projection(raw, manifest, model, conversation_id, complete=False)
+                    except ProposalError as framed_error:
+                        cause = framed_error.__context__
+                        if (type(framed_error) is not ProposalError
+                                or type(cause) is not RetryableProviderSessionError
+                                or framed_error.__cause__ is not None or not framed_error.__suppress_context__
+                                or str(framed_error) != str(cause)
+                                or str(framed_error) != "provider stream interrupted before a complete result"):
+                            return None
+                    else:
+                        return None
+                elif ("input_transport" in status or "input_framing_sha256" in status
+                        or framing_bytes is not None
+                        or not (is_retryable_interrupted_stream(raw, model) or is_retryable_zero_token_stream(raw, model))):
+                    return None
+                if any(item["conversation_id"] == conversation_id for item in failures):
+                    return None
+                kind = "PROVIDER_TRANSPORT_INTERRUPTED"
+            failures.append({"run_id": run_id, "status_sha256": hashlib.sha256(status_bytes).hexdigest(),
+                             "task_snapshot_sha256": hashlib.sha256(snapshot_bytes).hexdigest(),
+                             "prompt_sha256": hashlib.sha256(prompt_bytes).hexdigest(),
+                             "input_framing_sha256": hashlib.sha256(framing_bytes).hexdigest() if framing_bytes is not None else None,
+                             "stream_sha256": stream_sha,
+                             "kind": kind, "conversation_id": conversation_id})
+        except (ProposalError, OSError, UnicodeError, ValueError):
+            return None
+    return failures
+
+
+def _validate_reviewer_continuation(
+    root: Path, task_path: Path, run_prefix: str, head: str, refs: dict,
+    task: dict, sources: dict, state: dict, worker: tuple[str, str, str, str],
+    test_receipt: dict, test_sha: str, correction_count: int,
+) -> None:
+    """Reuse the quota continuation's existing physical Worker/native readers."""
+    if (state.get("state") in {"READY_FOR_CODEX", "ACCEPTED", "COMPLETE"}
+            or type(correction_count) is not int or not 0 <= correction_count <= 2
+            or state.get("correction_count") != correction_count
+            or state.get("final_worker_run_id") != worker[0]
+            or state.get("proposal_sha256") != worker[1]
+            or state.get("final_reviewer_run_id") is not None or state.get("reviewer_path") is not None):
+        raise ProposalError("reviewer continuation phase or proposal mismatch")
+    check_state(root, head, refs, task_path, task, sources)
+    if any(os.path.lexists(path) for path in (root / "STOP", root / ".local/two-site-refactor/autopilot/STOP")):
+        raise ProposalError("STOP blocks reviewer continuation")
+    pipeline_dir = root / ".local/two-site-refactor/pipeline"
+    semantic = read_existing_semantic_attempt(root, pipeline_dir, task, run_prefix)
+    if semantic["fingerprint"] != state.get("semantic_task_fingerprint"):
+        raise ProposalError("reviewer continuation semantic reservation mismatch")
+    artifacts = {
+        "task_id": task["task_id"], "source_head": head,
+        "original_run_prefix": run_prefix, "correction_count": correction_count,
+        "final_worker_run_id": worker[0], "proposal_path": state.get("proposal_path"),
+        "proposal_sha256": worker[1], "pre_review_test_state": state.get("pre_review_test_state"),
+        "pre_review_test_path": state.get("pre_review_test_path"), "pre_review_test_sha256": test_sha,
+    }
+    if state.get("pre_review_test_sha256") != test_sha:
+        raise ProposalError("reviewer continuation native receipt mismatch")
+    receipt = _load_verifier_pre_review_receipt(root, artifacts)
+    if receipt != test_receipt or receipt["selectors"] != task["test_selectors"]:
+        raise ProposalError("reviewer continuation requires the same passed native selectors")
+    try:
+        from scripts.two_site_quota_resume_worker_reader import load_prior_worker_chain
+    except ImportError:
+        from two_site_quota_resume_worker_reader import load_prior_worker_chain
+    validated = load_prior_worker_chain(root, task_path, artifacts)
+    if (validated["result_sha"] != worker[1] or validated["result_text"] != worker[2]
+            or validated["conversation_id"] != worker[3]):
+        raise ProposalError("reviewer continuation prior Worker changed")
+
+
+def _run_reviewer_phase(
+    *, root: Path, task_path: Path, run_prefix: str, timeout: int, cli: Path | None,
+    head: str, refs: dict, task: dict, sources: dict, state: dict,
+    evidence_dir: Path, state_check: Callable[[], None],
+    worker: tuple[str, str, str, str], worker_result_path: Path,
+    receipt: dict, receipt_path: Path, receipt_sha: str, correction_count: int,
+    seen_convs: set[str],
+) -> tuple[str, Path]:
+    """Keep Worker/native and allow at most two extra fresh transient-only batches.
+
+    Caller retains the existing pipeline/Broker locks. Each batch uses the existing
+    three-session bound; semantic corrections stay in the original 0..2 loop.
+    No partial result, quota failure, semantic/output error or ambiguous cleanup is
+    eligible. Immutable failed-batch records preserve counters and evidence.
+    """
+    expected_evidence = root / ".local/two-site-refactor/pipeline" / run_prefix
+    evidence_stat = evidence_dir.lstat()
+    if (evidence_dir != expected_evidence or evidence_dir.resolve(strict=True) != expected_evidence
+            or not stat.S_ISDIR(evidence_stat.st_mode) or evidence_stat.st_uid != os.geteuid()
+            or stat.S_IMODE(evidence_stat.st_mode) != 0o700):
+        raise ProposalError("reviewer continuation evidence directory is not the owned pipeline directory")
+    if state.get("state") in {"READY_FOR_CODEX", "ACCEPTED", "COMPLETE"}:
+        raise ProposalError("completed pipeline cannot resume a reviewer")
+    recorded_failures = []
+    for batch in range(3):
+        base = f"{run_prefix}-reviewer-{correction_count}" if batch == 0 else f"{run_prefix}-v{correction_count}r{batch}"
+        if batch:
+            _validate_reviewer_continuation(
+                root, task_path, run_prefix, head, refs, task, sources, state,
+                worker, receipt, receipt_sha, correction_count,
+            )
+            for prior in recorded_failures:
+                directory = root / ".local/two-site-refactor/proposals" / prior["run_id"]
+                for name, key, limit in (("status.json", "status_sha256", MAX_CONTEXT),
+                                         ("task.json", "task_snapshot_sha256", 3 * MAX_CONTEXT),
+                                         ("prompt.txt", "prompt_sha256", 2 * MAX_CONTEXT),
+                                         ("input-framing.json", "input_framing_sha256", 8192),
+                                         ("stream.jsonl", "stream_sha256", MAX_OUTPUT)):
+                    p = directory / name
+                    expected = prior[key]
+                    if (expected is None and os.path.lexists(p)) or (expected is not None and
+                            hashlib.sha256(bounded_file_bytes(root, p, limit, "prior failed reviewer evidence")).hexdigest() != expected):
+                        raise ProposalError("failed reviewer evidence changed before continuation")
+                if any(os.path.lexists(directory / name) for name in _REVIEWER_SUCCESS_ARTIFACTS):
+                    raise ProposalError("failed reviewer acquired success artifacts before continuation")
+        try:
+            return run_provider_session(
+                root, task_path, "verifier", base, timeout, state_check,
+                proposal=worker_result_path, cli=cli, test_evidence=receipt_path, expected_head=head,
+            )
+        except ProposalError as exc:
+            state_check()
+            failures = _reviewer_batch_failure(root, base, exc, head, task, sources, worker, receipt, receipt_sha)
+            if failures is None:
+                raise
+            failed_conversations = {item["conversation_id"] for item in failures
+                                    if item["conversation_id"] is not None}
+            if failed_conversations.intersection(seen_convs):
+                raise ProposalError("reviewer continuation reused a prior conversation") from exc
+            _validate_reviewer_continuation(
+                root, task_path, run_prefix, head, refs, task, sources, state,
+                worker, receipt, receipt_sha, correction_count,
+            )
+            recorded_failures.extend(failures)
+            seen_convs.update(failed_conversations)
+            failure = {
+                "schema_version": "1.0", "phase": "reviewer", "failure_code": "TRANSIENT_REVIEWER_PHASE",
+                "task_id": task["task_id"], "task_sha256": file_sha256(task_path),
+                "source_head": head, "sources_sha256": hashlib.sha256(serialize_json(sources)).hexdigest(),
+                "semantic_task_fingerprint": state["semantic_task_fingerprint"],
+                "run_prefix": run_prefix, "correction_count": correction_count,
+                "worker_run_id": worker[0], "proposal_sha256": worker[1], "pre_review_test_sha256": receipt_sha,
+                "failed_attempts": failures, "resume_batches_used": batch, "maximum_resume_batches": 2,
+                "remaining_resume_batches": 2 - batch,
+                "action": "CONTINUE_SAME_REVIEWER_PHASE" if batch < 2 else "HALT_BUDGET_EXHAUSTED",
+            }
+            path = evidence_dir / f"reviewer-phase-{correction_count}-batch-{batch}.json"
+            raw = serialize_json(failure)
+            if len(raw) > 16384:
+                raise ProposalError("reviewer phase failure record exceeds bound")
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            parent_fd = os.open(evidence_dir, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+            if batch == 2:
+                raise ReviewerPhaseExhausted(path.relative_to(root).as_posix(), failure) from exc
+    raise AssertionError("unreachable reviewer phase")
+
+
+def trusted_qoder_final_review_hook() -> Callable[..., dict] | None:
+    """The outside Broker policy opts in; legacy callers never launch a model."""
+    if os.environ.get("TWO_SITE_QODER_FINAL_REVIEW_REQUIRED") != "1":
+        return None
+    from scripts.two_site_qoder_review import review_proposal
+    return review_proposal
+
+
 def _run_post_worker_remainder(
     *,
     root: Path,
@@ -1461,6 +1751,7 @@ def _run_post_worker_remainder(
     seen_test_signatures: set[str],
     seen_bootstrap_signatures: set[str],
     seen_branch_factors: set[str] | None = None,
+    final_review_hook: Callable[..., dict] | None = None,
 ) -> None:
     """Execute post-worker verification, test execution, and correction loop."""
     prior_changes = worker_res["changes"]
@@ -1522,10 +1813,12 @@ def _run_post_worker_remainder(
                     seen_branch_factors.add(branch_factor)
                 feedback_payload = test_gate_feedback(receipt, current_worker[1])
             else:
-                reviewer_run_id, reviewer_dir = run_provider_session(
-                    root, task_candidate, "verifier", f"{run_prefix}-reviewer-{correction_count}", timeout,
-                    state_check, proposal=worker_result_path, cli=cli,
-                    test_evidence=receipt_path, expected_head=initial_head,
+                reviewer_run_id, reviewer_dir = _run_reviewer_phase(
+                    root=root, task_path=task_candidate, run_prefix=run_prefix, timeout=timeout, cli=cli,
+                    head=initial_head, refs=initial_refs, task=task, sources=sources, state=state,
+                    evidence_dir=evidence_dir, state_check=state_check, worker=current_worker,
+                    worker_result_path=worker_result_path, receipt=receipt, receipt_path=receipt_path,
+                    receipt_sha=receipt_sha, correction_count=correction_count, seen_convs=seen_convs,
                 )
                 reviewer_res, _st, _sha, _txt = validate_run(
                     root, reviewer_dir, "verifier", reviewer_run_id, initial_head, task, sources,
@@ -1542,11 +1835,57 @@ def _run_post_worker_remainder(
                 if reviewer_res["status"] == "VERIFIED":
                     if reviewer_res.get("findings"):
                         raise ProposalError("verified result cannot contain findings")
-                    state["state"] = "READY_FOR_CODEX"
-                    state["blockers"] = []
-                    break
-
-                findings = reviewer_res.get("findings", [])
+                    if final_review_hook is None:
+                        state["state"] = "READY_FOR_CODEX"
+                        state["blockers"] = []
+                        break
+                    if bound_gemini_role(_st, "verifier") is None:
+                        raise ProposalError("Qoder final review requires the captured current Gemini role policy")
+                    # Production supplies the independent helper; tests/legacy callers
+                    # leave this hook disabled. Preserve the real Gemini VERIFIED result.
+                    qoder_receipt = final_review_hook(
+                        root, task_candidate, current_worker[0], reviewer_run_id,
+                        current_worker[1], timeout=timeout,
+                    )
+                    state_check()
+                    qoder_path = root / ".local/two-site-refactor/qoder-reviews" / (current_worker[1] + ".json")
+                    qoder_bytes = bounded_file_bytes(root, qoder_path, MAX_CONTEXT, "Qoder final review receipt")
+                    if unique_json(qoder_bytes.decode("utf-8")) != qoder_receipt:
+                        raise ProposalError("Qoder final review receipt changed")
+                    value = qoder_receipt.get("result") if type(qoder_receipt) is dict else None
+                    if (type(value) is not dict or set(value) != {"decision", "findings", "proposal_sha256", "source_head"}
+                            or value.get("source_head") != initial_head or value.get("proposal_sha256") != current_worker[1]
+                            or value.get("decision") not in {"APPROVE", "REQUEST_CHANGES"}
+                            or type(value.get("findings")) is not list or len(value["findings"]) > 32
+                            or not all(type(f) is str and f.strip() and len(f.encode()) <= 4096 for f in value["findings"])
+                            or (value["decision"] == "APPROVE") != (value["findings"] == [])):
+                        raise ProposalError("Qoder final review decision or proposal binding is invalid")
+                    history_path = evidence_dir / f"qoder-review-{correction_count}.json"
+                    history = {
+                        "schema_version": "1.0", "correction_count": correction_count,
+                        "worker_run_id": current_worker[0], "gemini_reviewer_run_id": reviewer_run_id,
+                        "proposal_sha256": current_worker[1], "pre_review_test_sha256": receipt_sha,
+                        "qoder_review_receipt": qoder_path.relative_to(root).as_posix(),
+                        "qoder_review_receipt_sha256": hashlib.sha256(qoder_bytes).hexdigest(),
+                        "decision": value["decision"],
+                    }
+                    fd = os.open(history_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+                    with os.fdopen(fd, "wb") as output:
+                        output.write(serialize_json(history)); output.flush(); os.fsync(output.fileno())
+                    parent_fd = os.open(evidence_dir, os.O_RDONLY | os.O_DIRECTORY)
+                    try:
+                        os.fsync(parent_fd)
+                    finally:
+                        os.close(parent_fd)
+                    if value["decision"] == "APPROVE":
+                        state["state"] = "READY_FOR_CODEX"
+                        state["blockers"] = []
+                        break
+                    findings = value["findings"]
+                    feedback_reviewer = "qoder"
+                else:
+                    findings = reviewer_res.get("findings", [])
+                    feedback_reviewer = "gemini"
                 recurring = [f for f in findings if normalize_finding(f) in seen_norm_findings]
                 if recurring:
                     raise ProposalError(f"recurring normalized findings: {recurring[0]}")
@@ -1554,7 +1893,7 @@ def _run_post_worker_remainder(
                     seen_norm_findings.add(normalize_finding(f))
 
                 feedback_payload = {
-                    "reviewer": "gemini",
+                    "reviewer": feedback_reviewer,
                     "reviewed_proposal_sha256": current_worker[1],
                     "findings": findings,
                     "test_evidence": [
@@ -1601,7 +1940,8 @@ def _run_post_worker_remainder(
         )
 
 
-def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli: Path | None, state: dict) -> dict:
+def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli: Path | None, state: dict,
+                 *, final_review_hook: Callable[..., dict] | None = None) -> dict:
     root = root.resolve(strict=True)
     task_candidate = Path(os.path.abspath(task_path if task_path.is_absolute() else root / task_path))
     if not task_candidate.is_relative_to(root):
@@ -1692,6 +2032,7 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
             seen_test_signatures=seen_test_signatures,
             seen_bootstrap_signatures=seen_bootstrap_signatures,
             seen_branch_factors=seen_branch_factors,
+            final_review_hook=final_review_hook,
         )
 
         check_state(root, initial_head, initial_refs, task_candidate, task, sources)
@@ -1703,6 +2044,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=ROOT, help="project root directory")
     parser.add_argument("--task", type=Path, required=True, help="path to task definition JSON")
     parser.add_argument("--run-prefix", type=str, required=True, help="canonical unique prefix for run IDs")
+    parser.add_argument("--qoder-final-review", action="store_true", help="trusted Broker opt-in to independent final Qoder review")
     parser.add_argument("--timeout", type=int, default=300, help="timeout per model invocation in seconds")
     parser.add_argument("--cli", type=Path, default=None, help="path to existing Antigravity CLI executable")
     args = parser.parse_args()
@@ -1717,7 +2059,11 @@ def main() -> int:
         "semantic_task_fingerprint": None,
     }
     try:
-        run_pipeline(args.root, args.task, args.run_prefix, args.timeout, args.cli, state)
+        review_options = {}
+        if args.qoder_final_review:
+            from scripts.two_site_qoder_review import review_proposal
+            review_options["final_review_hook"] = review_proposal
+        run_pipeline(args.root, args.task, args.run_prefix, args.timeout, args.cli, state, **review_options)
     except QuotaBlockError as exc:
         state["state"] = "TASK_BLOCKED"
         state["quota_evidence"] = exc.quota_evidence

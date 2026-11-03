@@ -62,13 +62,15 @@ def _is_gemini_worker_run_id(value: object) -> bool:
 def _is_gemini_reviewer_run_id(value: object) -> bool:
     if not isinstance(value, str) or not _SAFE_ID_RE.fullmatch(value):
         return False
-    return "reviewer" in value and "worker" not in value.lower()
+    return ("reviewer" in value and "worker" not in value.lower()) or bool(
+        re.fullmatch(r".+-v[0-2]r[12](?:-retry-[12])?", value)
+    )
 
 
 def _codex_observed_usage(record: object) -> dict[str, int] | None:
     if not isinstance(record, dict):
         return None
-    if record.get("usage_state") != "OBSERVED_COMPLETED_TURNS":
+    if record.get("coordinator_provider", "codex") != "codex" or record.get("usage_state") != "OBSERVED_COMPLETED_TURNS":
         return None
     keys = ("input_tokens", "cached_input_tokens", "uncached_input_tokens", "output_tokens")
     extracted: dict[str, int] = {}
@@ -239,6 +241,7 @@ def usage_from_stream(root: Path, path: Path) -> dict:
         command_groups = dict.fromkeys(COMMAND_GROUPS, 0)
         turns = commands = count = reasoning = skipped_oversized_events = 0
         reasoning_known = True
+        qoder_terminal = None
         while True:
             line = stream.readline(MAX_LINE + 1)
             if not line:
@@ -257,6 +260,10 @@ def usage_from_stream(root: Path, path: Path) -> dict:
             item = unique_json(line.decode("utf-8"))
             if not isinstance(item, dict):
                 raise ProposalError("invalid metrics event")
+            if item.get("type") == "result" and item.get("subtype") == "success" and item.get("is_error") is False:
+                if qoder_terminal is not None:
+                    raise ProposalError("duplicate Qoder metrics terminal")
+                qoder_terminal = item
             if item.get("type") == "item.completed" and isinstance(item.get("item"), dict):
                 command = item["item"]
                 if command.get("type") == "command_execution":
@@ -288,12 +295,26 @@ def usage_from_stream(root: Path, path: Path) -> dict:
                 or file_fingerprint(after) != file_fingerprint(path.stat(follow_symlinks=False))
                 or path.resolve() != path):
             raise ProposalError("metrics stream changed during read")
+    qoder_usage = None
+    if qoder_terminal is not None:
+        raw_usage = qoder_terminal.get("usage")
+        credits = qoder_terminal.get("total_credits")
+        qoder_usage = {"provider": "qoder", "token_usage_state": "UNKNOWN",
+                       "input_tokens": None, "output_tokens": None,
+                       "credits": credits if type(credits) in (int, float) and math.isfinite(credits) and credits >= 0 else None}
+        if isinstance(raw_usage, dict):
+            inp, out = raw_usage.get("input_tokens"), raw_usage.get("output_tokens")
+            # The qualified CLI returns zero token placeholders with positive credits.
+            # Preserve unknown rather than treating those placeholders as free work.
+            if type(inp) is int and type(out) is int and inp >= 0 and out >= 0 and inp + out > 0:
+                qoder_usage.update(token_usage_state="PROVIDER_REPORTED", input_tokens=inp, output_tokens=out)
     return {"usage_state": "OBSERVED_COMPLETED_TURNS" if turns else "UNKNOWN",
             **(totals if turns else missing), "completed_turns": turns,
             "reasoning_output_tokens": reasoning if turns and reasoning_known else None,
             "completed_commands": commands, "command_groups": command_groups,
             "stream_bytes": count,
-            "skipped_oversized_events": skipped_oversized_events}
+            "skipped_oversized_events": skipped_oversized_events,
+            **({"coordinator_usage": qoder_usage} if qoder_usage is not None else {})}
 
 
 def atomic_json(root: Path, path: Path, value: object, limit: int) -> None:
@@ -570,6 +591,7 @@ def record_cycle(root: Path, state_root: Path, run_dir: Path, meta: dict,
                  "input_tokens": None, "cached_input_tokens": None,
                  "uncached_input_tokens": None, "output_tokens": None}
     record = {"run_id": run_dir.name, "model": model, "effort": effort,
+              "coordinator_provider": meta.get("coordinator_provider", "codex"),
               "state": meta["state"], "head_before": meta.get("head_before"),
               "head_after": meta.get("head_after"), "finished_at": meta.get("finished_at"),
               "duration_seconds": meta.get("duration_seconds"), **usage}

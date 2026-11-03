@@ -60,7 +60,7 @@ Discover optional memory without loading it. Entries here are not default loads.
 - None enabled.
 
 ### Enabled areas
-- `areas/automation-efficiency.md` — load for Codex/Gemini automation optimization,
+- `areas/automation-efficiency.md` — load for Qoder/Gemini automation and historical Codex optimization,
   token-per-work reporting, task preparation, accepted checkpoints, quota/recovery,
   evidence batching, or parallel-worker planning; routes the AE-20260919 plan.
 - `areas/security.md` — load for security audits, dependency vulnerability remediation,

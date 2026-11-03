@@ -1,0 +1,189 @@
+"""Filesystem boundary tests; live Qoder/provider calls are never made here."""
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+from unittest.mock import patch
+
+import pytest
+
+from scripts import two_site_coordinator_sandbox as sandbox
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    common = root / ".git"
+    common.mkdir()
+    run = root / "run"
+    run.mkdir()
+    auth = tmp_path / "auth"
+    auth.mkdir()
+    for name in ("user", "machine_id"):
+        (auth / name).write_text("SYNTHETIC_PUBLIC_FIXTURE")
+    with patch.object(sandbox, "_AUTH_ROOT", auth), \
+            patch.object(sandbox, "_commit_signing_required", return_value=False), \
+            patch.object(sandbox, "_git_path", side_effect=lambda _root, flag:
+                         root if flag == "--show-toplevel" else common):
+        yield root, run, common
+
+
+def bindings(command, flag):
+    return [(command[i + 1], command[i + 2])
+            for i, value in enumerate(command[:-2]) if value == flag]
+
+
+def test_sparse_mounts_capabilities_and_public_system_files(workspace):
+    root, run, common = workspace
+    command = sandbox.buildwrap_coordinator_command(root, run, ["/usr/bin/true"], environment={})
+    assert "--unshare-all" in command and "--share-net" in command
+    assert command[command.index("--cap-drop") + 1] == "ALL"
+    assert "--clearenv" in command and "--proc" in command and "--dev" in command
+    assert bindings(command, "--bind") == [(str(root), str(root)),
+                                           (str(run / "coordinator-qoder-state"), "/root/.qoder")]
+    assert ("/usr", "/usr") in bindings(command, "--ro-bind")
+    for source, target in bindings(command, "--ro-bind"):
+        assert source not in {"/", "/root", "/srv", "/etc", "/root/.ssh", "/root/.aws"}
+        assert target != "/etc/shadow" and target != "/var/run/docker.sock"
+    assert not any("settings.json" in value or "mcp.json" in value for value in command)
+    assert command[-2:] == ["--", str(Path("/usr/bin/true").resolve())]
+
+
+def test_masks_project_live_environment_and_credential_directories(workspace):
+    root, run, _ = workspace
+    for name in (".env", ".env.local", "live.env"):
+        (root / name).write_text("SYNTHETIC_PUBLIC_FIXTURE")
+    for name in (".aws", ".ssh", "data", "uploads", "production-data"):
+        (root / name).mkdir()
+    command = sandbox.buildwrap_coordinator_command(root, run, ["/usr/bin/true"], environment={})
+    for name in (".env", ".env.local", "live.env"):
+        assert ("/dev/null", str(root / name)) in bindings(command, "--ro-bind")
+    for name in (".aws", ".ssh", "data", "uploads", "production-data"):
+        assert ["--tmpfs", str(root / name), "--remount-ro", str(root / name)] == command[
+            command.index(str(root / name)) - 1:command.index(str(root / name)) + 3]
+
+
+def test_environment_comes_from_controller_allowlist_only(workspace):
+    root, run, _ = workspace
+    environment = {
+        "TWO_SITE_ASSIGNMENT_ID": "fixture-assignment", "TWO_SITE_AUTOPILOT_RUN_ID": "fixture-run",
+        "GIT_AUTHOR_NAME": "Fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
+        "AWS_SECRET_ACCESS_KEY": "SYNTHETIC_FORBIDDEN", "SSH_AUTH_SOCK": "/forbidden",
+        "QODER_PERSONAL_ACCESS_TOKEN": "SYNTHETIC_FORBIDDEN", "TWO_SITE_API_TOKEN": "SYNTHETIC_FORBIDDEN",
+        "LD_PRELOAD": "/forbidden", "PYTHONPATH": "/forbidden",
+        "TWO_SITE_COORDINATOR_SANDBOX": "untrusted-value",
+    }
+    command = sandbox.buildwrap_coordinator_command(root, run, ["/usr/bin/true"], environment=environment)
+    forwarded = dict(bindings(command, "--setenv"))
+    assert forwarded["TWO_SITE_ASSIGNMENT_ID"] == "fixture-assignment"
+    assert forwarded["GIT_AUTHOR_EMAIL"] == "fixture@example.invalid"
+    assert forwarded["APP_ENV_FILE"] == "config/unit-test.env.example"
+    assert forwarded["PYTHONPATH"] == str(root)
+    assert forwarded["TWO_SITE_COORDINATOR_SANDBOX"] == "1"
+    assert not set(forwarded) & {"AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK", "QODER_PERSONAL_ACCESS_TOKEN",
+                                 "TWO_SITE_API_TOKEN", "LD_PRELOAD"}
+
+
+def test_pinned_executable_is_read_only_even_inside_worktree(workspace):
+    root, run, _ = workspace
+    tool = root / "pinned-cli"
+    tool.write_text("#!/bin/sh\nexit 0\n")
+    tool.chmod(0o500)
+    command = sandbox.buildwrap_coordinator_command(root, run, [str(tool)], environment={})
+    assert (str(tool), str(tool)) in bindings(command, "--ro-bind")
+
+
+def test_required_signing_policy_is_preserved_without_inherited_git_overrides(workspace):
+    root, run, _ = workspace
+    with patch.object(sandbox, "_commit_signing_required", return_value=True):
+        command = sandbox.buildwrap_coordinator_command(
+            root, run, ["/usr/bin/true"],
+            environment={"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "commit.gpgsign",
+                         "GIT_CONFIG_VALUE_0": "false"},
+        )
+    forwarded = dict(bindings(command, "--setenv"))
+    assert forwarded["GIT_CONFIG_COUNT"] == "1"
+    assert forwarded["GIT_CONFIG_KEY_0"] == "commit.gpgsign"
+    assert forwarded["GIT_CONFIG_VALUE_0"] == "true"
+
+
+@pytest.mark.parametrize("variant", ["outside-run", "symlink-root", "traversal-root", "common-escape",
+                                      "cache-symlink", "protected-symlink", "relative-executable"])
+def test_malformed_paths_and_root_escapes_are_rejected(workspace, tmp_path, variant):
+    root, run, common = workspace
+    argv = ["/usr/bin/true"]
+    if variant == "outside-run":
+        run = tmp_path
+    elif variant == "symlink-root":
+        linked = tmp_path / "linked"
+        linked.symlink_to(root, target_is_directory=True)
+        root = linked
+    elif variant == "traversal-root":
+        root = root / ".." / "repo"
+    elif variant == "common-escape":
+        other = tmp_path / "other" / ".git"
+        other.mkdir(parents=True)
+        with patch.object(sandbox, "_git_path", side_effect=[root, other]):
+            with pytest.raises(sandbox.CoordinatorSandboxError):
+                sandbox.buildwrap_coordinator_command(root, run, argv, environment={})
+        return
+    elif variant == "cache-symlink":
+        (run / "coordinator-qoder-state").symlink_to(tmp_path, target_is_directory=True)
+    elif variant == "protected-symlink":
+        (root / ".env").symlink_to(tmp_path / "missing")
+    else:
+        argv = ["true"]
+    with pytest.raises(sandbox.CoordinatorSandboxError):
+        sandbox.buildwrap_coordinator_command(root, run, argv, environment={})
+
+
+@pytest.mark.skipif(os.environ.get("RUN_REAL_COORDINATOR_SANDBOX_CANARY") != "1",
+                    reason="Native namespace canary is explicitly run outside the tool sandbox")
+def test_real_offline_sandbox_hides_host_root_and_allows_workspace_write(tmp_path):
+    root = Path(sandbox.__file__).resolve().parents[1]
+    # Public synthetic sentinel only; no host credential bytes are accessed.
+    with tempfile.TemporaryDirectory(prefix="coordinator-sandbox-forbidden-", dir="/root") as outside, \
+            tempfile.TemporaryDirectory(prefix="coordinator-sandbox-canary-", dir=root / ".local") as run:
+        sentinel = Path(outside) / "public-sentinel"
+        sentinel.write_text("SYNTHETIC_PUBLIC_SENTINEL")
+        auth = tmp_path / "auth"
+        auth.mkdir()
+        (auth / "user").write_text("SYNTHETIC_PUBLIC_AUTH_FIXTURE")
+        (auth / "machine_id").write_text("SYNTHETIC_PUBLIC_MACHINE_FIXTURE")
+        output = Path(run) / "workspace-write"
+        script = '''import errno,json,os,pathlib,subprocess,sys
+sentinel,output=sys.argv[1:]
+assert not pathlib.Path(sentinel).exists()
+for name in ['/srv','/root/.ssh','/root/secure-envs','/var/run/docker.sock','/etc/shadow']:
+ assert not pathlib.Path(name).exists(),name
+assert 'QODER_PERSONAL_ACCESS_TOKEN' not in os.environ
+assert 'AWS_SECRET_ACCESS_KEY' not in os.environ
+assert os.environ['TWO_SITE_ASSIGNMENT_ID']=='canary'
+assert os.environ['APP_ENV_FILE']=='config/unit-test.env.example'
+status=pathlib.Path('/proc/self/status').read_text()
+assert 'CapEff:\\t0000000000000000' in status
+assert 'NoNewPrivs:\\t1' in status
+for filename in ['/usr/bin/true','/root/.qoder/.auth/user']:
+ try:
+  with open(filename,'ab'):pass
+ except OSError as error:
+  assert error.errno in (errno.EROFS,errno.EACCES,errno.EPERM)
+ else:raise AssertionError('read-only mount was writable')
+pathlib.Path(output).write_text('sandbox-write-ok')
+print(json.dumps({'outside_hidden':True,'workspace_write':True,'readonly_mounts':True,'zero_capabilities':True,'no_new_privileges':True}))
+'''
+        with patch.object(sandbox, "_AUTH_ROOT", auth):
+            command = sandbox.buildwrap_coordinator_command(
+                root, Path(run), ["/usr/bin/python3", "-I", "-S", "-B", "-c", script,
+                                  str(sentinel), str(output)],
+                environment={"TWO_SITE_ASSIGNMENT_ID": "canary",
+                             "QODER_PERSONAL_ACCESS_TOKEN": "SYNTHETIC_FORBIDDEN",
+                             "AWS_SECRET_ACCESS_KEY": "SYNTHETIC_FORBIDDEN"},
+            )
+        result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, timeout=15, check=False)
+        assert result.returncode == 0, result.stderr.decode(errors="replace")[:1000]
+        assert json.loads(result.stdout)["outside_hidden"] is True
+        assert output.read_text() == "sandbox-write-ok"

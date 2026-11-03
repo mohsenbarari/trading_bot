@@ -9,10 +9,10 @@ repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a Gi
 repo_root="$(realpath -e "$repo_root")"
 schema_rel="docs/refactor/two-server/templates/governance-review.schema.json"
 schema_path="$repo_root/$schema_rel"
-authorization="$repo_root/.local/two-site-refactor/authorizations/CODEX_SOURCE_REVIEW.md"
-codex_bin="$(command -v codex 2>/dev/null || true)"
-codex_model="gpt-6-sol"
-codex_reasoning_effort="xhigh"
+authorization="$repo_root/.local/two-site-refactor/authorizations/QODER_SOURCE_REVIEW.md"
+review_bridge="$repo_root/scripts/two_site_review_bridge.py"
+# CODEX_FINAL_REVIEWER is a historical SCHEMA_ROLE; execution is Qoder.
+
 amendment_id=""; bundle_rel=""; base_sha=""; head_sha=""
 
 while (($#)); do
@@ -34,8 +34,9 @@ while (($#)); do
 done
 
 require_command git; require_command jq; require_command realpath; require_command date
-test -n "$codex_bin" && test -x "$codex_bin" || die "required command is unavailable: codex"
-"$codex_bin" login status >/dev/null 2>&1 || die "Codex CLI is not authenticated"
+require_command sha256sum; require_command awk
+test -f "$review_bridge" || die "Qoder review bridge is missing"
+/usr/bin/python3 "$review_bridge" --root "$repo_root" --check >/dev/null || die "Qoder CLI is not ready"
 [[ "$amendment_id" =~ ^[A-Z0-9][A-Z0-9._-]+$ ]] || die "invalid amendment ID"
 [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || die "base must be a full lowercase SHA"
 [[ "$head_sha" =~ ^[0-9a-f]{40}$ ]] || die "head must be a full lowercase SHA"
@@ -49,7 +50,7 @@ for required in SCOPE.md FINAL_REVIEW_REQUEST.md tests.txt commit.txt; do
   test -s "$bundle_abs/$required" || die "missing or empty bundle file: $required"
 done
 test -s "$authorization" && grep -Fxq 'authorization: APPROVED' "$authorization" &&
-  grep -Fxq 'scope: TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_OPENAI_CODEX' "$authorization" ||
+  grep -Fxq 'scope: TWO_SITE_REFACTOR_SOURCE_AND_EVIDENCE_TO_QODER' "$authorization" ||
   die "explicit source-review authorization is missing"
 test -f "$schema_path" && jq -e . "$schema_path" >/dev/null || die "governance schema is missing or invalid"
 [[ "$(git -C "$repo_root" branch --show-current)" == "refactor/two-site-architecture" ]] || die "wrong integration branch"
@@ -89,13 +90,14 @@ Return only schema-valid JSON. APPROVE only with no unresolved High/Critical fin
 all verification items PASS, unauthorized_external_mutation exactly NONE, and
 decision.accepted_commit exactly $head_sha. Otherwise accepted_commit must be null.
 EOF
-PYTHONDONTWRITEBYTECODE=1 TMPDIR="$tmp_dir" "$codex_bin" exec \
-  --model "$codex_model" --config "model_reasoning_effort=\"$codex_reasoning_effort\"" \
-  --cd "$repo_root" \
-  --sandbox read-only --ephemeral --output-schema "$schema_path" \
-  --output-last-message "$raw" "$prompt"
+{
+  printf '%s\n' "$prompt"
+  printf '\nMACHINE_GENERATED_EXACT_GOVERNANCE_DIFF:\n'
+  git -C "$repo_root" diff --binary --full-index --no-ext-diff "$base_sha" "$head_sha"
+} | PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$review_bridge" --root "$repo_root" \
+  --schema "$schema_path" --output-last-message "$raw"
 
-test -s "$raw" && jq -e . "$raw" >/dev/null || die "Codex did not produce valid JSON"
+test -s "$raw" && jq -e . "$raw" >/dev/null || die "Qoder did not produce valid JSON"
 jq -e --arg amendment "$amendment_id" --arg base "$base_sha" --arg head "$head_sha" '
   .schema_version == "1.0" and .reviewer_authority == "CODEX_FINAL_REVIEWER" and
   .receipt_type == "EXECUTION_GOVERNANCE_AMENDMENT" and .amendment_id == $amendment and
@@ -107,7 +109,7 @@ jq -e --arg amendment "$amendment_id" --arg base "$base_sha" --arg head "$head_s
     (all(.findings[]; .severity != "CRITICAL" and .severity != "HIGH")) and
     ((.verification | length) > 0) and (all(.verification[]; .result == "PASS"))
   else .decision.accepted_commit == null end)
-' "$raw" >/dev/null || die "Codex governance receipt contradicts mandatory gates"
+' "$raw" >/dev/null || die "Qoder governance receipt contradicts mandatory gates"
 reviewed_at="$(jq -r .reviewed_at_utc "$raw")"
 reviewed_epoch="$(date -u -d "$reviewed_at" +%s 2>/dev/null)" || die "review timestamp is invalid"
 age="$(( $(date -u +%s) - reviewed_epoch ))"
@@ -117,6 +119,10 @@ test -z "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" || 
 
 tmp_receipt="$bundle_abs/.CODEX_GOVERNANCE_REVIEW.json.tmp"
 jq -S . "$raw" >"$tmp_receipt"
+execution_tmp="$bundle_abs/.CODEX_GOVERNANCE_REVIEW.execution.json.tmp"
+jq --arg published "$(sha256sum "$tmp_receipt" | awk '{print $1}')" \
+  '. + {published_receipt_sha256: $published}' "$raw.execution.json" >"$execution_tmp"
+mv -f -- "$execution_tmp" "$bundle_abs/CODEX_GOVERNANCE_REVIEW.execution.json"
 mv -f -- "$tmp_receipt" "$bundle_abs/CODEX_GOVERNANCE_REVIEW.json"
 printf 'CODEX_GOVERNANCE_REVIEW=%s\n' "$(jq -r .verdict "$bundle_abs/CODEX_GOVERNANCE_REVIEW.json")"
 printf 'RECEIPT=%s\n' "$bundle_rel/CODEX_GOVERNANCE_REVIEW.json"

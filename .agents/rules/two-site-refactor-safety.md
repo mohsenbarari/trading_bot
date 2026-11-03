@@ -1,5 +1,7 @@
 # Two-Site Refactor Safety
 
+> Current runtime authority (2026-11-03): Qoder coordinates and independently accepts Gemini proposals under automation-models.json and the current two-site-refactor Skill. Fixed Codex-model, caller-tool and paused legacy-adapter clauses below are historical for ordinary new cycles. Exact source/proposal/native/review/Git/STOP and human Writer protections remain mandatory.
+
 This workspace rule applies whenever two-site plan, deployment, infrastructure,
 runtime-role, sync, Market model, dashboard, or execution-governance files are read or
 changed.

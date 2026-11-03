@@ -60,7 +60,7 @@ case "${1:-}" in
   start)
     command -v tmux >/dev/null || { printf 'ERROR: tmux is unavailable\n' >&2; exit 2; }
     APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
-      /usr/bin/python3 scripts/two_site_codex_autopilot.py --root "$root" --check
+      /usr/bin/python3 scripts/two_site_autopilot.py --root "$root" --check
     if [[ -e "$state_root/STOP" || -L "$state_root/STOP" || -e "$root/STOP" || -L "$root/STOP" ]]; then
       printf 'ERROR: STOP file present\n' >&2
       exit 2
@@ -68,6 +68,7 @@ case "${1:-}" in
     if ! tmux has-session -t "=$broker_session" 2>/dev/null; then
       printf -v broker_command '%q ' \
         /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
+        TWO_SITE_QODER_FINAL_REVIEW_REQUIRED=1 \
         PYTHONPATH="$root" \
         /usr/bin/python3 "$root/scripts/two_site_provider_broker.py" --root "$root" serve "${broker_quota_args[@]}"
       tmux new-session -d -s "$broker_session" -c "$root" "$broker_command"
@@ -82,6 +83,11 @@ case "${1:-}" in
     done
     if [[ "$broker_ready" != true ]]; then
       printf 'ERROR: provider broker did not become healthy\n' >&2
+      exit 2
+    fi
+    if ! /usr/bin/python3 scripts/two_site_provider_broker.py --root "$root" status \
+        | /usr/bin/python3 -c 'import json,sys; v=json.load(sys.stdin); sys.exit(0 if v.get("qoder_final_review_required") is True else 2)'; then
+      printf 'ERROR: existing Broker lacks required Qoder final review; quiescent reload required\n' >&2
       exit 2
     fi
     if [[ "${#quota_args[@]}" -eq 1 ]] && ! \
@@ -101,7 +107,7 @@ case "${1:-}" in
       printf -v command '%q ' \
         /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
         PYTHONPATH="$root" \
-        /usr/bin/python3 "$root/scripts/two_site_codex_autopilot.py" --root "$root" "${quota_args[@]}"
+        /usr/bin/python3 "$root/scripts/two_site_autopilot.py" --root "$root" "${quota_args[@]}"
       tmux new-session -d -s "$session" -c "$root" "$command"
       printf 'PROVIDER_BROKER=RUNNING session=%s\n' "$broker_session"
       printf 'AUTOPILOT=STARTED session=%s\n' "$session"
