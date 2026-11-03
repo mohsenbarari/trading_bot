@@ -1421,6 +1421,17 @@ def run_provider_session(
             if extracted is not None:
                 quota_evidence, quota_attempt = extracted
                 raise QuotaBlockError(quota_evidence, quota_attempt) from None
+            # Framed ERROR classification deliberately wraps the legacy error.
+            # Admit only this exact proven interruption, never partial output.
+            context = exc.__context__
+            if (type(exc) is ProposalError
+                    and type(context) is RetryableProviderSessionError
+                    and exc.__cause__ is None and exc.__suppress_context__ is True
+                    and str(exc) == str(context)
+                    == "provider stream interrupted before a complete result"):
+                next_hint = None
+                last_error = context
+                continue
             raise
     raise ProposalError(
         f"provider session retry exhausted for {base_run_id} after 3 attempts"
