@@ -1,0 +1,211 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "assignment_scope_sha256": "80208105800094b4904f1d57dfaf3c9873bac20e1fd5a4083366e72f466e4dd1",
+  "parent_assignment_id": "WA-P1-00B-AUTHORITY-SECURITY-RESUME-20261102-001",
+  "original_parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "task_id": "p1-00b-post-security-five-source-registration-20261103-002",
+  "scenario_key": "P1-00B-POST-SECURITY-FIVE-REGISTRATION-V1.all-five-sources-six-existing-scenarios",
+  "source_head": "18ce99fb00fa985f5d7df6cce13323cd410fa546",
+  "canonical_gap_reference": "docs/refactor/two-server/section-1/inventory/scenario-records.json#P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+  "prior_completed_group_provenance": {
+    "accepted_commit": "5953f799f737780e8bcdfb57e8621030cb520422",
+    "closeout_source_head": "b2d4ef0b1695f1e7a234648895ce644d7d4649a4",
+    "closeout_packet_path": "docs/refactor/two-server/section-1/inventory/current-session-five-source-closeout.json",
+    "closeout_packet_sha256": "8eabc7b2fde077e6404eaee184a359ad2dc79add1a4a7b5ab1a2ed2d5c6b31b2",
+    "closeout_packet_utf8_bytes": 2509,
+    "closeout_module_path": "tests/test_p1_00b_characterization_current_session_group_ledger_closeout.py",
+    "closeout_module_sha256": "b901faa9502d86bc95dd6a9ce0c3adeb9d9ca0b2eb9afeb971f6addc04560fec",
+    "closeout_module_utf8_bytes": 29707,
+    "status": "COMPLETED_PROVENANCE",
+    "behavior_sources": 5,
+    "handler_scenarios": 7
+  },
+  "authority_source_provenance": {
+    "original_behavior_commit": "2a0b6a76d9a90e6fee5853c121fed253ec54b0d8",
+    "metadata_repair_commit": "18ce99fb00fa985f5d7df6cce13323cd410fa546",
+    "counted_behavior_units": 1,
+    "added_behavior_units_in_metadata_repair": 0,
+    "added_handler_scenarios_in_metadata_repair": 0
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_internal_session_service_failures_batch.py",
+      "sha256": "cef0bd510cfc5403c6afe571a772da228fc1c6efb1e3505f3230b81b41b4a8d4",
+      "utf8_bytes": 17624,
+      "mode": "100644",
+      "last_commit": "43ddd90bd668f2832437878a160b55934211a78b",
+      "parent": "7f1e230134e948ab27858392224ba3fb57c64c58",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_session_service_failures_batch.py::InternalSessionServiceFailuresCharacterizationTests::test_reset_service_exception_propagates_after_matching_user",
+        "tests/test_p1_00b_characterization_internal_session_service_failures_batch.py::InternalSessionServiceFailuresCharacterizationTests::test_replace_service_exception_propagates_after_matching_user"
+      ],
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+        "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_reset_scalar_failure.py",
+      "sha256": "ba68ed364c673d95c835cd534ca9222f1776058769317edfa321b7855be32526",
+      "utf8_bytes": 21185,
+      "mode": "100644",
+      "last_commit": "515f70dca516c9f3ee502159bd74c2d42536e474",
+      "parent": "43ddd90bd668f2832437878a160b55934211a78b",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_reset_scalar_failure.py::InternalResetScalarFailureCharacterizationTests::test_scalar_exception_propagates_before_reset_side_effects"
+      ],
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_replace_scalar_failure.py",
+      "sha256": "02c27ebe502868efdccb02cbaa7e35ca4c1d0216260cd606935822c43747566f",
+      "utf8_bytes": 21635,
+      "mode": "100644",
+      "last_commit": "5eba653fdb0390b51dbb1970cb62fc1c0c4c8573",
+      "parent": "515f70dca516c9f3ee502159bd74c2d42536e474",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_replace_scalar_failure.py::InternalReplaceScalarFailureCharacterizationTests::test_scalar_exception_propagates_before_replace_side_effects"
+      ],
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_replace_success_response.py",
+      "sha256": "266b4644cb8e5f5cdbe34765b204e4f22a81c02df3608588ea8534b7dff949b8",
+      "utf8_bytes": 21537,
+      "mode": "100644",
+      "last_commit": "cc3a6645d6b8cc7f4bd6957fbaa6a73fadace936",
+      "parent": "5eba653fdb0390b51dbb1970cb62fc1c0c4c8573",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_replace_success_response.py::InternalReplaceSuccessResponseCharacterizationTests::test_successful_service_result_is_converted_to_integer_response"
+      ],
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_authority_body_failure.py",
+      "sha256": "73d1dbc52c0fc0fceab6f3831beba69117c82b7124665f6a0d8e008df1a2d560",
+      "utf8_bytes": 8694,
+      "mode": "100644",
+      "last_commit": "18ce99fb00fa985f5d7df6cce13323cd410fa546",
+      "parent": "2a0b6a76d9a90e6fee5853c121fed253ec54b0d8",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_authority_body_failure.py::InternalAuthorityBodyFailureCharacterizationTests::test_body_error_propagates_before_headers_verifier_and_query"
+      ],
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539"
+      ]
+    }
+  ],
+  "selector_associations": [
+    {
+      "record_index": 0,
+      "selector_index": 0,
+      "source_path": "tests/test_p1_00b_characterization_internal_session_service_failures_batch.py",
+      "test_selector": "tests/test_p1_00b_characterization_internal_session_service_failures_batch.py::InternalSessionServiceFailuresCharacterizationTests::test_reset_service_exception_propagates_after_matching_user",
+      "handler": "api/routers/sessions.py:internal_reset_user_sessions",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+      "contract_summary": "selected reset_user_session_state RuntimeError propagates after stubbed signature verification and matching User lookup"
+    },
+    {
+      "record_index": 0,
+      "selector_index": 1,
+      "source_path": "tests/test_p1_00b_characterization_internal_session_service_failures_batch.py",
+      "test_selector": "tests/test_p1_00b_characterization_internal_session_service_failures_batch.py::InternalSessionServiceFailuresCharacterizationTests::test_replace_service_exception_propagates_after_matching_user",
+      "handler": "api/routers/sessions.py:internal_replace_user_sessions",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593",
+      "contract_summary": "selected force_clear_sessions RuntimeError propagates after stubbed signature verification and matching User lookup"
+    },
+    {
+      "record_index": 1,
+      "selector_index": 0,
+      "source_path": "tests/test_p1_00b_characterization_internal_reset_scalar_failure.py",
+      "test_selector": "tests/test_p1_00b_characterization_internal_reset_scalar_failure.py::InternalResetScalarFailureCharacterizationTests::test_scalar_exception_propagates_before_reset_side_effects",
+      "handler": "api/routers/sessions.py:internal_reset_user_sessions",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-RESET-USER-SESSIONS-L562",
+      "contract_summary": "synchronous scalar_one_or_none sentinel RuntimeError propagates before reset service side effects after actual execute/ORM path"
+    },
+    {
+      "record_index": 2,
+      "selector_index": 0,
+      "source_path": "tests/test_p1_00b_characterization_internal_replace_scalar_failure.py",
+      "test_selector": "tests/test_p1_00b_characterization_internal_replace_scalar_failure.py::InternalReplaceScalarFailureCharacterizationTests::test_scalar_exception_propagates_before_replace_side_effects",
+      "handler": "api/routers/sessions.py:internal_replace_user_sessions",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593",
+      "contract_summary": "synchronous scalar_one_or_none sentinel RuntimeError propagates before force_clear_sessions side effects after actual execute/ORM path"
+    },
+    {
+      "record_index": 3,
+      "selector_index": 0,
+      "source_path": "tests/test_p1_00b_characterization_internal_replace_success_response.py",
+      "test_selector": "tests/test_p1_00b_characterization_internal_replace_success_response.py::InternalReplaceSuccessResponseCharacterizationTests::test_successful_service_result_is_converted_to_integer_response",
+      "handler": "api/routers/sessions.py:internal_replace_user_sessions",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-REPLACE-USER-SESSIONS-L593",
+      "contract_summary": "successful stubbed force_clear_sessions synthetic result object is converted once via __int__ to exact integer 7 response"
+    },
+    {
+      "record_index": 4,
+      "selector_index": 0,
+      "source_path": "tests/test_p1_00b_characterization_internal_authority_body_failure.py",
+      "test_selector": "tests/test_p1_00b_characterization_internal_authority_body_failure.py::InternalAuthorityBodyFailureCharacterizationTests::test_body_error_propagates_before_headers_verifier_and_query",
+      "handler": "api/routers/sessions.py:internal_session_authority_check",
+      "seed_id": "API-AUTH-POST-SESSIONS-INTERNAL-SESSION-AUTHORITY-CHECK-L539",
+      "contract_summary": "await request.body() sentinel RuntimeError propagates before headers access, signature verifier, and DB query"
+    }
+  ],
+  "shared_contract_and_exclusions": {
+    "synthetic_service_count_witness": "Router int(revoked_count) coercion witness only; does not claim production force_clear_sessions returns non-int objects.",
+    "synthetic_lookup_and_result_witnesses": "Bounded router/ORM witnesses only; do not prove database persistence, session revocation correctness, or actual database driver failure.",
+    "signature_and_transport_exclusions": "Stubbed verify_session_authority_signature proves neither cryptographic HMAC correctness nor FastAPI HTTP/Depends transport wiring.",
+    "closure_exclusions": "Does not promote any seed, close canonical High blockers, resolve origin matrix cells, close stage P1-00b, or perform current-group ledger closeout."
+  },
+  "raw_membership_delta": [],
+  "counts": {
+    "expected_seed_count": 465,
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 263,
+    "evidenced_seed_count": 398,
+    "remaining_seed_count": 67
+  },
+  "accounting": {
+    "current_group_status_on_exact_acceptance": "PHYSICAL_REGISTRATION_VERIFIED_ONLY",
+    "behavior_sources": 5,
+    "handler_scenarios": 6,
+    "distinct_existing_seed_ids": 3,
+    "registration_complete": true,
+    "registration_remaining_sources": 0,
+    "registration_remaining_scenarios": 0,
+    "group_reconciliation_complete": false,
+    "canonical_manifest_and_ledger_integration_complete": false,
+    "ledger_integration_status": "PENDING",
+    "no_sixth_behavior_before_ledger_closeout": true,
+    "added_behavior_units": 0,
+    "added_handler_scenarios": 0,
+    "added_distinct_seeds": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0
+  },
+  "strict_canonical_progress": {
+    "proven": 288,
+    "partial": 177,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}

@@ -42,7 +42,8 @@
     "business_768_live786_authority_registration_after_security_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-authority-registration-security.json",
     "business_768_current_session_body_registration_path": "docs/refactor/two-server/section-1/inventory/current-session-body-registration.json",
     "business_768_current_session_group_union_path": "docs/refactor/two-server/section-1/inventory/current-session-five-source-union.json",
-    "business_768_current_session_group_closeout_path": "docs/refactor/two-server/section-1/inventory/current-session-five-source-closeout.json"
+    "business_768_current_session_group_closeout_path": "docs/refactor/two-server/section-1/inventory/current-session-five-source-closeout.json",
+    "business_768_post_security_five_registration_path": "docs/refactor/two-server/section-1/inventory/post-security-five-source-registration.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
