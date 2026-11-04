@@ -69,6 +69,19 @@ def test_schema_valid_result_and_truthful_execution_sidecar_are_published(setup)
     assert (root / proof["run_dir"] / "stream.jsonl").is_file()
 
 
+def test_schema_review_passes_exact_schema_to_tool_free_qoder(setup, monkeypatch):
+    root, schema, output = setup
+    observed = {}
+    actual = bridge.driver.qoder_command
+    def command(path, actual_root, directory, prompt, roleconfig, **kwargs):
+        observed.update(kwargs)
+        return actual(path, actual_root, directory, prompt, roleconfig, **kwargs)
+    monkeypatch.setattr(bridge.driver, "qoder_command", command)
+    bridge.review(root, schema, output, "Review exact synthetic output")
+    assert observed["role"] == "final_reviewer"
+    assert observed["response_schema"] == json.loads(schema.read_text())
+
+
 def test_old_openai_authorization_is_not_qoder_consent(setup):
     root, schema, output = setup
     write(root / bridge.AUTHORIZATION_REL,

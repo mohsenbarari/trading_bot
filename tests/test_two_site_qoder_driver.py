@@ -253,6 +253,20 @@ def test_coordinator_system_instruction_embeds_actual_complete_closed_schema(tmp
     assert set(final_schema["properties"]) == set(final_schema["required"])
     assert "tool-free final semantic reviewer" in final_system
     assert "Final role's own four-key contract" not in " ".join(final_argv)
+    receipt_schema = {"type": "object", "additionalProperties": False,
+        "required": ["verdict"], "properties": {"verdict": {"enum": ["APPROVE"]}}}
+    receipt_argv = driver.qoder_command(binary, tmp_path, run_dir, "Schema review", role(),
+        role="final_reviewer", response_schema=receipt_schema)
+    receipt_system = receipt_argv[receipt_argv.index("--append-system-prompt") + 1]
+    assert json.loads(receipt_system.split("TERMINAL_RESULT_SCHEMA_JSON:\n", 1)[1]) == receipt_schema
+
+
+@pytest.mark.parametrize("selected_role", ["coordinator", "receipt_formatter"])
+def test_only_schema_roles_accept_a_dynamic_response_schema(tmp_path, selected_role):
+    binary, _ = setup_runtime(tmp_path); run_dir = tmp_path / "run"; run_dir.mkdir()
+    with pytest.raises(driver.QoderError, match="QODER_RESPONSE_SCHEMA_ROLE"):
+        driver.qoder_command(binary, tmp_path, run_dir, "prompt", role(), role=selected_role,
+            response_schema={"type": "object", "additionalProperties": False})
 
 
 def test_formatter_is_a_tool_free_capability_profile_using_configured_coordinator(tmp_path):

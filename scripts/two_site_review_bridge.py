@@ -126,7 +126,8 @@ def review(root, schema_path, output_path, prompt, *, timeout=900, authority_rev
     directory = _run_directory(root)
     _new(directory / "prompt.txt", full_prompt.encode())
     identity = driver.qoder_identity(Path(runtime["coordinator"]["path"]), runtime, directory, role)
-    argv = driver.qoder_command(Path(identity["path"]), root, directory, full_prompt, role, role="final_reviewer")
+    argv = driver.qoder_command(Path(identity["path"]), root, directory, full_prompt, role,
+        role="final_reviewer", response_schema=schema)
     environment = os.environ.copy(); environment.update(APP_ENV_FILE="config/unit-test.env.example", PYTHONDONTWRITEBYTECODE="1")
     if authority_review_context is not None or environment.get("TWO_SITE_COORDINATOR_SANDBOX") != "1":
         from scripts.two_site_coordinator_sandbox import buildwrap_coordinator_command

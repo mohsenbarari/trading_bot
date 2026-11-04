@@ -220,8 +220,8 @@ def _coordinator_output_contract(root: Path) -> str:
         + json.dumps(schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
-def _final_reviewer_output_contract() -> str:
-    schema = {
+def _final_reviewer_output_contract(response_schema: dict | None = None) -> str:
+    schema = response_schema if response_schema is not None else {
         "type": "object",
         "additionalProperties": False,
         "required": ["decision", "findings", "proposal_sha256", "source_head"],
@@ -233,11 +233,17 @@ def _final_reviewer_output_contract() -> str:
             "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
         },
     }
+    _need(type(schema) is dict and schema.get("type") == "object"
+          and schema.get("additionalProperties") is False,
+          "QODER_FINAL_REVIEW_SCHEMA")
+    task_rules = ("APPROVE requires findings=[]; REQUEST_CHANGES requires concrete nonempty "
+                  "findings. Copy the exact proposal SHA and source head supplied in the user prompt. "
+                  if response_schema is None else
+                  "Populate every field only from the supplied review request and schema. ")
     return ("You are a tool-free final semantic reviewer. Return ONLY one JSON object matching "
             "this complete closed schema. Do not use tools, execute commands, edit, delegate, "
-            "return Markdown, or add prose outside the JSON. APPROVE requires findings=[]; "
-            "REQUEST_CHANGES requires concrete nonempty findings. Copy the exact proposal SHA "
-            "and source head supplied in the user prompt. TERMINAL_RESULT_SCHEMA_JSON:\n"
+            "return Markdown, or add prose outside the JSON. " + task_rules
+            + "TERMINAL_RESULT_SCHEMA_JSON:\n"
             + json.dumps(schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
@@ -252,8 +258,10 @@ def qoder_command(path: Path, root: Path, run_dir: Path, prompt: str, roleconfig
     runtime = _runtime(load_runtime_config(root)); _need(str(path) == runtime["path"], "QODER_RUNTIME_PATH_MISMATCH")
     contract = (["--append-system-prompt", _coordinator_output_contract(root)]
                 if role in {"coordinator", "receipt_formatter"}
-                else ["--append-system-prompt", _final_reviewer_output_contract()]
+                else ["--append-system-prompt", _final_reviewer_output_contract(response_schema)]
                 if role == "final_reviewer" else [])
+    if response_schema is not None and role not in {"final_reviewer", "proposal_author"}:
+        _need(False, "QODER_RESPONSE_SCHEMA_ROLE")
     if role == "proposal_author":
         _need(type(response_schema) is dict and response_schema.get("type") == "object"
               and response_schema.get("additionalProperties") is False
@@ -264,7 +272,7 @@ def qoder_command(path: Path, root: Path, run_dir: Path, prompt: str, roleconfig
                     "Worker JSON object matching this closed schema; no coordinator receipt, tools, "
                     "commands, delegation or edits.\n" + json.dumps(response_schema, ensure_ascii=False,
                                                                   separators=(",", ":"))]
-    else:
+    elif role != "final_reviewer":
         _need(response_schema is None, "QODER_UNEXPECTED_RESPONSE_SCHEMA")
     if role == "proposal_author":
         _need(len(prompt.encode("utf-8")) + len(contract[1].encode("utf-8")) <= limit,
