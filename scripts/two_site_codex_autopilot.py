@@ -229,6 +229,7 @@ CONTROL_PATHS = (
     Path("scripts/two_site_proposal_runner.py"),
     Path("scripts/two_site_provider_broker.py"),
     Path("scripts/two_site_qoder_output_repair.py"),
+    Path("scripts/two_site_coordinator_broker_wait.py"),
     Path("scripts/two_site_assignment_scope.py"),
     Path("scripts/two_site_preparation_contract.py"),
     Path("scripts/two_site_preparation_io.py"),
@@ -2963,6 +2964,7 @@ def run_cycle(
                     heartbeat_thread = threading.Thread(
                         target=_heartbeat_running_cycle,
                         args=(heartbeat_stop, state_root, cycle, before["head"], phase_started_at),
+                        kwargs={"phase_state": meta},
                         name="two-site-supervisor-heartbeat",
                         daemon=True,
                     )
@@ -2984,6 +2986,70 @@ def run_cycle(
                     raise AutopilotError("Model configuration changed during the cycle")
                 _validate_startup_file(root, startup_file, startup, startup_bytes)
                 repaired_output = None
+                if coordinator_settings["provider"] == "qoder" and quota_original_controller_run_id is None:
+                    from scripts.two_site_coordinator_broker_wait import finish_owned_request
+                    from scripts.two_site_qoder_driver import validate_qoder_terminal
+                    def owned_progress(phase):
+                        if meta.get("phase") != phase:
+                            meta.update(phase=phase, phase_started_at=time.time())
+                        meta["heartbeat_at"] = time.time()
+                        write_json(run_dir / "status.json", meta)
+                        write_supervisor_state(state_root, "RUNNING", announce=False,
+                            cycle=cycle, head=before["head"], phase=phase,
+                            phase_started_at=meta["phase_started_at"], heartbeat_at=meta["heartbeat_at"],
+                            summary="Waiting/completing only this controller's existing Broker request.", blockers=[])
+                    def owned_complete(directory, completion_prompt, remaining):
+                        global _ACTIVE_PROCESS
+                        import jsonschema
+                        _validate_startup_file(root, startup_file, startup, startup_bytes)
+                        if file_sha256(codex) != identity["sha256"] or load_ai_config(root) != cycle_ai_config:
+                            raise AutopilotError("Coordinator identity/model drift before owned completion")
+                        write_json(directory / "status.json", {"state": "RUNNING",
+                            "original_controller_run_id": run_dir.name, "coordinator": identity})
+                        (directory / "prompt.txt").write_text(completion_prompt)
+                        argv = coordinator_command(root, codex, directory, completion_prompt)
+                        argv = buildwrap_coordinator_command(root, directory, argv, environment=environment)
+                        owned_progress("COORDINATOR_COMPLETION")
+                        child = subprocess.Popen(argv, cwd=root, env=environment, stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+                        _ACTIVE_PROCESS = child
+                        try:
+                            capture_bounded_process(child, completion_prompt.encode(), directory / "stream.jsonl",
+                                                    directory / "stderr.txt", remaining, max_output=MAX_CODEX_OUTPUT)
+                        except BaseException as error:
+                            try:
+                                terminate_process(child)
+                            except BaseException:
+                                pass
+                            write_json(directory / "status.json", {"state": "FAILED",
+                                "original_controller_run_id": run_dir.name,
+                                "actual_returncode": child.returncode, "error_type": type(error).__name__})
+                            raise
+                        finally:
+                            _ACTIVE_PROCESS = None
+                            for pipe in (child.stdin, child.stdout, child.stderr):
+                                if pipe is not None and not pipe.closed:
+                                    pipe.close()
+                        write_json(directory / "status.json", {"state": "CLI_COMPLETED",
+                            "original_controller_run_id": run_dir.name, "actual_returncode": child.returncode,
+                            "normal_exit_observed": child.returncode == 0, "coordinator": identity})
+                        if child.returncode != 0 or file_sha256(codex) != identity["sha256"]:
+                            raise AutopilotError("Owned Coordinator completion did not exit normally with pinned CLI")
+                        result = finalize_qoder_output(directory, expected_model=coordinator_settings["model"])
+                        jsonschema.validate(result, unique_json(bounded_file_text(root, root / SCHEMA_REL,
+                                                                             MAX_RESULT_BYTES, "Coordinator schema")))
+                        _validate_startup_file(root, startup_file, startup, startup_bytes)
+                        if load_ai_config(root) != cycle_ai_config:
+                            raise AutopilotError("Model configuration changed during owned completion")
+                        return result, validate_qoder_terminal(directory, expected_model=coordinator_settings["model"])
+                    _ACTIVE_PROCESS = None
+                    owned = finish_owned_request(root, run_dir, before, cycle_ai_config,
+                        deadline_monotonic=coordinator_started_at + timeout,
+                        progress=owned_progress, complete=owned_complete)
+                    if owned is not None:
+                        meta["owned_broker_completion"] = {key: value for key, value in owned.items() if key != "result"}
+                        repaired_output = owned["result"]
+                        write_json(run_dir / "result.json", repaired_output)
 
                 def repair_output_contract():
                     from scripts.two_site_qoder_output_repair import repair_coordinator_output
@@ -3007,7 +3073,7 @@ def run_cycle(
                     }
                     return repaired["result"]
 
-                if coordinator_settings["provider"] == "qoder":
+                if coordinator_settings["provider"] == "qoder" and repaired_output is None:
                     try:
                         finalize_qoder_output(run_dir, expected_model=coordinator_settings["model"])
                     except QoderTerminalBodyError:
@@ -3189,6 +3255,7 @@ def _heartbeat_running_cycle(
     phase_started_at: float,
     *,
     interval: float = SUPERVISOR_HEARTBEAT_SECONDS,
+    phase_state: dict | None = None,
 ) -> None:
     """Refresh bounded, source-free liveness evidence while Codex is running.
 
@@ -3201,7 +3268,8 @@ def _heartbeat_running_cycle(
             now = time.time()
             write_supervisor_state(
                 state_root, "RUNNING", announce=False, cycle=cycle, head=head,
-                phase="COORDINATOR", phase_started_at=phase_started_at,
+                phase=(phase_state or {}).get("phase", "COORDINATOR"),
+                phase_started_at=(phase_state or {}).get("phase_started_at", phase_started_at),
                 heartbeat_at=now,
                 summary="Executing configured Worker -> independent Reviewer -> Qoder final gate.",
                 blockers=[],

@@ -3126,8 +3126,58 @@ def read_cycle_reservation(root: Path, controller_run_id: str) -> dict:
         return record_payload
 
 
+
+_CYCLE_DISPATCH = "broker-dispatch.json"
+_CYCLE_TERMINAL = "broker-terminal-response.json"
+_MAX_CYCLE_RECORD = MAX_REQUEST_BYTES + 2 * MAX_RESPONSE_BYTES
+
+
+def _cycle_request_record(root: Path, request: dict, filename: str, payload: dict) -> None:
+    """Retain one normal request's exact custody; never enqueue or accept work."""
+    record = read_cycle_reservation(root, request["controller_run_id"])
+    canonical = json.dumps(request, ensure_ascii=False, sort_keys=True,
+                           separators=(",", ":"), allow_nan=False).encode()
+    if (record["request_id"] != request["request_id"]
+            or record["request_sha256"] != hashlib.sha256(canonical).hexdigest()
+            or filename not in {_CYCLE_DISPATCH, _CYCLE_TERMINAL}):
+        raise BrokerError("cycle request record binding mismatch")
+    with _open_existing_cycle_run_directory(root, request["controller_run_id"]) as (directory, _fd, verify):
+        verify()
+        path = directory / filename
+        try:
+            _atomic_new_json(path, payload, _MAX_CYCLE_RECORD)
+        except BrokerError as error:
+            if str(error) not in {"broker queue target already exists", "broker queue target appeared during publication"}:
+                raise
+            existing = _read_json_file(root, path, _MAX_CYCLE_RECORD, "cycle request record")
+            encode = lambda value: json.dumps(value, sort_keys=True, allow_nan=False)
+            if encode(existing) != encode(payload):
+                raise BrokerError("cycle request record already has different bytes") from None
+        verify()
+
+
+def _publish_cycle_dispatch(root: Path, request: dict, status: dict) -> None:
+    if not CYCLE_RUN_RE.fullmatch(request["controller_run_id"]):
+        return
+    _cycle_request_record(root, request, _CYCLE_DISPATCH, {
+        "schema_version": "1.0", "request": request,
+        "broker_pid": status["pid"], "broker_started_at": status["started_at"],
+    })
+
+
+def _publish_cycle_terminal(root: Path, request: dict, response: dict) -> None:
+    if not CYCLE_RUN_RE.fullmatch(request["controller_run_id"]):
+        return
+    validate_response(request, response)
+    _cycle_request_record(root, request, _CYCLE_TERMINAL, {
+        "schema_version": "1.0", "request": request, "response": response,
+    })
+
+
 def _wait_existing_response(
     root: Path, request: dict, expected_broker_identity: tuple[int, float], timeout: int,
+    *, deadline_monotonic: float | None = None,
+    poll_check: Callable[[], None] | None = None,
 ) -> dict:
     """Wait only: no lock, reservation, enqueue, retry, echo, unlink or Provider.
 
@@ -3147,8 +3197,31 @@ def _wait_existing_response(
     _state, status_path, _requests, claimed, responses = broker_paths(root)
     response_path = _response_path(responses, request["request_id"])
     deadline = time.monotonic() + _overall_timeout(timeout) + 30
+    if deadline_monotonic is not None:
+        if (type(deadline_monotonic) not in (int, float)
+                or not math.isfinite(deadline_monotonic)):
+            raise BrokerError("invalid original response deadline")
+        deadline = min(deadline, deadline_monotonic)
     last_health_check = 0.0
     while True:
+        if poll_check is not None:
+            poll_check()
+        if time.monotonic() >= deadline:
+            raise BrokerError("provider broker response deadline exceeded")
+        if not quota and CYCLE_RUN_RE.fullmatch(request.get("controller_run_id", "")):
+            terminal = root / ".local/two-site-refactor/autopilot/runs" / request["controller_run_id"] / _CYCLE_TERMINAL
+            if os.path.lexists(terminal):
+                info = terminal.stat(follow_symlinks=False)
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                        or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o600):
+                    raise BrokerError("cycle terminal response custody mismatch")
+                saved = _read_json_file(root, terminal, _MAX_CYCLE_RECORD, "cycle terminal response")
+                if (set(saved) != {"schema_version", "request", "response"}
+                        or saved["schema_version"] != "1.0"
+                        or json.dumps(saved["request"], sort_keys=True, allow_nan=False)
+                        != json.dumps(request, sort_keys=True, allow_nan=False)):
+                    raise BrokerError("cycle terminal request mismatch")
+                return validate_response(request, saved["response"])
         if quota:
             from scripts.two_site_quota_broker_route import _check_pre_dispatch_stop
             _check_pre_dispatch_stop(root)
@@ -3212,12 +3285,15 @@ def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: boo
                 _publish_maintenance_record(root, request)
         else:
             publish_cycle_reservation(root, request)
+            _publish_cycle_dispatch(root, request, status_value)
         request_path = requests / f"{request['request_id']}.json"
         response_path = _response_path(responses, request["request_id"])
         _atomic_new_json(request_path, request, MAX_REQUEST_BYTES)
         validated = _wait_existing_response(
             root, request, (status_value["pid"], status_value.get("started_at")), timeout,
         )
+        if not maintenance:
+            _publish_cycle_terminal(root, request, validated)
         if validated["stdout"]:
             sys.stdout.write(validated["stdout"])
             sys.stdout.flush()
