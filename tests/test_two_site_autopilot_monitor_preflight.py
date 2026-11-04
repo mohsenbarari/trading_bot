@@ -10,6 +10,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest import mock
+import pytest
 
 from scripts.two_site_assignment_scope import AssignmentScope
 from scripts.two_site_autopilot_monitor_preflight import main, run_preflight
@@ -21,6 +22,75 @@ from scripts.two_site_codex_autopilot import (
     rescope_epoch_basename,
     serialize_rescope_receipt,
 )
+
+
+def _current_continue_fixture(tmp_path):
+    from scripts.two_site_codex_autopilot import serialize_accepted_checkpoint
+    from tests.test_two_site_autopilot_monitor_broker_preflight import _make_result as continue_result
+    root, state_root, repo, epoch = TestAutopilotMonitorPreflight(methodName="runTest")._setup_base_fixture(tmp_path)
+    checkpoint = state_root / "accepted_checkpoint.json"
+    checkpoint.write_bytes(serialize_accepted_checkpoint(continue_result(repo["head"]), repo))
+    checkpoint.chmod(0o600)
+    return root, state_root, repo, epoch, checkpoint
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "head", "control", "protected_ref", "scope"])
+def test_continue_requires_real_current_checkpoint_without_maintenance_admission(tmp_path, fault):
+    import copy
+    import dataclasses
+    from scripts import two_site_autopilot_monitor_preflight as preflight
+    root, state_root, original, _epoch, checkpoint = _current_continue_fixture(tmp_path)
+    repo = copy.deepcopy(original)
+    if fault == "missing":
+        checkpoint.unlink()
+    elif fault == "head":
+        repo["head"] = "b" * 40
+    elif fault == "control":
+        repo["control_blobs"][next(iter(repo["control_blobs"]))] = "b" * 40
+    elif fault == "protected_ref":
+        repo["protected_refs"][next(iter(repo["protected_refs"]))] = "b" * 40
+    elif fault == "scope":
+        repo["assignment_scope"] = dataclasses.replace(repo["assignment_scope"], sha256="b" * 64)
+    (state_root / "status.json").write_text(json.dumps({"state": "CONTINUE", "head": repo["head"]}))
+    with mock.patch.object(preflight, "validate_repository", return_value=repo), \
+         mock.patch("scripts.two_site_maintenance_transition_startup.require_reviewed_maintenance_transition_locked",
+                    return_value=None) as maintenance:
+        assert preflight.run_preflight(root) == ((True, "READY") if fault is None else (False, "STALE_CHECKPOINT"))
+        maintenance.assert_not_called()
+
+
+def test_continue_final_checkpoint_drift_cannot_use_maintenance_fallback(tmp_path):
+    from scripts import two_site_autopilot_monitor_preflight as preflight
+    root, state_root, repo, _epoch, checkpoint = _current_continue_fixture(tmp_path)
+    original_read = preflight._load_accepted_checkpoint
+    reads = []
+
+    def read_then_disappear(path):
+        reads.append(path)
+        if len(reads) == 2:
+            checkpoint.unlink()
+        return original_read(path)
+
+    with mock.patch.object(preflight, "validate_repository", return_value=repo), \
+         mock.patch.object(preflight, "_load_accepted_checkpoint", side_effect=read_then_disappear), \
+         mock.patch("scripts.two_site_maintenance_transition_startup.require_reviewed_maintenance_transition_locked",
+                    return_value=None) as maintenance:
+        assert preflight.run_preflight(root) == (False, "STALE_CHECKPOINT")
+        assert len(reads) == 2
+        maintenance.assert_not_called()
+
+
+def test_running_recovery_retains_existing_reviewed_maintenance_path(tmp_path):
+    from scripts import two_site_autopilot_monitor_preflight as preflight
+    root, state_root, repo, _epoch, checkpoint = _current_continue_fixture(tmp_path)
+    checkpoint.unlink()
+    (state_root / "status.json").write_text(json.dumps({"state": "RUNNING", "head": repo["head"]}))
+    with mock.patch.object(preflight, "validate_repository", return_value=repo), \
+         mock.patch.object(preflight, "validate_rescope_epoch_startup", return_value=None), \
+         mock.patch("scripts.two_site_maintenance_transition_startup.require_reviewed_maintenance_transition_locked",
+                    return_value=None) as maintenance:
+        assert preflight.run_preflight(root) == (True, "READY")
+        assert maintenance.call_count == 2
 
 
 def _make_scope() -> AssignmentScope:

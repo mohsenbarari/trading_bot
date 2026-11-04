@@ -3,10 +3,48 @@ from pathlib import Path
 import subprocess
 import pytest
 
-MONITOR = Path("scripts/two_site_autopilot_monitor.sh")
+MONITOR = Path(__file__).resolve().parents[1] / "scripts/two_site_autopilot_monitor.sh"
 
 def test_bash_syntax():
     subprocess.run(["bash", "-n", str(MONITOR)], check=True)
+
+
+@pytest.mark.parametrize("state,change,eligible", [
+    ("CONTINUE", None, True),
+    ("COMPLETE", None, False),
+    ("STOPPED", None, False),
+    ("CONTINUE", "live_supervisor", False),
+    ("CONTINUE", "present_session", False),
+    ("CONTINUE", "dirty_source", False),
+    ("CONTINUE", "stale_head", False),
+    ("CONTINUE", "root_stop", False),
+    ("CONTINUE", "state_stop", False),
+])
+def test_completed_continue_uses_existing_absence_source_and_stop_guards(tmp_path, state, change, eligible):
+    import shlex
+    src = MONITOR.read_text()
+    start = src.index('if [[ "$tmux_observation" == "absent" && "$supervisor_count" -eq 0')
+    end = src.index('\nfi', start) + len('\nfi')
+    root, state_root = tmp_path / "root", tmp_path / "root/state"
+    state_root.mkdir(parents=True)
+    values = {"tmux_observation": "absent", "supervisor_count": "0", "git_clean": "true",
+              "git_branch": "refactor/two-site-architecture", "status_head_compatible": "true",
+              "state_root": str(state_root), "integration_root": str(root), "state": state,
+              "status_dirty": "false", "status_ambiguous": "false", "blockers_text": "",
+              "standing_transfer_authorized": "false", "action": "none", "restart_eligible": "false",
+              "provider_probe": "false", "recovery_reason": "none"}
+    updates = {"live_supervisor": ("supervisor_count", "1"), "present_session": ("tmux_observation", "present"),
+               "dirty_source": ("git_clean", "false"), "stale_head": ("status_head_compatible", "false")}
+    if change in updates:
+        key, value = updates[change]
+        values[key] = value
+    if change in {"root_stop", "state_stop"}:
+        ((root if change == "root_stop" else state_root) / "STOP").write_bytes(b"STOP\n")
+    prefix = "".join(key + "=" + shlex.quote(value) + "\n" for key, value in values.items())
+    result = subprocess.run(["bash", "-c", prefix + "quota_args=()\n" + src[start:end]
+                             + '\nprintf "%s:%s:%s" "$restart_eligible" "$recovery_reason" "$provider_probe"'],
+                            capture_output=True, text=True, check=True)
+    assert result.stdout == ("true:accepted_continue:false" if eligible else "false:none:false")
 
 
 def test_monitor_requires_and_recovers_the_provider_broker():

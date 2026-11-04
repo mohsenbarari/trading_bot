@@ -195,6 +195,11 @@ if [[ "$tmux_observation" == "absent" && "$supervisor_count" -eq 0
   if [[ "$state" == "WAITING_QUOTA" && "${#quota_args[@]}" -eq 1 ]]; then
     restart_eligible=true
     recovery_reason="quota_wait_due"
+  elif [[ "$state" == "CONTINUE" ]]; then
+    # Read-only preflight must prove a current genuine accepted checkpoint;
+    # completed boundaries never authorize stale maintenance adoption or replay.
+    restart_eligible=true
+    recovery_reason="accepted_continue"
   elif [[ "$state" == "RUNNING" || "$state" == "RETRYABLE_FAILURE" ]]; then
     restart_eligible=true
     recovery_reason="unexpected_process_exit"

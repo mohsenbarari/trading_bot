@@ -149,16 +149,6 @@ def run_preflight(root: Path, *, quota_wait_enabled: bool = False) -> tuple[bool
                 if quota is not None:
                     return quota  # Existing Supervisor lock exits before caller launch.
 
-            try:
-                checkpoint = _load_accepted_checkpoint(state_root)
-                if checkpoint is None or not _accepted_checkpoint_matches_repository(checkpoint, repo):
-                    from scripts.two_site_maintenance_transition_startup import (
-                        require_reviewed_maintenance_transition_locked,
-                    )
-                    require_reviewed_maintenance_transition_locked(root, state_root, repo)
-            except Exception:
-                return False, "STALE_CHECKPOINT"
-
             status_path = state_root / STATUS_FILENAME
             try:
                 if not status_path.is_file() or status_path.is_symlink():
@@ -182,6 +172,18 @@ def run_preflight(root: Path, *, quota_wait_enabled: bool = False) -> tuple[bool
                     return False, "STATUS_INVALID"
             except Exception:
                 return False, "STATUS_INVALID"
+
+            try:
+                checkpoint = _load_accepted_checkpoint(state_root)
+                if checkpoint is None or not _accepted_checkpoint_matches_repository(checkpoint, repo):
+                    if state_val == "CONTINUE":
+                        return False, "STALE_CHECKPOINT"
+                    from scripts.two_site_maintenance_transition_startup import (
+                        require_reviewed_maintenance_transition_locked,
+                    )
+                    require_reviewed_maintenance_transition_locked(root, state_root, repo)
+            except Exception:
+                return False, "STALE_CHECKPOINT"
 
             try:
                 validate_rescope_epoch_startup(state_root, repo, root=root)
@@ -266,6 +268,8 @@ def run_preflight(root: Path, *, quota_wait_enabled: bool = False) -> tuple[bool
             try:
                 cp_recheck = _load_accepted_checkpoint(state_root)
                 if cp_recheck is None or not _accepted_checkpoint_matches_repository(cp_recheck, repo_recheck):
+                    if state_val == "CONTINUE":
+                        return False, "STALE_CHECKPOINT"
                     from scripts.two_site_maintenance_transition_startup import (
                         require_reviewed_maintenance_transition_locked,
                     )

@@ -1,12 +1,12 @@
-# اتوماسیون Codex و Antigravity — قرارداد جاری
+# اتوماسیون Qoder و Gemini — قرارداد جاری
 
-> Runtime migration 2026-11-03: active role models and reasoning are read from `docs/refactor/two-server/templates/automation-models.json`. Qoder owns coordination and final acceptance; Gemini owns proposal generation and independent first review. `gemini-runtime-contract.json` retains historical provenance and CLI/completion pins; its historical role-model fields do not select new runs. Source/proposal binding, native tests, independent sessions, serial Git and explicit STOP remain required.
+> Active policy 2026-11-04: `docs/refactor/two-server/templates/automation-models.json` selects all four role models and reasoning efforts. Qoder owns coordination, final acceptance and ordinary Supervisor continuation/recovery without a Root/Codex/chat handoff after each accepted unit; Gemini owns proposal generation and independent first review. Deterministic Python retains all native/review/checkpoint/Source/Scope/STOP/protected-ref gates. `gemini-runtime-contract.json` retains historical provenance and CLI/completion pins; historical model fields do not route fresh runs. No fifth model role or wider authority is introduced.
 
 
-به‌روز: ۲۰۲۶-۱۰-۱۹. مسیر پیش‌فرض توسعهٔ خودکار:
-Gemini Worker → Gemini Reviewer مستقل → Codex review/apply/test/commit.
+به‌روز: ۲۰۲۶-۱۱-۰۴. مسیر پیش‌فرض توسعهٔ خودکار:
+Qoder Coordinator → Gemini Worker → native → Gemini Reviewer مستقل → Qoder final review/apply/commit → Supervisor checkpoint و ادامهٔ خودکار.
 تماس provider در مسیر عادی و `submit-maintenance` فقط از Broker محلیِ محدود
-انجام می‌شود؛ Codex یک درخواست فایل‌محور محلی می‌گذارد و به مجوز تودرتوی مدل
+انجام می‌شود؛ Qoder Coordinator یک درخواست فایل‌محور محلی می‌گذارد و به مجوز تودرتوی مدل
 approval-review وابسته نیست. دو مسیر دستیِ محدود پایین مستقل از مسیر عادی‌اند:
 `Root REVIEW_ONLY` با Gemini verifier، و جایگزین موقتِ دو عامل مستقل Codex هنگام
 اختلال CLI. هرکدام تمام شروط بخش اختصاصی خود را لازم دارند؛ مسیر دوم هیچ تماس
@@ -14,17 +14,14 @@ provider یا تغییر Validatorهای unattended را مجاز نمی‌کن�
 مسیر قدیمی gateway/native همچنان غیرفعال است. وضعیت اجرا را از فرایند زنده،
 Git و شواهد همان چرخه بخوانید؛ عبارت RUNNING یا یک گزارش تاریخی اثبات سلامت نیست.
 
-مدل جاری Supervisor: `gpt-6.1-sol` با `xhigh`.
-مدل‌های Gemini از `templates/gemini-runtime-contract.json` می‌آیند:
-Worker=`gemini-4-argon-medium/medium` و Reviewer=`gemini-4-argon-high/high`.
-این انتخاب در ۲۰۲۶-۱۰-۱۷ پس از مشاهدهٔ هر دو مدل در فهرست همین حساب و آزمون
-واقعیِ مستقل هر دو نقش انجام شد؛ آن مشاهدهٔ تاریخی با CLI 1.4.0 بود.
-نسخه/SHA جاری CLI فقط از runtime contract می‌آیند. inventory منابعِ CLI
-مجوز ابزار نیست؛ Agent و hookهای محلی باید دقیقاً همان نقش محدود آماده‌شده باشند.
-این تفکیک از خروجی‌های غیرقابل‌تحویل
-ناشی از reasoning بی‌حد Worker جلوگیری می‌کند، درحالی‌که بازبینی مستقل روی بالاترین
-effort باقی می‌ماند. Runner پیش از مصرف provider سازگاری قرارداد و ارجاع‌هایش را
-می‌سنجد. حذف review یا سبک‌کردن تست برای صرفه‌جویی مجاز نیست.
+مدل و effort جاریِ `coordinator`، `final_reviewer`، `worker` و `reviewer` فقط از
+`templates/automation-models.json` انتخاب و برای هر واحد snapshot می‌شوند.
+Supervisor وظیفهٔ عملیاتیِ Qoder Coordinator است، نه یک نقش مدل پنجم؛ Python
+اعتبارسنجی و قفل‌گذاری را اجرا می‌کند. نسخه/SHA کلاینت‌ها از قرارداد هویت runtime
+جاری می‌آیند. مدل‌های medium/high و شواهد Codex در بخش‌های تاریخ‌دار پایین، شرح
+اجرای تاریخی‌اند و پیش‌فرض اجرای تازه نیستند. inventory منابع CLI مجوز ابزار نیست؛
+Agent و hookها باید همان نقش محدود آماده‌شده باشند. Runner پیش از مصرف provider
+سازگاری قرارداد و ارجاع‌هایش را می‌سنجد؛ حذف review یا سبک‌کردن تست مجاز نیست.
 
 شاهد مستقل ۲۰۲۶-۱۰-۱۸، فقط qualification غیرproviderِ 713Q برای artifact رسمی و
 غیرفعال CLI 1.4.2 با SHA085f43e0d0628a8a8dabe1e547067818fa2c0adc86cfac98a3c4492918f455ef بود:
@@ -41,7 +38,7 @@ actual executor، نه خروج graceful پس از terminal result، سلامت 
 
 مثلاً یک رفتار خطای ثبت پیام در Stage فعال هنوز تست مشخص ندارد:
 
-1. Codex یک بار Git، حافظهٔ مسیریابی‌شده، Stage و Assignment فعال را بررسی می‌کند.
+1. Qoder Coordinator یک بار Git، حافظهٔ مسیریابی‌شده، Stage و Assignment فعال را بررسی می‌کند.
    next_action چرخهٔ موفق قبلی محل دقیق کار بعدی را نشان می‌دهد؛ این خلاصه فقط وقتی
    HEAD هنوز همان است منتقل می‌شود و جای مجوز، شواهد پذیرش یا بررسی شکاف واقعی را نمی‌گیرد.
 2. یک زیرکار مرتبط با شکاف مشخص انتخاب می‌شود. دو یا سه سناریوی نزدیک برای همان
@@ -56,14 +53,24 @@ actual executor، نه خروج graceful پس از terminal result، سلامت 
 5. نشست تازهٔ Gemini Reviewer همان task، snapshot و proposal کامل را می‌گیرد.
    conversation ID باید متفاوت باشد؛ proposal SHA دقیق، VERIFIED و findings خالی لازم‌اند.
    Reviewer حق تولید تغییر ندارد و مستقیماً با Worker صحبت نمی‌کند.
-6. Codex کد واقعی و رفتار را کامل review می‌کند. اگر پذیرفت، فقط bytes همان proposal
-   را اعمال، تست‌های لازم را اجرا، diff کامل را بررسی و فایل‌های دقیق را commit می‌کند.
-   بررسی مکانیکی شواهد جای بازبینی معنایی یا تست واقعی را نمی‌گیرد.
+6. نشست تازه و مستقل Qoder کد واقعی و رفتار را کامل review می‌کند. پس از APPROVE معتبر،
+   Coordinator فقط bytes همان proposal را اعمال، PASS معتبر Broker را با binding دقیق
+   کنترل، diff کامل را بررسی و فایل‌های دقیق را commit می‌کند. بررسی مکانیکی شواهد
+   جای بازبینی معنایی یا تست واقعی را نمی‌گیرد.
 7. Supervisor مستقل از متن مدل، زنجیرهٔ Worker/Reviewer، یک commit با یک parent،
    برابری path/mode/bytes، ancestry، worktree تمیز و ثبات refs/controlها را می‌سنجد.
-   فقط سپس CONTINUE پذیرفته می‌شود. پذیرش واحد به معنی COMPLETE شدن Stage نیست.
+   فقط سپس CONTINUE و checkpoint واقعی پذیرفته می‌شوند و Qoder ادامهٔ عادی را بدون
+   handoff به Root/Codex/چت پیش می‌برد. پذیرش واحد به معنی COMPLETE شدن Stage نیست.
 
-مسیر پیش‌فرض توسعهٔ بدون‌نظارت همچنان Gemini Worker → Reviewer مستقل → Codex است.
+ادامه و بازیابی Supervisor متعلق به Qoder است و فقط مسیرهای محدودِ موجود را دارد؛
+Python همچنان تمام گیت‌ها را اعمال می‌کند. ادامهٔ خودکار از checkpoint واقعی و
+bindingهای معتبر، با نبود اجرای هم‌زمان و Scope کافی انجام می‌شود. STOP عمدی، رد
+authority، drift، اثر مبهم یا شواهد نامعتبر توقف معتبرند؛ این مسئولیت مجوز replay،
+reset، خوداصلاحی دلخواه، دورزدن STOP یا گسترش اختیار نیست. رفع توقف نیازمند همان
+اختیار واقعیِ مربوط است، نه handoff اجباری پس از هر واحد سالم.
+
+مسیر پیش‌فرض توسعهٔ بدون‌نظارت، Gemini Worker → Reviewer مستقل → Qoder است؛
+Qoder مالک Supervisor و ادامهٔ عادی نیز هست. مجوز دستیِ تاریخیِ زیر جدا و محدود می‌ماند.
 طبق مجوز دائمی مالک در ۲۰۲۶-۱۰-۱۲، تا پایان ریفکتور، Codex هرجا لازم باشد می‌تواند
 کد، آزمون یا مستندات بنویسد و اصلاح کند؛ تأیید جداگانه لازم نیست. ممنوعیت «فقط Gemini
 نویسنده باشد» و محدودیت استثناهای یک‌بارمصرف قبلی در این موضوع دیگر حاکم نیستند.
@@ -126,7 +133,7 @@ Source/سناریو/assertion یا سبک‌کردن review مجاز نیست. �
 مثلاً در تست دکمهٔ «معامله‌ای»، حذف نیم‌فاصله پاسخ متفاوتی تولید می‌کند. Runner از
 منبع اصلی، شناسه‌های دقیق و literalهای دارای نویسهٔ نامرئی را به شکل escaped در
 `preparation_notes` می‌گذارد؛ این راهنما محدود و مشورتی است و snapshot یا مجوز نیست.
-Codex پیش از ارسال باید تعریف وابستگی، شناسهٔ واقعی blocker، fixture معتبر و سناریوی
+Qoder Coordinator پیش از ارسال باید تعریف وابستگی، شناسهٔ واقعی blocker، fixture معتبر و سناریوی
 قبلاً پوشش‌داده‌شده را مشخص کند. Worker مقدار مورد انتظار را از تابع تحت تست تولید
 نمی‌کند؛ Reviewer حتی با PASS شدن تست، شکل کامل آرگومان‌ها، ترتیب، await و Unicode را
 بررسی می‌کند. راهنما جای اطلاعات ناقص یا review معنایی را نمی‌گیرد.
@@ -185,7 +192,7 @@ spec دقیقاً شامل `task` با همان شش کلید، `snippets`، `ga
 نمونهٔ snippets: `[{"path":"مسیر واقعی فایل Python","symbols":["نام تابع","نام ثابت"]}]`.
 برای بستهٔ کامل بدون excerpt مقدار `[]` بدهید.
 gap_reference مسیر مستند tracked و در صورت نیاز #شناسهٔ شکاف است؛ این برچسب به‌تنهایی
-اثبات بازبودن شکاف نیست. Codex باید آن را با Stage و پوشش موجود تطبیق دهد.
+اثبات بازبودن شکاف نیست. Qoder باید آن را با Stage و پوشش موجود تطبیق دهد.
 
 ### هویت معنایی و جلوگیری از دوباره‌کاری
 
@@ -247,7 +254,7 @@ session/table/patch سفارشی سنگین نیاز دارد، Coordinator آن
 برای فایل‌های تازهٔ `tests/test_p1_00*_characterization_*.py` که application import دارند،
 گیت قطعیِ پیش از sandbox-test، مقدار `APP_ENV_FILE`، ترتیب bootstrap و استفاده از
 `install_p1_00_network_fence()` را بررسی می‌کند. خطا با feedback محدودِ `test-gate` به Worker
-برمی‌گردد و تا رفع آن نه pytest، نه Reviewer و نه بررسی نهایی Codex اجرا نمی‌شوند. این گیت
+برمی‌گردد و تا رفع آن نه pytest، نه Reviewer و نه بررسی نهایی Qoder اجرا نمی‌شوند. این گیت
 فقط قرارداد پایدار hermetic-test را بررسی می‌کند و جای review معنایی یا تست واقعی را نمی‌گیرد.
 
 اگر محتوای نهایی UTF-8 یک فایل موجود حداقل ۸۱۹۲ بایت است، transport حتماً باید از
@@ -261,7 +268,7 @@ replacement دقیق استفاده کند؛ برای فایل موجود کوچ
 و نه جایگزین Scope، Source/byte budget، native یا بازبینی مستقل.
 حالت کامل content کامل + replacements خالی؛ حالت replacement مقدار content=null و
 ۱ تا ۳۲ {old,new} یکتا و غیرهم‌پوشان، مجموع حداکثر ۶۵۵۳۶ بایت UTF-8.
-Runner پیش از Reviewer bytes کامل را materialize می‌کند؛ Reviewer و Codex همواره
+Runner پیش از Reviewer bytes کامل را materialize می‌کند؛ Reviewer و Qoder همواره
 محتوای نهایی کامل را می‌بینند، پس فشرده‌سازی transport عمق review را کم نمی‌کند.
 مدل باید import/signature/enum، سناریوی منفی و پوشش نیازمندی‌ها را قبل از ارسال بررسی کند.
 نبود تعریف لازم باید با path/symbol دقیق گزارش شود، نه ادعای انجام کار یا خروجی ناقص.
@@ -461,7 +468,7 @@ python3 scripts/two_site_cycle_tools.py review --task <task> \
 ```
 
 BINDINGS_VALID یعنی اتصال دقیق task/source/head/hash و دو نشست بررسی شده، نه اینکه
-کد درست است. Codex تمام تغییرات و شواهد را review می‌کند. پس از اعمال bytes دقیق،
+کد درست است. Qoder تمام تغییرات و شواهد را مستقل review می‌کند. پس از اعمال bytes دقیق،
 همان فرمان با `--applied` و پیش از staging اجرا می‌شود؛ BYTES_VALID اختلاف مسیر،
 متن، mode یا فایل نامرتبط را رد می‌کند، ولی تستی اجرا نمی‌کند.
 در correction، helper قرارداد parsed feedback و proposal قبلی را می‌سنجد؛ hash متن
@@ -476,7 +483,7 @@ snapshot اصلی می‌سازد و correction برای آن path فقط محت
 همگی به همان فهرست متصل‌اند.
 
 رد Reviewer یا تست داخل pipeline با چهار کلید دقیق برمی‌گردد:
-`reviewer` (gemini یا codex)، `reviewed_proposal_sha256`،
+`reviewer` (gemini، qoder، test-gate یا شناسهٔ تاریخی codex)، `reviewed_proposal_sha256`،
 `findings` و `test_evidence`.
 finding باید محل، ورودی محرک، رفتار واقعی/مورد انتظار و اصلاح لازم را روشن کند.
 Worker تازه proposal ردشده و feedback را می‌گیرد؛ سپس Reviewer تازه الزامی است.
@@ -486,10 +493,13 @@ tool-attempt، function-call بدفرمت یا پاسخ `SUCCESS` با transport
 است و source را تکرار نمی‌کند. این retry جای correction معنایی نیست. خطای سهمیه/شبکه/auth،
 truncation، scope/security/Git/runtime و پوشش معنایی requirements وارد این مسیر نمی‌شوند.
 correction معنایی همچنان حداکثر دو بار است و رد معادل باید به rescope واقعی منجر شود.
-اگر Codex در گیت نهایی ایراد معنایی پیدا کند، همان واحد با Git تمیز و یافتهٔ دقیق
-BLOCKED/RESCOPE می‌شود؛ Codex runner مستقیم provider اجرا نمی‌کند و واحد بعدی باید
-کوچک‌تر و با context اصلاح‌شده ساخته شود. استثنای دستی `Root REVIEW_ONLY` فقط با
-تمام شروط بخش اختصاصی خودش است و راه تبدیل همان retry ردشده به فراخوانی مستقیم نیست.
+اگر Qoder در گیت نهایی `REQUEST_CHANGES` بدهد، یافته‌های واقعیِ مقید به همان proposal
+در همان lineage به اصلاح محدود Gemini برمی‌گردند؛ candidate اصلاح‌شده دوباره از native،
+نشست تازهٔ Gemini Reviewer و نشست تازهٔ Qoder می‌گذرد. فقط نبود اصلاح مجاز، اتمام بودجهٔ
+آن یا شکست معادلِ ممنوع برای ادامه، به BLOCKED/RESCOPE واقعی با Git تمیز منجر می‌شود؛
+واحد بعدی باید کوچک‌تر و با context اصلاح‌شده باشد. Coordinator runner مستقیم provider
+اجرا نمی‌کند. استثنای دستی `Root REVIEW_ONLY` فقط با تمام شروط بخش اختصاصی خودش است
+و راه تبدیل همان retry ردشده به فراخوانی مستقیم نیست.
 
 حداکثر دو اصلاح متمایز در یک واحد؛ تمام‌شدن بودجه با Git تمیز و بدون commit یعنی
 BLOCKED/RESCOPE INTERNAL_REJECTION و یک واحد کوچک‌تر/کامل‌تر جدید.
@@ -696,6 +706,7 @@ parent-return/PGID/EOF پیش از cleanup ثبت نشد، پس علت دقیق 
 Start/Monitor، سلامت، صرفه‌جویی یا بسته‌شدن AE03/Stage/هدف کلی نیست. کار ضروریِ
 آینده، از جمله شکست‌ها، باید outcome واقعی و هزینه/UNKNOWN را نگه دارد.
 
+مشخصات تاریخیِ Codex پیش از مهاجرت به Qoder (نه runtime جاری):
 Codex CLI نسخهٔ 0.159.2 با SHA ثبت‌شده در Supervisor، از مسیر مستقل این integration:
 `.local/tools/codex-0.159.2-1748767b230ebfc3/codex`.
 این مسیر به پوشهٔ نسخه‌دار افزونه وابسته نیست؛ fallback به PATH یا نسخهٔ تأییدنشده ندارد.
@@ -720,7 +731,7 @@ Broker نیز قفل server و client مستقل دارد، صف را حداکث
 نه مشاهدهٔ PID میزبان از داخل sandbox.
 
 Supervisor پس از اعتبارسنجی runtime، Git، protected refs، control blobs، registry و Assignment
-فلگ `startup_validation=true` را در context همان چرخه می‌گذارد. Codex این کنترل‌های مکانیکی
+فلگ `startup_validation=true` را در context همان چرخه می‌گذارد. Qoder این کنترل‌های مکانیکی
 آغاز چرخه را دوباره اجرا نمی‌کند و فقط پس از mutation/drift یا در بازرسی نهایی probe لازم را
 تکرار می‌کند؛ review معنایی، تست و کنترل نهایی دقیق bytes/refs حذف نشده‌اند.
 
