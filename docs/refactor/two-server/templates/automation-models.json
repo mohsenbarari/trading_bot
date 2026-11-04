@@ -3,13 +3,13 @@
   "roles": {
     "coordinator": {
       "provider": "qoder",
-      "model": "Qwen3.8-Max",
-      "reasoning_effort": "xhigh"
+      "model": "DeepSeek-Flash",
+      "reasoning_effort": "max"
     },
     "final_reviewer": {
       "provider": "qoder",
-      "model": "Qwen3.8-Max",
-      "reasoning_effort": "xhigh"
+      "model": "DeepSeek-Flash",
+      "reasoning_effort": "max"
     },
     "worker": {
       "provider": "antigravity",
