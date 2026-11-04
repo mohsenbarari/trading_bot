@@ -178,14 +178,18 @@ def _tool_free_command(command):
     argv = command if not separators else command[separators[0] + 1:]
     need(len(argv) == 24 and Path(argv[0]).is_absolute(), "AUTHOR_RESUME_COMMAND_SHAPE")
     positions = {1: "--settings", 3: "--append-system-prompt", 5: "--cwd",
-        7: "--model", 9: "--reasoning-effort", 11: "--thinking",
+        7: "--model", 9: "--reasoning-effort",
         13: "--output-format", 15: "--no-session-persistence",
         16: "--permission-mode", 18: "--strict-mcp-config", 19: "--mcp-config",
         21: "--tools", 23: "--print"}
     need(all(argv[index] == flag for index, flag in positions.items())
          and argv[4] and Path(argv[6]).is_absolute() and argv[8]
          and argv[10] in {"low", "medium", "high", "xhigh", "max"}
-         and argv[12] == "adaptive" and argv[14] == "stream-json"
+         and argv[11] in {"--thinking", "--thinking-budget"}
+         and ((argv[11] == "--thinking" and argv[12] == "adaptive")
+              or (argv[11] == "--thinking-budget" and argv[12].isdigit()
+                  and 1024 <= int(argv[12]) <= 1048576))
+         and argv[14] == "stream-json"
          and argv[17] == "auto" and argv[20] == '{"mcpServers":{}}'
          and argv[22] == "", "AUTHOR_RESUME_NOT_TOOL_FREE")
     try:
@@ -218,6 +222,8 @@ def _tool_free_command(command):
         need(type(maximum) is int and not isinstance(maximum, bool)
              and 32768 <= maximum <= 1048576 and settings["modelConfigs"] == expected,
              "AUTHOR_RESUME_SETTINGS")
+        if argv[11] == "--thinking-budget":
+            need(int(argv[12]) < maximum, "AUTHOR_RESUME_SETTINGS")
     return argv
 
 

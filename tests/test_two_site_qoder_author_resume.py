@@ -96,7 +96,8 @@ def test_dead_tool_free_owner_gets_one_idempotent_bound_variant_without_output_a
         run_id=receipt["recovery_run_id"]) == receipt
 
 
-@pytest.mark.parametrize("fault", ["extra-tool", "tool-position", "mcp-config", "settings-model"])
+@pytest.mark.parametrize("fault", ["extra-tool", "tool-position", "mcp-config", "settings-model",
+                                   "thinking-over-output"])
 def test_process_custody_rejects_any_unrecognized_or_tool_enabling_argv(episode, fault):
     _, directory, process, values, _ = episode
     stopped(process); (directory / resume.CUSTODY).unlink()
@@ -104,10 +105,17 @@ def test_process_custody_rejects_any_unrecognized_or_tool_enabling_argv(episode,
     if fault == "extra-tool": command[-1:-1] = ["--allowedTools", "Read"]
     elif fault == "tool-position": command[command.index("--tools") + 1] = "Read"
     elif fault == "mcp-config": command[command.index("--mcp-config") + 1] = '{"mcpServers":{"x":{}}}'
-    else:
+    elif fault == "settings-model":
         command[command.index("--settings") + 1] = json.dumps({"general": {"enableAutoUpdate": False},
             "modelConfigs": {"customOverrides": [{"match": {"model": "Other", "overrideScope": "core"},
                 "modelConfig": {"generateContentConfig": {"maxOutputTokens": 262144}}}]}})
+    else:
+        index = command.index("--thinking")
+        command[index:index + 2] = ["--thinking-budget", "32768"]
+        command[command.index("--settings") + 1] = json.dumps({
+            "general": {"enableAutoUpdate": False}, "modelConfigs": {"customOverrides": [{
+                "match": {"model": "Synthetic", "overrideScope": "core"},
+                "modelConfig": {"generateContentConfig": {"maxOutputTokens": 32768}}}]}})
     candidate = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL, start_new_session=True)
     try:
@@ -132,6 +140,22 @@ def test_recovery_variant_has_the_same_process_custody_before_prompt(episode):
         custody = resume.persist_author_process(recovered, candidate, **values,
             command_sha256=resume.digest(resume.encode(candidate.args)))
         assert custody["run_id"] == receipt["recovery_run_id"]
+    finally:
+        os.killpg(candidate.pid, signal.SIGKILL); candidate.wait(timeout=5)
+
+
+def test_process_custody_accepts_current_bounded_thinking_form(episode):
+    _, directory, process, values, _ = episode
+    stopped(process); (directory / resume.CUSTODY).unlink()
+    command = tool_free_command()
+    index = command.index("--thinking")
+    command[index:index + 2] = ["--thinking-budget", "32768"]
+    candidate = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        custody = resume.persist_author_process(directory, candidate, **values,
+            command_sha256=resume.digest(resume.encode(command)))
+        assert custody["owner"]["pid"] == candidate.pid
     finally:
         os.killpg(candidate.pid, signal.SIGKILL); candidate.wait(timeout=5)
 

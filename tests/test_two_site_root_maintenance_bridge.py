@@ -138,7 +138,8 @@ def test_both_shared_callers_use_real_marked_route_without_legacy_fallback(lab,m
     assert helpers.custody(lab)==before
     from scripts import two_site_autopilot_monitor_preflight as monitor
     monkeypatch.setattr(monitor,'validate_repository',lab['repository_oracle'])
-    helpers.private(lab['state']/'status.json',ap.serialize_json(dict(head=lab['marker']['head'],state='CONTINUE')))
+    helpers.private(lab['state']/'status.json',ap.serialize_json(
+        dict(head=lab['marker']['head'],state='RETRYABLE_FAILURE')))
     assert monitor.run_preflight(lab['root'])==(True,'READY')
     helpers.replace_bundle(lab,post_edit=lambda p:p.update(broker_posthold_completed=False))
     with ap.exclusive_supervisor_lock(lab['state']/'autopilot.lock'):
@@ -181,6 +182,40 @@ def test_record_and_historical_raw_read_budgets_forward_then_restore(lab,monkeyp
     lab['evidence_path'].write_bytes(original)
     helpers.replace_bundle(lab)
     assert helpers.run(lab)['repository']['head']==lab['marker']['head']
+
+
+def test_pure_record_accepts_only_exact_historical_to_current_control_expansion(lab):
+    prior=copy.deepcopy(lab['prior'])
+    current=copy.deepcopy(lab['repository'])
+    prior['control_blobs']={key:'a'*40 for key in ap._HISTORICAL_CONTROL_KEYS_20261104}
+    current['control_blobs']={path.as_posix():'b'*40 for path in ap.CONTROL_PATHS}
+    record=copy.deepcopy(lab['record'])
+    record['repository']={key:value for key,value in current.items() if key!='assignment_scope'}
+    raw=helpers.canonical(record)
+    marker={**lab['marker'],'record_sha256':helpers.sha(raw)}
+    parsed=subject.parse_root_maintenance_bridge_bytes(
+        raw,marker=marker,prior_repository=prior,current_repository=current,
+        destination_assignment_id=helpers.DESTINATION,
+    )
+    assert parsed['repository']['control_blobs']==current['control_blobs']
+
+    for mutation in ('missing','foreign'):
+        rejected=copy.deepcopy(current)
+        if mutation=='missing':
+            rejected['control_blobs'].pop(next(iter(rejected['control_blobs'])))
+        else:
+            rejected['control_blobs']['scripts/foreign_control.py']='c'*40
+        rejected_record=copy.deepcopy(record)
+        rejected_record['repository']={key:value for key,value in rejected.items()
+                                       if key!='assignment_scope'}
+        rejected_raw=helpers.canonical(rejected_record)
+        rejected_marker={**marker,'record_sha256':helpers.sha(rejected_raw)}
+        with pytest.raises(subject.RootMaintenanceBridgeError):
+            subject.parse_root_maintenance_bridge_bytes(
+                rejected_raw,marker=rejected_marker,prior_repository=prior,
+                current_repository=rejected,
+                destination_assignment_id=helpers.DESTINATION,
+            )
 
 
 @pytest.mark.parametrize('exc',[KeyboardInterrupt(),SystemExit(),GeneratorExit()])

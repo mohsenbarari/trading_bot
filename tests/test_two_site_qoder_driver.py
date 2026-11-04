@@ -97,12 +97,12 @@ def test_command_has_no_prompt_in_argv_no_resume_and_explicit_minimal_policy(tmp
     assert prompt not in argv
     assert argv[argv.index("--model") + 1] == role()["model"]
     assert argv[argv.index("--reasoning-effort") + 1] == role()["reasoning_effort"]
-    assert argv[argv.index("--thinking") + 1] == "adaptive"
+    assert "--thinking" not in argv
+    assert argv[argv.index("--thinking-budget") + 1] == "32768"
     settings = json.loads(argv[argv.index("--settings") + 1])
     assert settings == {"general": {"enableAutoUpdate": False}, "modelConfigs": {
         "customOverrides": [{"match": {"model": role()["model"], "overrideScope": "core"},
             "modelConfig": {"generateContentConfig": {"maxOutputTokens": 262144}}}]}}
-    assert "--thinking-budget" not in argv
     assert argv[argv.index("--permission-mode") + 1] == "auto"
     assert "--dangerously-skip-permissions" not in argv
     assert {"--print", "--no-session-persistence", "--strict-mcp-config"} <= set(argv)
@@ -123,6 +123,7 @@ def test_json_only_new_qoder_model_max_effort_reaches_real_argv_builder(tmp_path
     argv = driver.qoder_command(binary, tmp_path, run_dir, "Synthetic prompt", selected)
     assert argv[argv.index("--model") + 1] == "synthetic-new-model"
     assert argv[argv.index("--reasoning-effort") + 1] == "max"
+    assert argv[argv.index("--thinking-budget") + 1] == "32768"
     settings = json.loads(argv[argv.index("--settings") + 1])
     assert settings["modelConfigs"]["customOverrides"][0]["match"]["model"] == "synthetic-new-model"
     assert settings["modelConfigs"]["customOverrides"][0]["modelConfig"] == {
@@ -137,6 +138,8 @@ def test_historical_policy_without_execution_override_keeps_minimal_settings(tmp
     argv = driver.qoder_command(binary, tmp_path, run_dir, "Synthetic", role())
     assert json.loads(argv[argv.index("--settings") + 1]) == {
         "general": {"enableAutoUpdate": False}}
+    assert argv[argv.index("--thinking") + 1] == "adaptive"
+    assert "--thinking-budget" not in argv
 
 
 def test_only_genuine_bound_terminal_json_creates_result(tmp_path):

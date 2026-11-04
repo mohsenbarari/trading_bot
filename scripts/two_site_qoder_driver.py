@@ -139,15 +139,19 @@ def _settings_args(runtime: dict) -> list[str]:
     return result
 
 
-def _execution_settings(root: Path, roleconfig: dict) -> dict:
-    """Return one documented Qoder settings object for this configured model.
+def _execution_options(root: Path, roleconfig: dict) -> tuple[dict, list[str]]:
+    """Return documented Qoder settings and one bounded thinking mode.
 
     The model selector remains role data.  The execution limit is optional so
     historical configurations keep their exact argv; when present it is bound
     dynamically to the selected role model rather than to a model name in code.
+    A fixed thinking ceiling retains the configured reasoning effort while
+    preventing a model from consuming the whole output allowance in private
+    reasoning without emitting its required terminal JSON.
     """
     policy = load_ai_config(root)
     settings = {"general": {"enableAutoUpdate": False}}
+    thinking = ["--thinking", "adaptive"]
     execution = policy.get("qoder_execution")
     if execution is not None:
         settings["modelConfigs"] = {"customOverrides": [{
@@ -155,7 +159,9 @@ def _execution_settings(root: Path, roleconfig: dict) -> dict:
             "modelConfig": {"generateContentConfig": {
                 "maxOutputTokens": execution["max_output_tokens"]}},
         }]}
-    return settings
+        if "max_thinking_tokens" in execution:
+            thinking = ["--thinking-budget", str(execution["max_thinking_tokens"])]
+    return settings, thinking
 
 
 def qoder_identity(path: Path, runtime: dict, temporary: Path, roleconfig: dict | None = None) -> dict:
@@ -234,12 +240,12 @@ def qoder_command(path: Path, root: Path, run_dir: Path, prompt: str, roleconfig
     if role == "proposal_author":
         _need(len(prompt.encode("utf-8")) + len(contract[1].encode("utf-8")) <= limit,
               "QODER_AUTHOR_COMPLETE_PROMPT_BOUND")
-    settings = _execution_settings(root, roleconfig)
+    settings, thinking = _execution_options(root, roleconfig)
     settings_args = ["--settings", json.dumps(settings, separators=(",", ":"))]
     if runtime.get("config_dir"):
         settings_args += _settings_args(runtime)[2:]
     return [str(path), *settings_args, *contract, "--cwd", str(root), "--model", roleconfig["model"],
-        "--reasoning-effort", roleconfig["reasoning_effort"], "--thinking", "adaptive",
+        "--reasoning-effort", roleconfig["reasoning_effort"], *thinking,
         "--output-format", "stream-json", "--no-session-persistence", "--permission-mode", "auto",
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
         "--tools", *(TOOLS[role] or ("",)), "--print"]

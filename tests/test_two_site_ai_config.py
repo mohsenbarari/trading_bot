@@ -93,6 +93,15 @@ def test_qoder_execution_rejects_open_shape(tmp_path):
         config.load_ai_config(tmp_path)
 
 
+@pytest.mark.parametrize("value", [True, 1023, 262144, "32768", None])
+def test_qoder_thinking_budget_is_typed_bounded_and_below_output(tmp_path, value):
+    path = write_policy(tmp_path); data = json.loads(path.read_text())
+    data["qoder_execution"]["max_thinking_tokens"] = value
+    path.write_text(json.dumps(data)); path.chmod(0o600)
+    with pytest.raises(config.AIConfigError, match="AI_CONFIG_QODER_THINKING_TOKENS"):
+        config.load_ai_config(tmp_path)
+
+
 @pytest.mark.parametrize("kind", ["symlink", "hardlink", "group-write", "oversize"])
 def test_unsafe_policy_file_is_rejected(tmp_path, kind):
     path = write_policy(tmp_path)

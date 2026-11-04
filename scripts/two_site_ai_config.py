@@ -17,6 +17,7 @@ _EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 _MAX_BYTES = 65536
 _QODER_OUTPUT_MIN = 32768
 _QODER_OUTPUT_MAX = 1048576
+_QODER_THINKING_MIN = 1024
 
 
 class AIConfigError(ValueError):
@@ -89,11 +90,17 @@ def load_ai_config(root: Path) -> dict:
               "AI_CONFIG_EFFORT")
     if "qoder_execution" in value:
         execution = value["qoder_execution"]
-        _need(type(execution) is dict and set(execution) == {"max_output_tokens"},
+        _need(type(execution) is dict and set(execution) in (
+                  {"max_output_tokens"},
+                  {"max_output_tokens", "max_thinking_tokens"}),
               "AI_CONFIG_QODER_EXECUTION_FIELDS")
         maximum = execution["max_output_tokens"]
         _need(type(maximum) is int and _QODER_OUTPUT_MIN <= maximum <= _QODER_OUTPUT_MAX,
               "AI_CONFIG_QODER_OUTPUT_TOKENS")
+        if "max_thinking_tokens" in execution:
+            thinking = execution["max_thinking_tokens"]
+            _need(type(thinking) is int and _QODER_THINKING_MIN <= thinking < maximum,
+                  "AI_CONFIG_QODER_THINKING_TOKENS")
     return copy.deepcopy(value)
 
 

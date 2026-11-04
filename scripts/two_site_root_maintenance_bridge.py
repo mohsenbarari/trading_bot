@@ -17,7 +17,8 @@ import re
 import stat
 
 from scripts.two_site_codex_autopilot import (
-    BRANCH, validate_repository, validate_accepted_repository,
+    BRANCH, CONTROL_PATHS, _HISTORICAL_CONTROL_KEYS_20261104,
+    validate_repository, validate_accepted_repository,
     _validate_persisted_repository,
 )
 from scripts.two_site_assignment_scope import (
@@ -190,7 +191,17 @@ def parse_root_maintenance_bridge_bytes(raw, *, marker, prior_repository,
         _validate_external_main_transition(record, prior_repository, bare)
     else:
         _require(_same(prior_repository['protected_refs'], bare['protected_refs']))
-    _require(set(prior_repository['control_blobs']) == set(bare['control_blobs']))
+    prior_controls = set(prior_repository['control_blobs'])
+    current_controls = set(bare['control_blobs'])
+    current_control_contract = {path.as_posix() for path in CONTROL_PATHS}
+    # A Root bridge may cross the one exact issued 33-control checkpoint into
+    # the complete current control contract.  No partial, arbitrary, or later
+    # guessed keyset is accepted.  The exact Git ancestry and every current
+    # blob remain independently bound below; this expands custody, not credit.
+    _require(prior_controls == current_controls or (
+        prior_controls == set(_HISTORICAL_CONTROL_KEYS_20261104)
+        and current_controls == current_control_contract
+    ))
     _require(type(record['handoff_assignment_id']) is str
              and re.fullmatch('[A-Za-z0-9_-]{1,128}', record['handoff_assignment_id']) is not None
              and record['handoff_assignment_id'] != destination_assignment_id
