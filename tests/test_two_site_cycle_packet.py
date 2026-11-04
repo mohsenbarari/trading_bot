@@ -12,6 +12,7 @@ import pytest
 from scripts import two_site_cycle_packet as packet_mod
 from scripts import two_site_cycle_tools as ct
 from scripts import two_site_proposal_runner as runner
+from tests.two_site_generation_fixture import install_current_contract, seal_completion_fixture
 
 INITIAL_CODE = (
     "import os\n"
@@ -85,7 +86,8 @@ def repo(tmp_path, monkeypatch):
     (tmp_path / "doc.md").write_text("start\n--- old divider\nend\n")
     (tmp_path / "tests").mkdir(parents=True, exist_ok=True)
     (tmp_path / "tests/test_packet_fixture.py").write_text("def test_fixture():\n    assert True\n")
-    git("add", "--", ".gitignore", "gap.md", "code.py", "doc.md", "tests/test_packet_fixture.py")
+    install_current_contract(tmp_path)
+    git("add", ".")
     git("commit", "-m", "offline fixture")
     return tmp_path, git
 
@@ -196,6 +198,8 @@ def make_proposal_chain(
             "input_worker_conversation_id": "wc",
         },
     )
+    seal_completion_fixture(root, worker)
+    seal_completion_fixture(root, reviewer)
     return output, digest, result, reviewer, head
 
 

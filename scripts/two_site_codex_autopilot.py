@@ -213,6 +213,25 @@ CONTROL_PATHS = (
     AI_CONFIG_REL,
     Path("scripts/two_site_ai_config.py"),
     Path("scripts/two_site_qoder_driver.py"),
+    Path("scripts/two_site_qoder_author.py"),
+    Path('scripts/two_site_qoder_author_resume.py'),
+    Path('scripts/two_site_qoder_maintenance.py'),
+    Path('scripts/two_site_maintenance_lkg.py'),
+    Path('docs/refactor/two-server/templates/automation-maintenance-policy.json'),
+    Path('scripts/two_site_qoder_authority.py'),
+    Path('scripts/two_site_qoder_host.py'),
+    Path('scripts/two_site_qoder_business_reconcile.py'),
+    Path('scripts/two_site_maintenance_quota.py'),
+    Path('docs/refactor/two-server/templates/automation-authority-policy.json'),
+    Path('scripts/two_site_maintenance_transition_record.py'),
+    Path('scripts/two_site_maintenance_transition_publish.py'),
+    Path('scripts/two_site_maintenance_transition_storage.py'),
+    Path('scripts/two_site_maintenance_transition_startup.py'),
+    Path('scripts/two_site_maintenance_transition_git.py'),
+    Path('scripts/two_site_maintenance_transition_dir.py'),
+    Path('scripts/two_site_maintenance_transition_file.py'),
+    Path('scripts/two_site_cold_start_broker_quiescence.py'),
+    Path("docs/refactor/two-server/templates/automation-author-policy.json"),
     Path("scripts/two_site_autopilot.py"),
     Path("scripts/two_site_coordinator_sandbox.py"),
     Path("scripts/two_site_qoder_review.py"),
@@ -254,6 +273,10 @@ class AutopilotError(ProposalError):
 class QuotaFinalizationHardStopError(AutopilotError):
     pass
 
+
+
+# Exact issued 33-control schema: decode historical checkpoints only.
+_HISTORICAL_CONTROL_KEYS_20261104 = frozenset(('docs/refactor/two-server/templates/automation-models.json', 'scripts/two_site_ai_config.py', 'scripts/two_site_qoder_driver.py', 'scripts/two_site_autopilot.py', 'scripts/two_site_coordinator_sandbox.py', 'scripts/two_site_qoder_review.py', 'scripts/two_site_apply_reviewed.py', 'scripts/two_site_review_bridge.py', 'scripts/two_site_model_transition.py', 'scripts/two_site_codex_final_review.sh', 'scripts/two_site_codex_closeout_review.sh', 'scripts/two_site_codex_governance_review.sh', 'scripts/two_site_codex_autopilot.py', 'scripts/two_site_cycle_packet.py', 'scripts/two_site_cycle_tools.py', 'scripts/two_site_cycle_metrics.py', 'scripts/two_site_proposal_runner.py', 'scripts/two_site_provider_broker.py', 'scripts/two_site_qoder_output_repair.py', 'scripts/two_site_coordinator_broker_wait.py', 'scripts/two_site_assignment_scope.py', 'scripts/two_site_preparation_contract.py', 'scripts/two_site_preparation_io.py', 'scripts/two_site_preparation_boundary.py', 'scripts/two_site_preparation_runtime_gate.py', 'scripts/two_site_autopilot_tmux.sh', 'scripts/two_site_autopilot_monitor.sh', 'docs/refactor/two-server/templates/gemini-runtime-contract.json', 'docs/refactor/two-server/templates/GEMINI_TASK_PROMPT.md', 'docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md', 'docs/refactor/two-server/templates/codex-autopilot-cycle.schema.json', '.agents/skills/two-site-refactor/SKILL.md', '.agents/rules/two-site-refactor-safety.md'))
 
 @contextmanager
 def exclusive_supervisor_lock(lock_path: Path):
@@ -450,19 +473,19 @@ def codex_identity(codex: Path, temporary: Path) -> dict[str, object]:
 def coordinator_identity(root: Path, executable: Path, temporary: Path) -> dict[str, object]:
     """Select the configured driver while retaining legacy receipt compatibility."""
     settings = role_settings(root, "coordinator")
-    if settings["provider"] == "qoder":
-        runtime = load_runtime_config(root)["coordinator"]
-        if executable.resolve(strict=True) != Path(runtime["path"]).resolve(strict=True):
-            raise AutopilotError("coordinator executable differs from configured runtime")
-        return qoder_identity(executable, runtime, temporary, settings)
-    return codex_identity(executable, temporary)
+    if settings["provider"] != "qoder":
+        raise AutopilotError("operational coordinator provider must be qoder")
+    runtime = load_runtime_config(root)["coordinator"]
+    if executable.resolve(strict=True) != Path(runtime["path"]).resolve(strict=True):
+        raise AutopilotError("coordinator executable differs from configured runtime")
+    return qoder_identity(executable, runtime, temporary, settings)
 
 
 def coordinator_command(root: Path, executable: Path, run_dir: Path, prompt: str) -> list[str]:
     settings = role_settings(root, "coordinator")
-    if settings["provider"] == "qoder":
-        return qoder_command(executable, root, run_dir, prompt, settings)
-    return codex_command(executable, root, run_dir, prompt)
+    if settings["provider"] != "qoder":
+        raise AutopilotError("operational coordinator provider must be qoder")
+    return qoder_command(executable, root, run_dir, prompt, settings)
 
 
 def validate_result(result: object) -> dict:
@@ -724,8 +747,10 @@ def _validate_persisted_repository(repository: object) -> dict[str, object]:
             raise AutopilotError(f"protected ref {ref_name} identity must be a lowercase 40-hex SHA")
     control_blobs = repository.get("control_blobs")
     expected_controls = {p.as_posix() for p in CONTROL_PATHS}
-    if not isinstance(control_blobs, dict) or set(control_blobs) != expected_controls:
-        raise AutopilotError("control_blobs must contain every and only CONTROL_PATHS key")
+    if not isinstance(control_blobs, dict) or set(control_blobs) not in (
+            expected_controls, _HISTORICAL_CONTROL_KEYS_20261104):
+        raise AutopilotError("control_blobs must contain the current or exact issued historical keyset")
+    expected_controls = set(control_blobs)  # Historical data stays historical; live comparator differs.
     for path_key, blob_sha in control_blobs.items():
         if not isinstance(blob_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", blob_sha):
             raise AutopilotError(f"control blob {path_key} identity must be a lowercase 40-hex SHA")
@@ -2112,6 +2137,10 @@ def validate_rescope_epoch_startup(
                 return
         if root is None:
             raise AutopilotError("prior epoch requires matching accepted checkpoint")
+        if os.path.lexists(root / "docs/refactor/two-server/templates/automation-authority-policy.json"):
+            from scripts.two_site_maintenance_transition_startup import authority_startup_locked
+            if authority_startup_locked(root, state_root, repository):
+                return
         if len(prior_epoch_names) > 1 or current_epoch_exists:
             try:
                 from scripts.two_site_maintenance_transition_startup import (
@@ -2381,18 +2410,14 @@ def _validate_gemini_chain(
     reviewer_dir = proposal_run_dir(root, result["gemini_reviewer_run_id"])
     worker_result_path = worker_dir / "result.json"
     reviewer_result_path = reviewer_dir / "result.json"
-    worker_result_text = bounded_file_text(
-        root, worker_result_path, MAX_CONTEXT, "Gemini Worker result"
-    )
-    worker_snapshot = unique_json(bounded_file_text(
-        root, worker_dir / "task.json", 3 * MAX_CONTEXT, "Gemini Worker snapshot"
-    ))
+    from scripts.two_site_proposal_runner import worker_result_limit, read_task_snapshot
+    worker_result_text = bounded_file_text(root, worker_result_path,
+                                           worker_result_limit(root, worker_dir), "Worker result")
+    _, worker_snapshot = read_task_snapshot(root, worker_dir / "task.json", "Worker snapshot")
     worker_status = unique_json(bounded_file_text(
         root, worker_dir / "status.json", MAX_CONTEXT, "Gemini Worker status"
     ))
-    reviewer_snapshot = unique_json(bounded_file_text(
-        root, reviewer_dir / "task.json", 3 * MAX_CONTEXT, "Gemini Reviewer snapshot"
-    ))
+    _, reviewer_snapshot = read_task_snapshot(root, reviewer_dir / "task.json", "Gemini Reviewer snapshot")
     reviewer_result = unique_json(bounded_file_text(
         root, reviewer_result_path, MAX_CONTEXT, "Gemini Reviewer result"
     ))
@@ -2414,9 +2439,18 @@ def _validate_gemini_chain(
             validate_task_scope(assignment_scope, task)
         except AssignmentScopeError:
             raise AutopilotError("assignment scope validation failed") from None
-    worker_result = validate_proposal_result(
-        unique_json(worker_result_text), task, sources, "worker", enforce_raw_transport=False
-    )
+    authorization = worker_snapshot.get("maintenance_authorization")
+    if authorization is None:
+        worker_result = validate_proposal_result(unique_json(worker_result_text), task, sources,
+                                                 "worker", enforce_raw_transport=False)
+    else:
+        if assignment_scope is not None:
+            raise AutopilotError("maintenance proposal cannot claim ordinary business checkpoint authority")
+        if worker_status.get("author_provider") != "qoder":
+            raise AutopilotError("maintenance author requires genuine first-class Qoder proof")
+        from scripts.two_site_proposal_runner import validate_prepared_result
+        worker_result = validate_prepared_result(root, authorization, unique_json(worker_result_text),
+            task, sources, "worker", source_head=source_head)
     if assignment_scope is not None:
         try:
             validate_changed_paths(
@@ -2755,6 +2789,13 @@ def prompt_for_cycle(
         raise AutopilotError("quota final review requires its exclusive template branch")
     if quota_ready is not None:
         context["quota_final_review"] = quota_ready
+    authority_policy = root / "docs/refactor/two-server/templates/automation-authority-policy.json"
+    checkpoint_path = root / ".local/two-site-refactor/autopilot" / ACCEPTED_CHECKPOINT_FILENAME
+    if os.path.lexists(authority_policy) and os.path.lexists(checkpoint_path):
+        from scripts.two_site_qoder_authority import lifecycle_feedback
+        authority_feedback = lifecycle_feedback(root, before)
+        if authority_feedback is not None:
+            context["authority_lifecycle_feedback"] = authority_feedback
     return base + "\n\nSUPERVISOR_CONTEXT_JSON:\n" + json.dumps(context, sort_keys=True)
 
 
@@ -2778,6 +2819,64 @@ def elapsed_seconds(started_at: float) -> float:
     """Return a non-negative monotonic duration for source-free cycle telemetry."""
     return round(max(0.0, time.monotonic() - started_at), 3)
 
+
+
+
+def _publish_postacceptance_operator_stop(root: Path) -> None:
+    """Use the existing STOP contract; never replace an operator's marker."""
+    path = root / ".local/two-site-refactor/autopilot/STOP"
+    try:
+        if os.path.lexists(path):
+            return
+        if path.parent.resolve(strict=True) != path.parent:
+            raise AutopilotError("STOP publication custody failed")
+        try:
+            descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        except FileExistsError:
+            return
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except BaseException as error:
+        raise SystemExit("ACCEPTED_CPP_RETAINED: operator STOP publication failed") from error
+
+
+def _refresh_accepted_lkg(root: Path) -> dict:
+    """Trusted post-CPP work; never erase acceptance or wait in reverse lock order."""
+    policy = root / "docs/refactor/two-server/templates/automation-maintenance-policy.json"
+    if not os.path.lexists(policy):
+        return {"state": "NOT_CONFIGURED"}  # Frozen historical/legacy roots remain unchanged.
+    try:
+        from scripts.two_site_qoder_maintenance import maintenance_policy_enabled
+        if not maintenance_policy_enabled(root):
+            return {"state": "NOT_CONFIGURED"}
+        monitor = root / ".local/two-site-refactor/monitor"
+        monitor.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = monitor.lstat()
+        if (monitor.resolve(strict=True) != monitor or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != os.geteuid() or info.st_mode & 0o022):
+            raise AutopilotError("LKG_MONITOR_DIRECTORY_CUSTODY")
+        # AP is already held. MON is NONBLOCKING, so monitor's MON->AP order
+        # can never deadlock this post-acceptance maintenance step.
+        with exclusive_supervisor_lock(monitor / "monitor.lock"):
+            from scripts.two_site_maintenance_lkg import install
+            installed = install(root)  # Rechecks real matching CPP/current clean Source.
+        return {"state": "LKG_CURRENT", "acceptance": "ACCEPTED_CPP_RETAINED", "capsule": installed}
+    except (KeyboardInterrupt, SystemExit) as error:
+        # Retain the genuine acceptance and stop ALL ordinary/bootstrap entry
+        # points via their existing STOP contract. Failure to publish must exit.
+        _publish_postacceptance_operator_stop(root)
+        return {"state": "LKG_REFRESH_PENDING", "acceptance": "ACCEPTED_CPP_RETAINED",
+                "error_type": type(error).__name__, "operator_stop_requested": True}
+    except Exception as error:
+        return {"state": "LKG_REFRESH_PENDING", "acceptance": "ACCEPTED_CPP_RETAINED",
+                "error_type": type(error).__name__}
 
 def run_cycle(
     root: Path,
@@ -2817,6 +2916,7 @@ def run_cycle(
         heartbeat_stop: threading.Event | None = None
         heartbeat_thread: threading.Thread | None = None
         primary_exception: BaseException | None = None
+        accepted_checkpoint_published = False
         phase_seconds: dict[str, float | None] = {
             "repository_validation": None,
             "task_context": None,
@@ -3144,6 +3244,10 @@ def run_cycle(
                 if final_repository["assignment_scope"] != before["assignment_scope"]:
                     raise AutopilotError("assignment_scope changed before checkpoint publication")
                 publish_accepted_checkpoint(state_root, result, final_repository)
+                accepted_checkpoint_published = True
+                meta["lkg_refresh"] = _refresh_accepted_lkg(root)
+                if meta["lkg_refresh"].get("operator_stop_requested") is True:
+                    result["operator_stop_requested"] = True
             result["advisories"] = advisories
             meta.update(
                 state=result["state"],
@@ -3165,12 +3269,19 @@ def run_cycle(
             return run_dir, result
         except BaseException as exc:
             primary_exception = exc
-            meta.update(
-                state="FAILED",
-                error=type(exc).__name__ + ": " + str(exc),
-                finished_at=time.time(),
-                duration_seconds=round(time.time() - float(meta["started_at"]), 3),
-            )
+            if accepted_checkpoint_published and isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                # A post-publication stop failure terminates the caller but can
+                # never relabel genuine accepted work as a replayable failure.
+                meta.update(state="CONTINUE", head_after=result["head_after"],
+                    summary=result["summary"], next_action=result["next_action"], blockers=result["blockers"],
+                    gemini_worker_run_id=result["gemini_worker_run_id"],
+                    gemini_reviewer_run_id=result["gemini_reviewer_run_id"], proposal_sha256=result["proposal_sha256"],
+                    lkg_refresh={"state": "LKG_REFRESH_PENDING", "acceptance": "ACCEPTED_CPP_RETAINED",
+                        "error_type": type(exc).__name__, "operator_stop_requested": True})
+            else:
+                meta.update(state="FAILED", error=type(exc).__name__ + ": " + str(exc))
+            meta.update(finished_at=time.time(),
+                duration_seconds=round(time.time() - float(meta["started_at"]), 3))
             write_json(run_dir / "status.json", meta)
             raise
         finally:
@@ -3375,7 +3486,7 @@ def run_loop(
                 state_root, "RUNNING", cycle=cycle, head=cycle_start_head,
                 phase="PREPARING", phase_started_at=phase_started_at,
                 heartbeat_at=phase_started_at,
-                summary="Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
+                summary="Executing Gemini Worker -> Gemini Reviewer -> Qoder final gate.",
                 blockers=[],
             )
             run_dir = None
@@ -3417,6 +3528,13 @@ def run_loop(
                         ],
                     )
                     return 2
+                if result.get("operator_stop_requested") is True:
+                    write_supervisor_state(state_root, "STOPPED", cycle=cycle,
+                        evidence=str(run_dir), head=result["head_after"],
+                        summary="Accepted checkpoint retained; operator requested stop after acceptance.",
+                        blockers=[])
+                    _observe_boundary(root, state_root, run_dir, "planned_stop")
+                    return 0
                 if quota_wait_enabled:
                     try:
                         from scripts.two_site_quota_supervisor_bridge import (

@@ -36,6 +36,9 @@ def setup_runtime(root):
     runtime = {"path": str(binary), "version": "1.2.3", "sha256": hashlib.sha256(binary.read_bytes()).hexdigest()}
     path = root / config.AI_RUNTIME_REL; path.parent.mkdir(parents=True)
     path.write_text(json.dumps({"schema_version": 1, "coordinator": runtime})); path.chmod(0o600)
+    policy = root / config.AI_CONFIG_REL
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_bytes(TEMPLATE.read_bytes()); policy.chmod(0o600)
     return binary, runtime
 
 
@@ -95,6 +98,10 @@ def test_command_has_no_prompt_in_argv_no_resume_and_explicit_minimal_policy(tmp
     assert argv[argv.index("--model") + 1] == role()["model"]
     assert argv[argv.index("--reasoning-effort") + 1] == role()["reasoning_effort"]
     assert argv[argv.index("--thinking") + 1] == "adaptive"
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert settings == {"general": {"enableAutoUpdate": False}, "modelConfigs": {
+        "customOverrides": [{"match": {"model": role()["model"], "overrideScope": "core"},
+            "modelConfig": {"generateContentConfig": {"maxOutputTokens": 262144}}}]}}
     assert "--thinking-budget" not in argv
     assert argv[argv.index("--permission-mode") + 1] == "auto"
     assert "--dangerously-skip-permissions" not in argv
@@ -116,6 +123,20 @@ def test_json_only_new_qoder_model_max_effort_reaches_real_argv_builder(tmp_path
     argv = driver.qoder_command(binary, tmp_path, run_dir, "Synthetic prompt", selected)
     assert argv[argv.index("--model") + 1] == "synthetic-new-model"
     assert argv[argv.index("--reasoning-effort") + 1] == "max"
+    settings = json.loads(argv[argv.index("--settings") + 1])
+    assert settings["modelConfigs"]["customOverrides"][0]["match"]["model"] == "synthetic-new-model"
+    assert settings["modelConfigs"]["customOverrides"][0]["modelConfig"] == {
+        "generateContentConfig": {"maxOutputTokens": 262144}}
+
+
+def test_historical_policy_without_execution_override_keeps_minimal_settings(tmp_path):
+    binary, _ = setup_runtime(tmp_path); run_dir = tmp_path / "run"; run_dir.mkdir()
+    policy_path = tmp_path / config.AI_CONFIG_REL
+    policy = json.loads(policy_path.read_text()); policy.pop("qoder_execution")
+    policy_path.write_text(json.dumps(policy)); policy_path.chmod(0o600)
+    argv = driver.qoder_command(binary, tmp_path, run_dir, "Synthetic", role())
+    assert json.loads(argv[argv.index("--settings") + 1]) == {
+        "general": {"enableAutoUpdate": False}}
 
 
 def test_only_genuine_bound_terminal_json_creates_result(tmp_path):

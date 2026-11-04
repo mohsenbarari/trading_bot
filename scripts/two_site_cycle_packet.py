@@ -87,13 +87,13 @@ def _prepare_proposal(
     reviewer_result_path = Path(receipt["reviewer_result"])
     worker_dir = worker_result_path.parent
 
-    worker_text = runner.bounded_file_text(root, worker_result_path, runner.MAX_CONTEXT, "worker result")
+    limit = runner.worker_result_limit(root, worker_dir)
+    worker_text = runner.bounded_file_text(root, worker_result_path, limit, "worker result")
     reviewer_text = runner.bounded_file_text(root, reviewer_result_path, runner.MAX_CONTEXT, "reviewer result")
-    snapshot_text = runner.bounded_file_text(root, worker_dir / "task.json", 2 * runner.MAX_CONTEXT, "worker snapshot")
+    snapshot_raw, snapshot = runner.read_task_snapshot(root, worker_dir / "task.json", "worker snapshot")
 
     worker_res = runner.unique_json(worker_text)
     reviewer_res = runner.unique_json(reviewer_text)
-    snapshot = runner.unique_json(snapshot_text)
 
     worker_sha = runner.sha(worker_text.encode("utf-8"))
     if worker_sha != sha or worker_sha != receipt["proposal_sha256"]:
@@ -114,11 +114,14 @@ def _prepare_proposal(
     if not isinstance(sources, dict):
         raise runner.ProposalError("invalid snapshot sources")
 
+    maintenance = snapshot.get("maintenance_authorization") is not None
     for name, src in sources.items():
-        target = runner.relative_file(root, name)
+        target = (root / name if maintenance else runner.relative_file(root, name))
+        if maintenance and (target.resolve(strict=False) != target or not target.is_relative_to(root)):
+            raise runner.ProposalError("maintenance source path alias")
         src_sha = src.get("sha256")
         if src_sha is not None:
-            disk_bytes = runner.bounded_file_bytes(root, target, runner.MAX_CONTEXT, "source check")
+            disk_bytes = runner.bounded_file_bytes(root, target, limit, "source check")
             if runner.sha(disk_bytes) != src_sha:
                 raise runner.ProposalError(f"source {name} modified after review")
         else:
@@ -156,7 +159,11 @@ def _prepare_proposal(
             raise runner.ProposalError("invalid change path")
         if any(ord(c) < 32 or ord(c) == 127 for c in path_str):
             raise runner.ProposalError(f"patch path contains control characters: {path_str}")
-        runner.relative_file(root, path_str)
+        if maintenance:
+            if path_str not in snapshot["task"]["allowed_files"]:
+                raise runner.ProposalError("unauthorized maintenance change")
+        else:
+            runner.relative_file(root, path_str)
 
         if path_str not in sources:
             raise runner.ProposalError(f"change path {path_str} not in sources")

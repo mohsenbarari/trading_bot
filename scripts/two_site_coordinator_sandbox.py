@@ -150,6 +150,7 @@ def _assignment_control_mounts(root: Path, common: Path, scope_env: Mapping[str,
 def buildwrap_coordinator_command(
     root: Path, run_dir: Path, argv: list[str], *,
     environment: Mapping[str, str] | None = None,
+    authority_review_context: dict | None = None,
 ) -> list[str]:
     """Return the complete bwrap command; refuse malformed roots and escapes.
 
@@ -192,7 +193,22 @@ def buildwrap_coordinator_command(
                   and all(ord(c) >= 32 for c in value), "SANDBOX_SCOPE_ENV")
             scope_env[name] = value
 
-    assignment_controls = _assignment_control_mounts(root, common, scope_env)
+    if authority_review_context is None:
+        assignment_controls = _assignment_control_mounts(root, common, scope_env)
+    else:
+        from scripts.two_site_qoder_authority import validate_authority_review_context
+        try:
+            assignment_controls = validate_authority_review_context(root, authority_review_context)
+            _need(type(assignment_controls) is tuple and len(assignment_controls) == 2,
+                  "SANDBOX_AUTHORITY_CONTROL_COUNT")
+            expected = common.parent / ".local/two-site-refactor"
+            _need(assignment_controls == (expected / "worktrees.yaml", expected / "assignments" /
+                  (authority_review_context["assignment_id"] + ".md")), "SANDBOX_AUTHORITY_CONTROL_PATH")
+            identities = tuple(_scope_control_identity(p, 524288) for p in assignment_controls)
+        except Exception as exc:
+            raise CoordinatorSandboxError("SANDBOX_AUTHORITY_REVIEW_CONTEXT") from exc
+        # Historical closed-Stage observations never masquerade as active business Scope.
+        scope_env = {key: value for key, value in scope_env.items() if not key.startswith("TWO_SITE_ASSIGNMENT")}
 
     state = run_dir / "coordinator-qoder-state"
     _private_directory(state)
@@ -213,9 +229,10 @@ def buildwrap_coordinator_command(
         path = Path(value)
         if path.exists():
             command += ["--ro-bind", str(path.resolve(strict=True)), value]
-    command += ["--bind", str(root), str(root)]
+    root_bind = "--bind" if authority_review_context is None else "--ro-bind"
+    command += [root_bind, str(root), str(root)]
     if not common.is_relative_to(root):
-        command += ["--bind", str(common), str(common)]
+        command += [root_bind, str(common), str(common)]
     # Public shared controls remain file-scoped; Main and its .local directory
     # are never mounted. The validated active Assignment is the only document.
     for control in assignment_controls:
@@ -257,4 +274,9 @@ def buildwrap_coordinator_command(
                          GIT_CONFIG_VALUE_0="true")
     for name, value in (fixed_env | scope_env).items():
         command += ["--setenv", name, value]
+    if authority_review_context is not None:
+        from scripts.two_site_qoder_authority import validate_authority_review_context
+        _need(validate_authority_review_context(root, authority_review_context) == assignment_controls
+              and tuple(_scope_control_identity(p, 524288) for p in assignment_controls) == identities,
+              "SANDBOX_AUTHORITY_CONTEXT_CHANGED")
     return command + ["--chdir", str(root), "--", str(executable), *argv[1:]]

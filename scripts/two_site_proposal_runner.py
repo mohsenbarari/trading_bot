@@ -1510,7 +1510,12 @@ def _load_task_snapshot(
     return task, sources
 
 
-def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
+def load_task(root: Path, task_path: Path, *, maintenance_authorization=None,
+              evidence_only: bool = False) -> tuple[dict, dict]:
+    if maintenance_authorization is not None:
+        from scripts.two_site_qoder_maintenance import load_maintenance_task
+        return load_maintenance_task(root, task_path, maintenance_authorization,
+                                     evidence_only=evidence_only)
     return _load_task_snapshot(root, task_path)
 
 
@@ -2581,6 +2586,7 @@ def normalize_result(
 
 # Private provenance for one already-validated terminal rejection; never serialized.
 _TERMINAL_NEW_TEST_BUDGET = object()
+_PREPARED_MAINTENANCE_RESULT = object()
 
 
 def validate_result(
@@ -2590,8 +2596,12 @@ def validate_result(
     role: str,
     enforce_raw_transport: bool = True,
     *,
-    original_sources: dict | None = None,
+    original_sources: dict | None = None, _prepared_maintenance=None,
 ) -> dict:
+    if _prepared_maintenance is not None and (
+            type(_prepared_maintenance) is not tuple or len(_prepared_maintenance) != 2
+            or _prepared_maintenance[0] is not _PREPARED_MAINTENANCE_RESULT):
+        raise ProposalError("invalid prepared maintenance result capability")
     if type(enforce_raw_transport) is not bool:
         raise ProposalError("enforce_raw_transport must be a boolean")
     if not isinstance(result, dict) or set(result) != set(schema(role)["required"]):
@@ -2617,8 +2627,12 @@ def validate_result(
     if role == "worker" and success and not result["changes"]:
         raise ProposalError("plan-only or no-op response is not implementation")
     origin = sources if original_sources is None else original_sources
-    new_test_limits = _new_test_file_limits(task, origin) if role == "worker" else {}
-    notes = task_preparation_notes(task, sources)
+    if _prepared_maintenance is not None:
+        new_test_limits = _prepared_maintenance[1] if role == "worker" else {}
+        notes = {"output_contract": {"test_only_task": False}}
+    else:
+        new_test_limits = _new_test_file_limits(task, origin) if role == "worker" else {}
+        notes = task_preparation_notes(task, sources)
     out_contract = notes.get("output_contract", {}) if isinstance(notes, dict) else {}
     test_only = bool(out_contract.get("test_only_task"))
     max_transport = out_contract.get("max_test_only_transport_bytes", 64000)
@@ -2664,6 +2678,50 @@ def validate_result(
     return result
 
 
+
+def validate_prepared_result(root, authorization, result, task, sources, role, *, source_head):
+    """Closed maintenance-only materialization; never change ordinary budgets."""
+    from scripts.two_site_qoder_maintenance import validate_maintenance_authorization
+    validate_maintenance_authorization(root, authorization, task=task, sources=sources,
+                                       source_head=source_head, evidence_only=True)
+    limits = {path: 64000 for path in task["allowed_files"]
+              if path.startswith("tests/") and path.endswith(".py")
+              and sources[path]["content"] is None}
+    value = validate_result(result, task, sources, role, enforce_raw_transport=False,
+                            _prepared_maintenance=(_PREPARED_MAINTENANCE_RESULT, limits))
+    if len(serialize_json(value)) > 320000:
+        raise ProposalError("prepared maintenance materialization exceeds 320000 bytes")
+    return value
+
+
+
+def build_prepared_review_transport(root, authorization, candidate, task, sources, *, source_head,
+                                    proposal_sha256, raw_transport):
+    """Complete original once plus actual proved unique hunks, maintenance only."""
+    if (not isinstance(proposal_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", proposal_sha256)
+            or sha(serialize_json(candidate)) != proposal_sha256
+            or len(serialize_json(raw_transport)) > MAX_CONTEXT
+            or type(raw_transport) is not dict or type(raw_transport.get("changes")) is not list
+            or any(type(change) is not dict or set(change) != {"path", "original_sha256", "content", "replacements"}
+                   for change in raw_transport["changes"])):
+        raise ProposalError("prepared maintenance raw delta or canonical proposal binding is invalid")
+    normalized = normalize_result(raw_transport, task, sources, "worker", strict_transport=True)
+    validated = validate_prepared_result(root, authorization, normalized, task, sources, "worker", source_head=source_head)
+    if validated != candidate:
+        raise ProposalError("prepared maintenance raw delta does not materialize the reviewed proposal")
+    return {"canonical_proposal_sha256": proposal_sha256, "raw_worker_transport": raw_transport}
+
+def worker_result_limit(root, directory):
+    """Historical replay may read 320k only for an independently validated job."""
+    _, snapshot = read_task_snapshot(root, directory / "task.json", "worker task snapshot")
+    authorization = snapshot.get("maintenance_authorization")
+    if authorization is None:
+        return MAX_CONTEXT
+    from scripts.two_site_qoder_maintenance import validate_maintenance_authorization
+    validate_maintenance_authorization(root, authorization, task=snapshot["task"],
+        sources=snapshot["sources"], source_head=snapshot["source_head"], evidence_only=True)
+    return 320000
+
 def load_prior_worker(
     root: Path,
     proposal_path: Path,
@@ -2673,9 +2731,7 @@ def load_prior_worker(
     head: str,
 ) -> tuple[dict, dict, str]:
     """Bind a review/correction to one complete worker run and exact proposal bytes."""
-    baseline = unique_json(bounded_file_text(
-        root, proposal_path.with_name("task.json"), 3 * MAX_CONTEXT, "worker snapshot"
-    ))
+    _, baseline = read_task_snapshot(root, proposal_path.with_name("task.json"), "worker snapshot")
     worker_status = unique_json(bounded_file_text(
         root, proposal_path.with_name("status.json"), MAX_CONTEXT, "worker status"
     ))
@@ -2691,9 +2747,10 @@ def load_prior_worker(
             or not isinstance(worker_status.get("conversation_id"), str)
             or not worker_status["conversation_id"].strip()):
         raise ProposalError("proposal is not bound to one completed worker run")
-    candidate = validate_result(
-        unique_json(proposal_text), task, sources, "worker", enforce_raw_transport=False
-    )
+    authorization = baseline.get("maintenance_authorization")
+    candidate = (validate_result(unique_json(proposal_text), task, sources, "worker", enforce_raw_transport=False)
+                 if authorization is None else validate_prepared_result(root, authorization,
+                     unique_json(proposal_text), task, sources, "worker", source_head=head))
     if candidate["status"] != "PROPOSAL_READY":
         raise ProposalError("review/correction requires a complete worker proposal")
     validate_generation_completion(
@@ -2721,7 +2778,7 @@ def _load_bound_opus_fallback_receipt(
 
     failed_dir = root / ".local/two-site-refactor/proposals" / failed_id
     status_raw = bounded_file_bytes(root, failed_dir / "status.json", MAX_CONTEXT, "failed status")
-    task_raw = bounded_file_bytes(root, failed_dir / "task.json", 3 * MAX_CONTEXT, "failed task")
+    task_raw, _ = read_task_snapshot(root, failed_dir / "task.json", "failed task")
     stream_raw = bounded_file_bytes(root, failed_dir / "stream.jsonl", MAX_OUTPUT, "failed stream")
 
     try:
@@ -3238,12 +3295,14 @@ def _generation_artifact_bindings(
     """Recompute retained bytes/schema/correction context; no historical OS query."""
     if role not in {"worker", "verifier"}:
         raise ProposalError("invalid completion proof role")
-    snapshot_bytes = bounded_file_bytes(root, run_dir / "task.json", 3 * MAX_CONTEXT,
-                                       "completion task snapshot")
-    snapshot = unique_json(snapshot_bytes.decode("utf-8"))
+    snapshot_bytes, snapshot = read_task_snapshot(root, run_dir / "task.json", "completion task snapshot")
     if (type(snapshot) is not dict or snapshot.get("task") != task
             or snapshot.get("sources") != sources or snapshot.get("source_head") != status.get("head")):
         raise ProposalError("completion task snapshot binding mismatch")
+    if snapshot.get("maintenance_authorization") is not None:
+        from scripts.two_site_qoder_maintenance import validate_maintenance_authorization
+        validate_maintenance_authorization(root, snapshot["maintenance_authorization"], task=task,
+            sources=sources, source_head=status.get("head"), evidence_only=True)
     prompt_bytes = bounded_file_bytes(root, run_dir / "prompt.txt", 2 * MAX_CONTEXT,
                                      "completion logical prompt")
     compact = status.get("compact_review")
@@ -3466,7 +3525,15 @@ def validate_generation_completion(
     root: Path, run_dir: Path, *, task: dict, sources: dict, role: str,
     status: dict, result: dict,
 ) -> dict:
-    """Mandatory current-policy gate; missing markers never select legacy mode."""
+    """Mandatory provider-specific completion; historical Gemini proof stays exact."""
+    if type(status) is dict and status.get("author_provider") == "qoder":
+        if role != "worker":
+            raise ProposalError("Qoder author proof cannot replace independent Gemini review")
+        from scripts.two_site_qoder_author import validate_author_completion
+        return validate_author_completion(root, run_dir, task=task, sources=sources,
+                                          status=status, result=result)
+    if type(status) is dict and status.get("author_provider") not in (None, "antigravity"):
+        raise ProposalError("unknown proposal author provider")
     contract_sha = _generation_contract_sha(root)
     if (type(status) is not dict or status.get("completion_policy") != GENERATION_COMPLETION_POLICY
             or status.get("runtime_contract_sha256") != contract_sha
@@ -3525,9 +3592,42 @@ def serialize_json(value: dict) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
-def _validate_task_snapshot_budget(material: dict) -> None:
-    if len(serialize_json(material)) > 3 * MAX_CONTEXT:
+MAINTENANCE_SNAPSHOT_BYTES = 3 * 320000
+
+
+def task_snapshot_limit(root: Path | None, material: dict) -> int:
+    """Larger retained metadata is authority-bound, never a provider input cap."""
+    if type(material) is not dict:
+        raise ProposalError("invalid task snapshot")
+    authorization = material.get("maintenance_authorization")
+    if authorization is None or root is None:
+        return 3 * MAX_CONTEXT
+    from scripts.two_site_qoder_maintenance import validate_maintenance_authorization
+    validate_maintenance_authorization(root, authorization, task=material.get("task"),
+        sources=material.get("sources"), source_head=material.get("source_head"), evidence_only=True)
+    return MAINTENANCE_SNAPSHOT_BYTES
+
+
+def _validate_task_snapshot_budget(material: dict, *, root: Path | None = None) -> None:
+    if len(serialize_json(material)) > task_snapshot_limit(root, material):
         raise ProposalError("task snapshot exceeds context budget")
+
+
+def validate_task_snapshot_bytes(root: Path, raw: bytes) -> dict:
+    """The field alone grants nothing; replay authority before the larger bound."""
+    if type(raw) is not bytes or len(raw) > MAINTENANCE_SNAPSHOT_BYTES:
+        raise ProposalError("task snapshot exceeds context budget")
+    material = unique_json(raw.decode("utf-8"))
+    if len(raw) > task_snapshot_limit(root, material):
+        raise ProposalError("task snapshot exceeds context budget")
+    _validate_task_snapshot_budget(material, root=root)
+    return material
+
+
+def read_task_snapshot(root: Path, path: Path, label: str = "task snapshot") -> tuple[bytes, dict]:
+    """Bound before parse, then revalidate immutable maintenance authority or 480k."""
+    raw = bounded_file_bytes(root, path, MAINTENANCE_SNAPSHOT_BYTES, label)
+    return raw, validate_task_snapshot_bytes(root, raw)
 
 
 def build_review_transport(
@@ -3856,7 +3956,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         cli: Path | None = None, test_evidence: Path | None = None,
         *, pre_provider_check: Callable[[], None] | None = None,
         fallback_from_run_id: str | None = None,
-        retry_hint: object = None) -> Path:
+        retry_hint: object = None, maintenance_authorization=None) -> Path:
     root = root.resolve(strict=True)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", run_id) or not 10 <= timeout <= 900:
         raise ProposalError("invalid run ID or timeout")
@@ -3870,11 +3970,19 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
     selected_role = model_config["worker" if role == "worker" else "reviewer"]
     role_model = selected_role["model"]
     role_effort = selected_role["reasoning_effort"]
-    task, sources = load_task(root, task_path)
-    prep_notes = enrich_repository_dependency_context(
-        root, task, sources, task_preparation_notes(task, sources)
-    )
-    validate_task_readiness(prep_notes)
+    task, sources = (load_task(root, task_path) if maintenance_authorization is None else
+                     load_task(root, task_path, maintenance_authorization=maintenance_authorization))
+    if maintenance_authorization is None:
+        prep_notes = enrich_repository_dependency_context(
+            root, task, sources, task_preparation_notes(task, sources)
+        )
+        validate_task_readiness(prep_notes)
+    else:
+        if role != "verifier":
+            raise ProposalError("prepared maintenance author must use genuine Qoder author")
+        # Closed immutable job loader has already validated complete Source,
+        # selectors, identity, policy and320k envelope. No business admission waiver.
+        prep_notes = {"maintenance_authorization": maintenance_authorization}
     head = git(root, "rev-parse", "HEAD")
     fallback_receipt = None
     if fallback_from_run_id is not None:
@@ -3899,10 +4007,14 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         )
     initial_status = git(root, "status", "--porcelain=v1", "--untracked-files=all")
     material = {"task": task, "source_head": head, "sources": sources}
+    if maintenance_authorization is not None:
+        material["maintenance_authorization"] = maintenance_authorization
     input_hashes = {}
     for key, path in (("feedback", feedback), ("proposal", proposal), ("test_evidence", test_evidence)):
         if path is not None:
-            content = bounded_file_text(root, path, MAX_CONTEXT, key)
+            maximum = (worker_result_limit(root, path.parent)
+                       if key == "proposal" and maintenance_authorization is not None else MAX_CONTEXT)
+            content = bounded_file_text(root, path, maximum, key)
             if SECRET.search(content):
                 raise ProposalError("credential-like content excluded from model input")
             material[key] = content
@@ -3959,7 +4071,13 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 },
             }
         elif role == "verifier":
-            review_proposal = build_review_transport(candidate, sources, proposal_sha256)
+            if maintenance_authorization is None:
+                review_proposal = build_review_transport(candidate, sources, proposal_sha256)
+            else:
+                raw_transport = unique_json(bounded_file_text(root, proposal.with_name("raw-result.json"), MAX_CONTEXT,
+                                                            "prepared maintenance original raw delta"))
+                review_proposal = build_prepared_review_transport(root, maintenance_authorization, candidate, task,
+                    sources, source_head=head, proposal_sha256=proposal_sha256, raw_transport=raw_transport)
             review_transport_bytes = serialize_json(review_proposal)
             if len(review_transport_bytes) > MAX_REVIEW_TRANSPORT_BYTES:
                 raise ProposalError("review transport exceeds context budget")
@@ -4014,7 +4132,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 except Exception as exc:
                     raise ProposalError(f"compact review material build failed: {exc}") from exc
                 is_compact_review = True
-    _validate_task_snapshot_budget(material)
+    _validate_task_snapshot_budget(material, root=root)
     prompt_material = dict(prompt_material)
     if "preparation_notes" not in prompt_material:
         prompt_material["preparation_notes"] = prep_notes
@@ -4288,7 +4406,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
                 # A late parent/source change invalidates the entire candidate.
                 if head != git(root, "rev-parse", "HEAD") or initial_status != git(root, "status", "--porcelain=v1", "--untracked-files=all"):
                     raise ProposalError("Git state changed during generation")
-                current_task, current_sources = load_task(root, task_path)
+                current_task, current_sources = (load_task(root, task_path) if maintenance_authorization is None else
+            load_task(root, task_path, maintenance_authorization=maintenance_authorization))
                 if current_task != task or current_sources != sources:
                     raise ProposalError("task or source bytes changed during generation")
                 if fallback_from_run_id is not None:
@@ -4342,7 +4461,8 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         # removed its temporary tree and released the Runner lock.
         if head != git(root, "rev-parse", "HEAD") or initial_status != git(root, "status", "--porcelain=v1", "--untracked-files=all"):
             raise ProposalError("Git state changed before generation publication")
-        current_task, current_sources = load_task(root, task_path)
+        current_task, current_sources = (load_task(root, task_path) if maintenance_authorization is None else
+            load_task(root, task_path, maintenance_authorization=maintenance_authorization))
         if current_task != task or current_sources != sources:
             raise ProposalError("task/source bytes changed before generation publication")
         if _generation_contract_sha(root) != runtime_contract_sha:

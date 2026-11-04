@@ -259,6 +259,12 @@ def test_parse_stream_canonical_four_key_transport():
 
 
 def test_run_command_uses_task_aware_schema(tmp_path: Path):
+    import shutil
+    # Fresh generation reads real public model policy before the intercepted
+    # CLI command; this fixture does not bypass that admission gate.
+    target = tmp_path / runner.AI_CONFIG_REL
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(runner.ROOT / runner.AI_CONFIG_REL, target)
     task = make_task()
     sources = make_sources()
     task_file = tmp_path / "task.json"

@@ -106,6 +106,41 @@ def _fingerprint(info):
             info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
+# Fixed source-syntax observations only: never inspect Mock instances or exception text.
+_MOCK_ASSERTIONS = tuple(
+    "UNITTEST_MOCK_TYPE_V1:" + method + "(type(_)," + cls +
+    ");if_unittest_mock_use_isinstance_and_check_sync_async"
+    for method in ("assertIs", "assertEqual") for cls in ("MagicMock", "AsyncMock")
+)
+
+_MOCK_HASATTR_ASSERTION = 'UNITTEST_MOCK_HASATTR_V1:assertFalse(hasattr(_,await_count));if_unittest_mock_check_isinstance_AsyncMock_and_iscoroutinefunction'
+
+def _mock_type_assertion(node):
+    if type(node) is not ast.Expr or type(node.value) is not ast.Call:
+        return None
+    call = node.value
+    if (type(call.func) is ast.Attribute and type(call.func.value) is ast.Name
+            and call.func.value.id == "self" and call.func.attr == "assertFalse"
+            and len(call.args) == 1 and not call.keywords):
+        actual = call.args[0]
+        if (type(actual) is ast.Call and type(actual.func) is ast.Name and actual.func.id == "hasattr"
+                and len(actual.args) == 2 and not actual.keywords and type(actual.args[0]) is ast.Name
+                and type(actual.args[1]) is ast.Constant and type(actual.args[1].value) is str
+                and actual.args[1].value == "await_count"):
+            return _MOCK_HASATTR_ASSERTION
+    if (type(call.func) is not ast.Attribute or type(call.func.value) is not ast.Name
+            or call.func.value.id != "self" or call.func.attr not in ("assertIs", "assertEqual")
+            or len(call.args) != 2 or call.keywords):
+        return None
+    actual, expected = call.args
+    if (type(actual) is not ast.Call or type(actual.func) is not ast.Name
+            or actual.func.id != "type" or len(actual.args) != 1 or actual.keywords
+            or type(actual.args[0]) is not ast.Name or type(expected) is not ast.Name
+            or expected.id not in ("MagicMock", "AsyncMock")):
+        return None
+    return ("UNITTEST_MOCK_TYPE_V1:" + call.func.attr + "(type(_)," + expected.id +
+            ");if_unittest_mock_use_isinstance_and_check_sync_async")
+
 def _source_assertion(traceback):
     candidate = None
     for _ in range(64):
@@ -151,6 +186,10 @@ def _source_assertion(traceback):
         for index, node in enumerate(ast.walk(tree)):
             if index > 2048:
                 return None
+            if type(node) is ast.Expr and node.lineno <= line <= node.end_lineno:
+                shape = _mock_type_assertion(node)
+                if shape is not None:
+                    return shape  # Nodeid/proposal bind location; omit spelling and line from cause identity.
             if type(node) is ast.Assert and node.lineno <= line <= node.end_lineno:
                 node.msg = None  # Never retain an assertion-message payload.
                 result = ast.Module(body=[node], type_ignores=[])

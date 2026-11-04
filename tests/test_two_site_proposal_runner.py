@@ -1847,11 +1847,9 @@ class ProposalContracts(unittest.TestCase):
         return fixed_now
 
     def worker_model(self):
-        if callable(getattr(runner, "role_model", None)):
-            return runner.role_model("worker")
-        if hasattr(runner, "ROLE_MODELS") and "worker" in runner.ROLE_MODELS:
-            return runner.ROLE_MODELS["worker"]
-        return "gemini-4-argon-medium"
+        # Fake capture already stamps the actually configured dispatch model.
+        # Expected quota provenance must bind that same public policy snapshot.
+        return runner.configured_gemini_role(self.root, "worker")["model"]
 
     def quota_events(self, *, error="RESOURCE_EXHAUSTED: quota exceeded, resets at 2026-09-24T19:00:00Z",
                      usage=None, conversation_id="session-quota", model=None):

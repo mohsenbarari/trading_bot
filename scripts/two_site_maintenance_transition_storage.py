@@ -488,6 +488,23 @@ def read_maintenance_transition_locked(root: Path, state_root: Path) -> dict[str
     successfully first; the fixed main reader then rechecks all current inputs
     under its own continuous Broker hold. Any main failure is hard and typed.
     """
+    if not isinstance(root, Path) or not isinstance(state_root, Path):
+        raise MaintenanceTransitionStorageError("root and state_root must be pathlib.Path instances")
+    # Legacy checkouts/fixtures have no new policy and keep their exact reader.
+    # A present policy (even unsafe/malformed) is not a missing-module waiver.
+    if os.path.lexists(root / "docs/refactor/two-server/templates/automation-maintenance-policy.json"):
+        from scripts.two_site_qoder_business_reconcile import read_business_reconciliation_transition_locked
+        from scripts.two_site_qoder_maintenance import QoderMaintenanceError
+        try:
+            business_record = read_business_reconciliation_transition_locked(root, state_root)
+        except Exception as exc:
+            raise QoderMaintenanceError("BUSINESS_RECONCILIATION_VERIFICATION_FAILED") from exc
+        if business_record is not None:
+            return business_record
+        from scripts.two_site_qoder_maintenance import read_qoder_maintenance_transition_locked
+        qoder_record = read_qoder_maintenance_transition_locked(root, state_root)
+        if qoder_record is not None:
+            return qoder_record
     record = _read_legacy_maintenance_transition_locked(root, state_root)
     if record is not _MAIN_TRANSITION_REQUIRED:
         return record

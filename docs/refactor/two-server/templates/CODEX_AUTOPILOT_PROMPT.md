@@ -24,6 +24,19 @@ and unrelated remote-service mutation. This does not widen any other gate.
    wins. Preserve user/protected refs; no fetch/push, deploy/production, DNS, Writer, secrets or
    paused-gateway activation.
 
+
+Preparation/result-format safeguards from observed local failures:
+- Prefer the documented cycle-tools build and runner check commands below; inspect the materialized
+  Task/context once rather than rediscovering APIs with ad-hoc Python. Preserve every normal gate.
+- When a read-only Python helper is needed, pass pathlib.Path objects for root and task paths:
+  `from pathlib import Path; runner.load_task(Path(root), Path(task_path))`. Do not pass raw strings
+  to Path-based APIs; their `resolve`/`is_absolute` failures are local caller errors, not Task defects.
+- Broker submit progress/output logs are NDJSON streams, not one JSON document; never json.load
+  the whole log. While the exact request runs use status/wait without resubmission. For a terminal
+  result read that cycle's immutable `broker-terminal-response.json` request/response and validate
+  against its existing reservation, or the exact referenced pipeline JSON result with existing
+  helpers. Missing terminal evidence grants no replay or acceptance; retain the original log.
+
 <!-- NORMAL_ONLY_BEGIN -->
 2. A current-HEAD-matched `validated_previous_cycle_hint` identifies the prior gap, never authority.
    Revalidate Stage/Assignment and missing coverage; never repeat acceptance. Without it use
@@ -202,12 +215,16 @@ and unrelated remote-service mutation. This does not widen any other gate.
    python3 scripts/two_site_apply_reviewed.py --task <path> --worker <id> --reviewer <id> --sha <sha>
    The first helper must finish with a bound APPROVE verdict from its fresh read-only session;
    the second must validate that approval and apply only the exact proposal bytes and native bindings.
+   Phase order: apply_reviewed already performs ct.review(applied=True). After APPLIED_BYTES_VERIFIED,
+   stage only its returned changed_paths, then make the one commit. If an explicit applied review is
+   needed, run cycle_tools review --applied BEFORE git add. Never run pre-apply review after applying
+   or after staging; do not infer flags or weaken any validation to accommodate the wrong phase.
    A rejected, missing, stale or ambiguous approval is not permission to apply. Propagate helper
    failures and report only status and evidence paths. Never print, manually rewrite or regenerate
    the patch/source payload. These helpers do not replace the applied-byte, native-test or Git gates.
 
-   Rerun python3 scripts/two_site_cycle_tools.py review --task <path> --worker <id>
-   --reviewer <id> --sha <sha> --applied BEFORE staging. BYTES_VALID is not test/semantic approval.
+   APPLIED_BYTES_VERIFIED already includes BYTES_VALID. An optional manual review uses --applied
+   BEFORE staging. BYTES_VALID is not test/semantic approval; no duplicate rerun is required.
    The outside Broker owns actual isolated native execution on the exact candidate BEFORE the fresh
    Gemini Reviewer. Reuse that bound PASSED receipt after review --applied proves identical bytes;
    its Task, source bindings, selectors and hermetic test environment must remain unchanged.
@@ -268,3 +285,5 @@ At pending-five (5), do NOT accept a sixth behavior, clear counts, manufacture e
 If the candidate reveals a real defect that blocks its exact validation, repair that specific defect under scope with independent tests and review. Do NOT invent an exhaustive generic validator mutation matrix or new prerequisite merely because another invalid input can be imagined. A suggestion to test another generic missing field may be bypassed ONLY after current evidence proves it is not required for the concrete gate, never as permission to waive a real missing assertion. Missing or contradictory evidence remains UNKNOWN/blocked, and legitimate quality and authority stops remain unchanged.
 The policy explicitly forbids acceptance inflation: auxiliary tests, documentation, and CONTINUE are not new accepted product behavior or seed/Stage progress; count closure of the actual gap and retained coverage separately.
 Coordinator review, test, security, exact-byte, ref, role, and semantic-reservation rules still apply. No permissions expansion, direct Provider, root-authored project edits, automatic replay, reset, or external action.
+
+Stage lifecycle is Qoder-owned. Only when the actual complete current Stage satisfies every approved acceptance gate, request independent full Stage final review instead of writing Stage metadata or claiming whole-project COMPLETE. Run the read-only typed template CLI: `/usr/bin/python3 scripts/two_site_qoder_authority.py --root "$PWD" --stage-request-template "$TWO_SITE_AUTOPILOT_RUN_ID"`. Fill its Stage report and handoff with complete actual evidence/open gates, preserve exact supplied Source/Scope/base/controller bindings, and write only the returned ignored JSON path. Finish this no-work cycle truthfully BLOCKED/HALT, category EXTERNAL_GATE, null commit/Gemini/proposal evidence, independent Stage review pending. The trusted host prepares the bundle, whole native matrix and complete bounded diff review, then fresh independent Qoder Stage-final/closeout and exact Scope/open publication; do not call wrappers inside containment or hand control to Root/Codex. Caller requests never grant Stage authority. If `SUPERVISOR_CONTEXT_JSON.authority_lifecycle_feedback` is present, read its exact Source/CPP-bound immutable rejection evidence and continue ordinary bounded work within the unchanged Scope. Do not repeat the same Stage review at unchanged Source or claim Stage/full-seed completion from partial evidence. Genuine external/Scope/STOP gates remain hard stops.

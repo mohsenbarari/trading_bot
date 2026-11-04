@@ -88,7 +88,7 @@ def check(root):
             "model_calls": 0}
 
 
-def review(root, schema_path, output_path, prompt, *, timeout=900):
+def review(root, schema_path, output_path, prompt, *, timeout=900, authority_review_context=None):
     import jsonschema
     from scripts import two_site_proposal_runner as runner
     root = Path(root).resolve(strict=True)
@@ -128,9 +128,10 @@ def review(root, schema_path, output_path, prompt, *, timeout=900):
     identity = driver.qoder_identity(Path(runtime["coordinator"]["path"]), runtime, directory, role)
     argv = driver.qoder_command(Path(identity["path"]), root, directory, full_prompt, role, role="final_reviewer")
     environment = os.environ.copy(); environment.update(APP_ENV_FILE="config/unit-test.env.example", PYTHONDONTWRITEBYTECODE="1")
-    if environment.get("TWO_SITE_COORDINATOR_SANDBOX") != "1":
+    if authority_review_context is not None or environment.get("TWO_SITE_COORDINATOR_SANDBOX") != "1":
         from scripts.two_site_coordinator_sandbox import buildwrap_coordinator_command
-        argv = buildwrap_coordinator_command(root, directory, argv, environment=environment)
+        argv = buildwrap_coordinator_command(root, directory, argv, environment=environment,
+            authority_review_context=authority_review_context)
     process = subprocess.Popen(argv, cwd=root, env=environment, stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
     try:
@@ -176,16 +177,19 @@ def main():
     parser.add_argument("--schema", type=Path)
     parser.add_argument("--output-last-message", type=Path)
     parser.add_argument("--timeout", type=int, default=900)
+    parser.add_argument("--authority-review-context", type=Path)
     args = parser.parse_args()
     try:
         if args.check:
-            need(args.schema is None and args.output_last_message is None, "REVIEW_BRIDGE_CHECK_ARGUMENTS")
+            need(args.schema is None and args.output_last_message is None and args.authority_review_context is None, "REVIEW_BRIDGE_CHECK_ARGUMENTS")
             value = check(args.root)
         else:
             need(args.schema is not None and args.output_last_message is not None, "REVIEW_BRIDGE_REQUIRED_ARGUMENTS")
             raw = sys.stdin.buffer.read(MAX_PROMPT_BYTES + 1)
             need(len(raw) <= MAX_PROMPT_BYTES, "REVIEW_BRIDGE_PROMPT_BOUND")
-            proof = review(args.root, args.schema, args.output_last_message, raw.decode("utf-8"), timeout=args.timeout)
+            context = None if args.authority_review_context is None else driver._json(driver._regular(args.authority_review_context, 65536))
+            proof = review(args.root, args.schema, args.output_last_message, raw.decode("utf-8"), timeout=args.timeout,
+                authority_review_context=context)
             value = {"state": "REVIEW_RESULT_VERIFIED", "provider": "qoder", "model": proof["model_config"]["model"],
                      "output": str(args.output_last_message), "execution_metadata": str(args.output_last_message) + ".execution.json"}
         print(json.dumps(value, sort_keys=True)); return 0

@@ -81,6 +81,12 @@ Context precision applies to Worker and Verifier:
   When preparation_notes.output_contract.new_characterization_scaffold is supplied,
   copy its bootstrap_prefix exactly before application imports; a fixture module's
   own bootstrap does not replace the new module's bootstrap.
+- For unittest.mock fixtures, Mock classes may create dynamic subclasses: use
+  isinstance checks instead of type(mock) is MagicMock/AsyncMock. MagicMock also
+  synthesizes missing attributes, so hasattr(mock, 'await_count') does not prove
+  whether a callable is synchronous. Check isinstance(mock, AsyncMock) and
+  inspect.iscoroutinefunction with the required call/await trace. Keep exact identity
+  assertions for actual source functions, dependency targets and sentinel objects.
 - For SQLAlchemy statement-column assertions, do not compare clause.left to
   Model.__table__.c.column with Python is or assertIs: SQLAlchemy may wrap/annotate
   columns. Assert exact compiled SQL and the column-specific compiled.params mapping.

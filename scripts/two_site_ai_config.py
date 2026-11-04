@@ -15,6 +15,8 @@ _PROVIDERS = {"coordinator": "qoder", "final_reviewer": "qoder",
               "worker": "antigravity", "reviewer": "antigravity"}
 _EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 _MAX_BYTES = 65536
+_QODER_OUTPUT_MIN = 32768
+_QODER_OUTPUT_MAX = 1048576
 
 
 class AIConfigError(ValueError):
@@ -71,7 +73,9 @@ def _read(root: Path, relative: Path, *, private: bool = False) -> dict:
 
 def load_ai_config(root: Path) -> dict:
     value = _read(root, AI_CONFIG_REL)
-    _need(set(value) == {"schema_version", "roles"} and type(value["schema_version"]) is int
+    _need(set(value) in ({"schema_version", "roles"},
+                         {"schema_version", "roles", "qoder_execution"})
+          and type(value["schema_version"]) is int
           and value["schema_version"] == 1, "AI_CONFIG_SCHEMA")
     _need(type(value["roles"]) is dict and set(value["roles"]) == set(ROLES), "AI_CONFIG_ROLES")
     for role in ROLES:
@@ -83,6 +87,13 @@ def load_ai_config(root: Path) -> dict:
               and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", setting["model"]), "AI_CONFIG_MODEL")
         _need(type(setting["reasoning_effort"]) is str and setting["reasoning_effort"] in _EFFORTS,
               "AI_CONFIG_EFFORT")
+    if "qoder_execution" in value:
+        execution = value["qoder_execution"]
+        _need(type(execution) is dict and set(execution) == {"max_output_tokens"},
+              "AI_CONFIG_QODER_EXECUTION_FIELDS")
+        maximum = execution["max_output_tokens"]
+        _need(type(maximum) is int and _QODER_OUTPUT_MIN <= maximum <= _QODER_OUTPUT_MAX,
+              "AI_CONFIG_QODER_OUTPUT_TOKENS")
     return copy.deepcopy(value)
 
 

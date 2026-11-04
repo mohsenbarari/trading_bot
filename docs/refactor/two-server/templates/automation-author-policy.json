@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "model_role": "coordinator",
+  "generation_variants_per_phase": 1,
+  "qualified_failures": [
+    "QUALIFIED_GENERATION_EXHAUSTION",
+    "QUALIFIED_PREGEN_PROFILE"
+  ]
+}

@@ -44,6 +44,45 @@ def test_control_paths_added_and_retained_without_duplicates() -> None:
         Path(".agents/rules/two-site-refactor-safety.md"),
     }
 
+    # Current independently protected runtime/author/maintenance authority.
+    expected_added |= {
+        Path('docs/refactor/two-server/templates/automation-author-policy.json'),
+        Path('docs/refactor/two-server/templates/automation-authority-policy.json'),
+        Path('docs/refactor/two-server/templates/automation-maintenance-policy.json'),
+        Path('docs/refactor/two-server/templates/automation-models.json'),
+        Path('docs/refactor/two-server/templates/codex-autopilot-cycle.schema.json'),
+        Path('docs/refactor/two-server/templates/gemini-runtime-contract.json'),
+        Path('scripts/two_site_ai_config.py'),
+        Path('scripts/two_site_apply_reviewed.py'),
+        Path('scripts/two_site_autopilot.py'),
+        Path('scripts/two_site_codex_closeout_review.sh'),
+        Path('scripts/two_site_codex_final_review.sh'),
+        Path('scripts/two_site_codex_governance_review.sh'),
+        Path('scripts/two_site_cold_start_broker_quiescence.py'),
+        Path('scripts/two_site_coordinator_broker_wait.py'),
+        Path('scripts/two_site_coordinator_sandbox.py'),
+        Path('scripts/two_site_maintenance_lkg.py'),
+        Path('scripts/two_site_maintenance_transition_dir.py'),
+        Path('scripts/two_site_maintenance_transition_file.py'),
+        Path('scripts/two_site_maintenance_transition_git.py'),
+        Path('scripts/two_site_maintenance_transition_publish.py'),
+        Path('scripts/two_site_maintenance_transition_record.py'),
+        Path('scripts/two_site_maintenance_transition_startup.py'),
+        Path('scripts/two_site_maintenance_transition_storage.py'),
+        Path('scripts/two_site_model_transition.py'),
+        Path('scripts/two_site_qoder_author.py'),
+        Path('scripts/two_site_qoder_author_resume.py'),
+        Path('scripts/two_site_qoder_authority.py'),
+        Path('scripts/two_site_qoder_host.py'),
+        Path('scripts/two_site_qoder_business_reconcile.py'),
+        Path('scripts/two_site_maintenance_quota.py'),
+        Path('scripts/two_site_qoder_driver.py'),
+        Path('scripts/two_site_qoder_maintenance.py'),
+        Path('scripts/two_site_qoder_output_repair.py'),
+        Path('scripts/two_site_qoder_review.py'),
+        Path('scripts/two_site_review_bridge.py'),
+    }
+
     # No duplicates
     assert len(CONTROL_PATHS) == len(set(CONTROL_PATHS)), "CONTROL_PATHS must contain no duplicates"
 
@@ -109,7 +148,7 @@ def test_monitor_cd_occurs_before_first_filesystem_side_effect() -> None:
     )
 
 
-def test_monitor_codex_pgrep_regex_filtering() -> None:
+def test_monitor_qoder_pgrep_regex_filtering() -> None:
     content = MONITOR_PATH.read_text(encoding="utf-8")
 
     root_match = re.search(r'^integration_root="([^"]+)"', content, re.MULTILINE)
@@ -117,10 +156,10 @@ def test_monitor_codex_pgrep_regex_filtering() -> None:
     integration_root = root_match.group(1)
 
     pgrep_match = re.search(
-        r'pgrep\s+-f\s+"([^"]*codex[^"]*)"',
+        r'pgrep\s+-f\s+"([^"]*qodercli[^"]*)"',
         content,
     )
-    assert pgrep_match is not None, "Codex coordinator pgrep pattern not found in monitor script"
+    assert pgrep_match is not None, "Qoder coordinator pgrep pattern not found in monitor script"
     raw_pattern = pgrep_match.group(1)
 
     # Expand $integration_root as the shell does
@@ -135,39 +174,23 @@ def test_monitor_codex_pgrep_regex_filtering() -> None:
         )
         return res.returncode == 0
 
-    # 1. Pinned executable matching integration_root
-    pinned_cmd = (
-        f"/root/trading-bot/trading_bot/.local/two-site-refactor/integration/.local/tools/"
-        f"codex-0.156.1-0b2e9301d6100ddd/codex exec --model gpt-6-astra "
-        f'--config model_reasoning_effort="xhigh" --cd {integration_root} --approve-for-me --ephemeral'
+    # 1. Active Qoder coordinator matching integration_root.
+    qoder_cmd = (
+        f"/root/.local/bin/qodercli --cwd {integration_root} --model DeepSeek-Flash "
+        "--reasoning-effort max --print"
     )
-    assert matches(pinned_cmd), "Must match pinned codex exec with matching integration_root"
+    assert matches(qoder_cmd), "Must match Qoder coordinator with matching integration_root"
 
-    # 2. Legacy executable matching integration_root
-    legacy_cmd = (
-        f"/usr/local/bin/codex exec --model gpt-6-astra "
-        f'--config model_reasoning_effort="xhigh" --cd {integration_root} --approve-for-me --ephemeral'
-    )
-    assert matches(legacy_cmd), "Must match legacy codex exec with matching integration_root"
-
-    # 3. Different root
-    diff_root_pinned = (
-        f"/root/trading-bot/trading_bot/.local/two-site-refactor/integration/.local/tools/"
-        f"codex-0.156.1-0b2e9301d6100ddd/codex exec --model gpt-6-astra --cd /other/path/to/repo"
-    )
-    assert not matches(diff_root_pinned), "Must not match pinned codex with different root"
-
-    diff_root_legacy = (
-        f"/usr/local/bin/codex exec --model gpt-6-astra --cd /other/path/to/repo"
-    )
-    assert not matches(diff_root_legacy), "Must not match legacy codex with different root"
+    # 2. Different or prefix-colliding roots.
+    diff_root_qoder = "/root/.local/bin/qodercli --cwd /other/path/to/repo --model DeepSeek-Flash"
+    assert not matches(diff_root_qoder), "Must not match Qoder with different root"
 
     diff_root_standby = (
-        f"/usr/local/bin/codex exec --model gpt-6-astra --cd {integration_root}-standby"
+        f"/root/.local/bin/qodercli --cwd {integration_root}-standby --model DeepSeek-Flash"
     )
-    assert not matches(diff_root_standby), "Must not match prefix-colliding different root"
+    assert not matches(diff_root_standby), "Must not match prefix-colliding Qoder root"
 
-    # 4. Unrelated monitor command strings
+    # 3. Unrelated monitor and legacy Codex command strings.
     monitor_cmd_full = f"/bin/bash {integration_root}/scripts/two_site_autopilot_monitor.sh"
     assert not matches(monitor_cmd_full), "Must not match full monitor command invocation"
 
@@ -179,3 +202,8 @@ def test_monitor_codex_pgrep_regex_filtering() -> None:
 
     supervisor_cmd = f"/usr/bin/python3 {integration_root}/scripts/two_site_codex_autopilot.py --root {integration_root}"
     assert not matches(supervisor_cmd), "Must not match supervisor command"
+
+    legacy_codex_cmd = f"/usr/local/bin/codex exec --cd {integration_root} --ephemeral"
+    assert not matches(legacy_codex_cmd), "Legacy Codex must not be reported as an active coordinator"
+
+    assert 'phase="codex_coordinator"' not in content

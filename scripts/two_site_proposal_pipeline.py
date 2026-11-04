@@ -98,17 +98,19 @@ except ImportError:
     )
 
 
-def load_task(root: Path, task_path: Path) -> tuple[dict, dict]:
+def load_task(root: Path, task_path: Path, *, maintenance_authorization=None) -> tuple[dict, dict]:
     """Reject an unrepairable task declaration before reservation or Provider.
 
     All initial, state-recheck and continuation task reads use this boundary.
     The allowed set validates syntax only; no candidate paths are authorized.
     """
-    task, sources = _load_task(root, task_path)
+    task, sources = (_load_task(root, task_path) if maintenance_authorization is None else
+                     _load_task(root, task_path, maintenance_authorization=maintenance_authorization))
     try:
-        parse_proposal_utf8_budget_profile(
-            task["requirements"], task["allowed_files"], task["allowed_files"],
-        )
+        if maintenance_authorization is None:
+            parse_proposal_utf8_budget_profile(
+                task["requirements"], task["allowed_files"], task["allowed_files"],
+            )
     except ProposalByteProfileError:
         raise ProposalError(BYTE_PROFILE_ERROR) from None
     return task, sources
@@ -595,7 +597,8 @@ def ref_snapshot(root: Path) -> dict[str, str | None]:
     return result
 
 
-def check_state(root: Path, head: str, refs: dict[str, str | None], task_path: Path, task: dict, sources: dict) -> None:
+def check_state(root: Path, head: str, refs: dict[str, str | None], task_path: Path, task: dict, sources: dict,
+                *, maintenance_authorization=None) -> None:
     if git(root, "branch", "--show-current") != BRANCH:
         raise ProposalError(f"branch drift: expected {BRANCH}")
     if git(root, "rev-parse", "HEAD") != head:
@@ -604,7 +607,8 @@ def check_state(root: Path, head: str, refs: dict[str, str | None], task_path: P
         raise ProposalError("worktree drift: untracked or modified files detected")
     if ref_snapshot(root) != refs:
         raise ProposalError("protected refs drift detected")
-    cur_task, cur_sources = load_task(root, task_path)
+    cur_task, cur_sources = (load_task(root, task_path) if maintenance_authorization is None else
+                            load_task(root, task_path, maintenance_authorization=maintenance_authorization))
     if cur_task != task or cur_sources != sources:
         raise ProposalError("task or source files changed during execution")
 
@@ -676,6 +680,11 @@ def expected_bound_role_model(
 ) -> str:
     if not isinstance(status, dict):
         raise ProposalError(f"status must be dict, got {type(status).__name__}")
+    if status.get("author_provider") == "qoder":
+        if role != "worker":
+            raise ProposalError("Qoder author cannot stand in for Gemini reviewer")
+        from scripts.two_site_qoder_author import role_snapshot
+        return role_snapshot(status)["model"]
     bound_role = bound_gemini_role(status, role)
     if bound_role is not None:
         if "fallback_from_run_id" in status or "fallback_receipt" in status:
@@ -770,11 +779,24 @@ def validate_run(
     expected_test_receipt: dict | None = None, expected_test_evidence_sha: str | None = None,
 ) -> tuple[dict, dict, str, str]:
     status = unique_json(bounded_file_text(root, run_dir / "status.json", MAX_CONTEXT, f"{role} status"))
-    snapshot = unique_json(bounded_file_text(root, run_dir / "task.json", 3 * MAX_CONTEXT, f"{role} task"))
-    raw_result_bytes = bounded_file_bytes(root, run_dir / "result.json", MAX_CONTEXT, f"{role} result")
+    from scripts.two_site_proposal_runner import read_task_snapshot
+    _, snapshot = read_task_snapshot(root, run_dir / "task.json", f"{role} task")
+    result_limit = MAX_CONTEXT
+    if role == "worker" and snapshot.get("maintenance_authorization") is not None:
+        from scripts.two_site_proposal_runner import worker_result_limit
+        result_limit = worker_result_limit(root, run_dir)
+    raw_result_bytes = bounded_file_bytes(root, run_dir / "result.json", result_limit, f"{role} result")
     result_text = raw_result_bytes.decode("utf-8")
     result = unique_json(result_text)
-    validate_result(result, expected_task, expected_sources, role, enforce_raw_transport=False)
+    authorization = snapshot.get("maintenance_authorization")
+    if authorization is None:
+        validate_result(result, expected_task, expected_sources, role, enforce_raw_transport=False)
+    else:
+        if role == "worker" and status.get("author_provider") != "qoder":
+            raise ProposalError("maintenance author requires genuine first-class Qoder proof")
+        from scripts.two_site_proposal_runner import validate_prepared_result
+        validate_prepared_result(root, authorization, result, expected_task, expected_sources,
+                                 role, source_head=expected_head)
     result_sha = hashlib.sha256(raw_result_bytes).hexdigest()
     expected_model = expected_bound_role_model(
         root, role, expected_run_id, expected_head, expected_task, expected_sources, status
@@ -839,6 +861,20 @@ def validate_run(
     return result, status, result_sha, result_text
 
 
+
+def _maintenance_exact_record(root, path, value):
+    raw = serialize_json(value)
+    if os.path.lexists(path):
+        if bounded_file_bytes(root, path, MAX_CONTEXT, "retained exact phase record") != raw:
+            raise ProposalError("retained maintenance phase record changed")
+        return
+    fd = os.open(path, os.O_WRONLY|os.O_CREAT|os.O_EXCL|getattr(os,"O_NOFOLLOW",0),0o600)
+    with os.fdopen(fd,"wb") as output:
+        output.write(raw);output.flush();os.fsync(output.fileno())
+    descriptor=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
+    try:os.fsync(descriptor)
+    finally:os.close(descriptor)
+
 def persist_pre_review_tests(
     root: Path,
     evidence_dir: Path,
@@ -848,6 +884,7 @@ def persist_pre_review_tests(
     index: int,
     state_check: Callable[[], None],
     state: dict,
+    *, maintenance_authorization=None,
 ) -> tuple[dict, Path, str]:
     if isinstance(root, str):
         root = Path(root)
@@ -881,15 +918,44 @@ def persist_pre_review_tests(
 
     receipt_path = evidence_dir / f"pre-review-tests-{index}.json"
     if receipt_path.exists() or receipt_path.is_symlink() or os.path.lexists(receipt_path):
-        raise ProposalError(f"test receipt path already exists or is a symlink: {receipt_path}")
+        if maintenance_authorization is None:
+            raise ProposalError(f"test receipt path already exists or is a symlink: {receipt_path}")
+        prior_raw = bounded_file_bytes(root, receipt_path, MAX_CONTEXT, "retained maintenance native receipt")
+        prior = validate_test_receipt(unique_json(prior_raw.decode()), worker_sha)
+        if prior["selectors"] != task["test_selectors"] or prior_raw != serialize_json(prior):
+            raise ProposalError("retained maintenance native selectors/bytes changed")
+        from scripts.two_site_qoder_maintenance import maintenance_native_overlays
+        goldens = maintenance_native_overlays(root, maintenance_authorization)
+        overlay_path = evidence_dir / f"maintenance-native-overlays-{index}.json"
+        overlay = {"authorization": maintenance_authorization,
+                   "proposal_sha256": worker_sha,
+                   "golden_sha256": {k: hashlib.sha256(v.encode()).hexdigest() for k,v in sorted(goldens.items())}}
+        if bounded_file_bytes(root, overlay_path, MAX_CONTEXT, "native golden overlay bindings") != serialize_json(overlay):
+            raise ProposalError("maintenance native golden binding changed")
+        state.update(pre_review_test_path=receipt_path.relative_to(root).as_posix(),
+            pre_review_test_sha256=hashlib.sha256(prior_raw).hexdigest(),pre_review_test_state=prior["state"])
+        state_check()
+        return prior, receipt_path, hashlib.sha256(prior_raw).hexdigest()
 
     if not isinstance(state, dict):
         raise ProposalError("state must be a dict")
     if not callable(state_check):
         raise ProposalError("state_check must be callable")
 
+    native_result = worker_result
+    if maintenance_authorization is not None:
+        from scripts.two_site_qoder_maintenance import maintenance_native_overlays
+        goldens = maintenance_native_overlays(root, maintenance_authorization)
+        if set(goldens).intersection(change["path"] for change in worker_result["changes"]):
+            raise ProposalError("maintenance golden overlays overlap candidate changes")
+        overlay = {"authorization": maintenance_authorization, "proposal_sha256": worker_sha,
+                   "golden_sha256": {k: hashlib.sha256(v.encode()).hexdigest() for k,v in sorted(goldens.items())}}
+        _maintenance_exact_record(root, evidence_dir / f"maintenance-native-overlays-{index}.json", overlay)
+        native_result = copy.deepcopy(worker_result)
+        native_result["changes"].extend({"path": path, "original_sha256": None, "content": content}
+                                        for path, content in sorted(goldens.items()))
     receipt = run_candidate_tests(
-        root, task, worker_result, worker_sha, timeout=1200
+        root, task, native_result, worker_sha, timeout=1200
     )
     write_json(receipt_path, receipt)
 
@@ -1304,7 +1370,8 @@ def _retryable_profile_preparation(
         if not {"task.json", "prompt.txt", "response-schema.json", "status.json"} <= names:
             return False
         status = unique_json(bounded_file_bytes(root, run_dir / "status.json", MAX_CONTEXT, "preparation status").decode())
-        snapshot = unique_json(bounded_file_bytes(root, run_dir / "task.json", 3 * MAX_CONTEXT, "preparation task").decode())
+        from scripts.two_site_proposal_runner import read_task_snapshot
+        _, snapshot = read_task_snapshot(root, run_dir / "task.json", "preparation task")
         if not isinstance(status, dict) or not isinstance(snapshot, dict):
             return False
         return (
@@ -1328,6 +1395,7 @@ def run_provider_session(
     state_check: Callable[[], None], feedback: Path | None = None,
     proposal: Path | None = None, cli: Path | None = None,
     test_evidence: Path | None = None, expected_head: str | None = None,
+    author_fallback_hook=None, maintenance_authorization=None,
 ) -> tuple[str, Path]:
     proposals_dir = root / ".local/two-site-refactor/proposals"
     attempts = (base_run_id, f'{base_run_id}-retry-1', f'{base_run_id}-retry-2')
@@ -1340,7 +1408,35 @@ def run_provider_session(
     for attempt_id in attempts:
         state_check()
         if (proposals_dir / attempt_id).exists():
-            raise ProposalError(f"{label} run ID already exists: {attempt_id}")
+            if maintenance_authorization is None or role != "verifier":
+                raise ProposalError(f"{label} run ID already exists: {attempt_id}")
+            task, sources = load_task(root, task_path, maintenance_authorization=maintenance_authorization)
+            directory = proposals_dir / attempt_id
+            if os.path.lexists(directory / "result.json"):
+                return attempt_id, directory  # Full proof+same native binding validated immediately by caller.
+            extracted = _extract_bound_quota_evidence(root, directory, attempt_id, role, expected_head, task["task_id"])
+            if extracted is not None:
+                from scripts.two_site_maintenance_quota import maintenance_quota_resume_due
+                if maintenance_quota_resume_due(root, maintenance_authorization,
+                        task=task, sources=sources, expected_head=expected_head,
+                        base_run_id=base_run_id, attempt_id=attempt_id, attempts=attempts,
+                        quota_evidence=extracted[0], quota_attempt=extracted[1]) is True:
+                    continue  # Consumes the old slot; only an existing unused slot may follow.
+                raise QuotaBlockError(*extracted)
+            from scripts.two_site_proposal_runner import load_prior_worker, worker_result_limit
+            worker_text = bounded_file_text(root, proposal, worker_result_limit(root, proposal.parent), "retained maintenance Worker")
+            _wr, ws, digest = load_prior_worker(root, proposal, worker_text, task, sources, expected_head)
+            native_raw = bounded_file_bytes(root, test_evidence, MAX_CONTEXT, "retained maintenance native")
+            native = validate_test_receipt(unique_json(native_raw.decode()), digest, require_passed=True)
+            error = ProposalError(f"provider session retry exhausted for {base_run_id} after 3 attempts")
+            error.__cause__ = RetryableProviderSessionError("retained terminal transport failure")
+            failures = _reviewer_batch_failure(root, base_run_id, error, expected_head, task, sources,
+                (ws["run_id"], digest, worker_text, ws["conversation_id"]), native,
+                hashlib.sha256(native_raw).hexdigest(), _attempt_ids=(attempt_id,))
+            if failures is None:
+                raise ProposalError("MAINTENANCE_REVIEWER_CONTINUATION_REQUIRES_RECONCILIATION")
+            last_error = error.__cause__
+            continue
         current_hint = next_hint
         next_hint = None
         try:
@@ -1351,12 +1447,22 @@ def run_provider_session(
             }
             if test_evidence is not None:
                 runner_kwargs["test_evidence"] = test_evidence
+            if maintenance_authorization is not None:
+                runner_kwargs["maintenance_authorization"] = maintenance_authorization
             if current_hint is not None:
                 runner_kwargs["retry_hint"] = current_hint
             run_dir = runner_run(
                 root, task_path, role, attempt_id, timeout, **runner_kwargs
             )
             return attempt_id, run_dir
+        except subprocess.TimeoutExpired:
+            if role == "worker" and author_fallback_hook is not None:
+                state_check()
+                # The callback replays exact ERROR/schema/CID/cleanup byte custody;
+                # an ordinary timeout cannot qualify and is never retried blindly.
+                return author_fallback_hook(root, task_path, base_run_id, timeout, state_check,
+                    feedback=feedback, proposal=proposal, maintenance_authorization=maintenance_authorization)
+            raise
         except RetryableProviderOutputError as exc:
             if (
                 role == "worker" and feedback is not None and proposal is not None
@@ -1386,7 +1492,8 @@ def run_provider_session(
             ):
                 cause_text = str(exc.__cause__)
                 if cause_text.startswith("generated Python syntax is invalid: "):
-                    task, _ = load_task(root, task_path)
+                    task, _ = (load_task(root, task_path) if maintenance_authorization is None else
+                           load_task(root, task_path, maintenance_authorization=maintenance_authorization))
                     hint = extract_syntax_hint(cause_text, task["allowed_files"])
                     if hint is not None:
                         next_hint = hint
@@ -1398,7 +1505,8 @@ def run_provider_session(
             policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
             if not policy.enabled:
                 raise
-            task, _ = load_task(root, task_path)
+            task, _ = (load_task(root, task_path) if maintenance_authorization is None else
+                           load_task(root, task_path, maintenance_authorization=maintenance_authorization))
             task_id = task.get("task_id") if isinstance(task, dict) else None
             if not isinstance(task_id, str) or not task_id.strip():
                 raise
@@ -1423,7 +1531,8 @@ def run_provider_session(
         except ProposalProfileError as exc:
             next_hint = None
             state_check()
-            task, _ = load_task(root, task_path)
+            task, _ = (load_task(root, task_path) if maintenance_authorization is None else
+                           load_task(root, task_path, maintenance_authorization=maintenance_authorization))
             if not _retryable_profile_preparation(
                 root, proposals_dir / attempt_id, attempt_id, role, expected_head, task, exc,
             ):
@@ -1438,7 +1547,8 @@ def run_provider_session(
             if role == "worker":
                 policy = load_worker_routing_policy(ROOT / DEFAULT_POLICY_PATH, base_dir=ROOT)
                 if policy.enabled:
-                    task, _ = load_task(root, task_path)
+                    task, _ = (load_task(root, task_path) if maintenance_authorization is None else
+                           load_task(root, task_path, maintenance_authorization=maintenance_authorization))
                     expected_task_id = task["task_id"]
             extracted = _extract_bound_quota_evidence(
                 root, proposals_dir / attempt_id, attempt_id, role, expected_head, expected_task_id
@@ -1457,7 +1567,15 @@ def run_provider_session(
                 next_hint = None
                 last_error = context
                 continue
+            if (role == "worker" and author_fallback_hook is not None
+                    and type(exc) is ProposalError
+                    and str(exc) == "MODEL_OUTPUT_TRUNCATED: rescope to a smaller task"):
+                return author_fallback_hook(root, task_path, base_run_id, timeout, state_check,
+                    feedback=feedback, proposal=proposal, maintenance_authorization=maintenance_authorization)
             raise
+    if role == "worker" and author_fallback_hook is not None and type(last_error) is ProposalProfileError:
+        return author_fallback_hook(root, task_path, base_run_id, timeout, state_check,
+            feedback=feedback, proposal=proposal, maintenance_authorization=maintenance_authorization)
     raise ProposalError(
         f"provider session retry exhausted for {base_run_id} after 3 attempts"
     ) from last_error
@@ -1481,6 +1599,7 @@ def _reviewer_batch_failure(
     root: Path, base_run_id: str, error: ProposalError, head: str,
     task: dict, sources: dict, worker: tuple[str, str, str, str],
     test_receipt: dict, test_sha: str,
+    *, _attempt_ids=None,
 ) -> list[dict] | None:
     """Recognize only failed, fully retained transient attempts, never outputs."""
     if (type(error) is not ProposalError
@@ -1488,7 +1607,10 @@ def _reviewer_batch_failure(
             or type(error.__cause__) not in {RetryableProviderSessionError, ProposalProfileError}):
         return None
     failures = []
-    for run_id in (base_run_id, f"{base_run_id}-retry-1", f"{base_run_id}-retry-2"):
+    original_ids = (base_run_id, f"{base_run_id}-retry-1", f"{base_run_id}-retry-2")
+    if _attempt_ids is not None and (_attempt_ids not in [(x,) for x in original_ids]):
+        return None
+    for run_id in original_ids if _attempt_ids is None else _attempt_ids:
         run_dir = root / ".local/two-site-refactor/proposals" / run_id
         try:
             ds = run_dir.lstat()
@@ -1499,8 +1621,8 @@ def _reviewer_batch_failure(
                 return None
             status_bytes = bounded_file_bytes(root, run_dir / "status.json", MAX_CONTEXT, "failed reviewer status")
             status = unique_json(status_bytes.decode("utf-8"))
-            snapshot_bytes = bounded_file_bytes(root, run_dir / "task.json", 3 * MAX_CONTEXT, "failed reviewer task")
-            snapshot = unique_json(snapshot_bytes.decode("utf-8"))
+            from scripts.two_site_proposal_runner import read_task_snapshot
+            snapshot_bytes, snapshot = read_task_snapshot(root, run_dir / "task.json", "failed reviewer task")
             prompt_bytes = bounded_file_bytes(root, run_dir / "prompt.txt", 2 * MAX_CONTEXT, "failed reviewer prompt")
             framing_path = run_dir / "input-framing.json"
             framing_bytes = (bounded_file_bytes(root, framing_path, 8192, "failed reviewer framing")
@@ -1587,6 +1709,7 @@ def _validate_reviewer_continuation(
     root: Path, task_path: Path, run_prefix: str, head: str, refs: dict,
     task: dict, sources: dict, state: dict, worker: tuple[str, str, str, str],
     test_receipt: dict, test_sha: str, correction_count: int,
+    *, maintenance_authorization=None,
 ) -> None:
     """Reuse the quota continuation's existing physical Worker/native readers."""
     if (state.get("state") in {"READY_FOR_CODEX", "ACCEPTED", "COMPLETE"}
@@ -1596,7 +1719,8 @@ def _validate_reviewer_continuation(
             or state.get("proposal_sha256") != worker[1]
             or state.get("final_reviewer_run_id") is not None or state.get("reviewer_path") is not None):
         raise ProposalError("reviewer continuation phase or proposal mismatch")
-    check_state(root, head, refs, task_path, task, sources)
+    check_state(root, head, refs, task_path, task, sources,
+        **({"maintenance_authorization": maintenance_authorization} if maintenance_authorization is not None else {}))
     if any(os.path.lexists(path) for path in (root / "STOP", root / ".local/two-site-refactor/autopilot/STOP")):
         raise ProposalError("STOP blocks reviewer continuation")
     pipeline_dir = root / ".local/two-site-refactor/pipeline"
@@ -1615,6 +1739,13 @@ def _validate_reviewer_continuation(
     receipt = _load_verifier_pre_review_receipt(root, artifacts)
     if receipt != test_receipt or receipt["selectors"] != task["test_selectors"]:
         raise ProposalError("reviewer continuation requires the same passed native selectors")
+    if maintenance_authorization is not None:
+        from scripts.two_site_proposal_runner import load_prior_worker
+        proposal_path = root / state["proposal_path"]
+        _res, bound_status, digest = load_prior_worker(root, proposal_path, worker[2], task, sources, head)
+        if digest != worker[1] or bound_status["conversation_id"] != worker[3]:
+            raise ProposalError("maintenance Reviewer prior Worker changed")
+        return
     try:
         from scripts.two_site_quota_resume_worker_reader import load_prior_worker_chain
     except ImportError:
@@ -1632,6 +1763,7 @@ def _run_reviewer_phase(
     worker: tuple[str, str, str, str], worker_result_path: Path,
     receipt: dict, receipt_path: Path, receipt_sha: str, correction_count: int,
     seen_convs: set[str],
+    maintenance_authorization=None,
 ) -> tuple[str, Path]:
     """Keep Worker/native and allow at most two extra fresh transient-only batches.
 
@@ -1655,15 +1787,19 @@ def _run_reviewer_phase(
             _validate_reviewer_continuation(
                 root, task_path, run_prefix, head, refs, task, sources, state,
                 worker, receipt, receipt_sha, correction_count,
+                **({"maintenance_authorization": maintenance_authorization} if maintenance_authorization is not None else {}),
             )
             for prior in recorded_failures:
                 directory = root / ".local/two-site-refactor/proposals" / prior["run_id"]
                 for name, key, limit in (("status.json", "status_sha256", MAX_CONTEXT),
-                                         ("task.json", "task_snapshot_sha256", 3 * MAX_CONTEXT),
+                                         ("task.json", "task_snapshot_sha256", 960000),
                                          ("prompt.txt", "prompt_sha256", 2 * MAX_CONTEXT),
                                          ("input-framing.json", "input_framing_sha256", 8192),
                                          ("stream.jsonl", "stream_sha256", MAX_OUTPUT)):
                     p = directory / name
+                    if name == "task.json":
+                        from scripts.two_site_proposal_runner import read_task_snapshot
+                        read_task_snapshot(root, p, "prior failed reviewer task")
                     expected = prior[key]
                     if (expected is None and os.path.lexists(p)) or (expected is not None and
                             hashlib.sha256(bounded_file_bytes(root, p, limit, "prior failed reviewer evidence")).hexdigest() != expected):
@@ -1674,6 +1810,7 @@ def _run_reviewer_phase(
             return run_provider_session(
                 root, task_path, "verifier", base, timeout, state_check,
                 proposal=worker_result_path, cli=cli, test_evidence=receipt_path, expected_head=head,
+                **({"maintenance_authorization": maintenance_authorization} if maintenance_authorization is not None else {}),
             )
         except ProposalError as exc:
             state_check()
@@ -1687,6 +1824,7 @@ def _run_reviewer_phase(
             _validate_reviewer_continuation(
                 root, task_path, run_prefix, head, refs, task, sources, state,
                 worker, receipt, receipt_sha, correction_count,
+                **({"maintenance_authorization": maintenance_authorization} if maintenance_authorization is not None else {}),
             )
             recorded_failures.extend(failures)
             seen_convs.update(failed_conversations)
@@ -1705,11 +1843,14 @@ def _run_reviewer_phase(
             raw = serialize_json(failure)
             if len(raw) > 16384:
                 raise ProposalError("reviewer phase failure record exceeds bound")
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(raw)
-                stream.flush()
-                os.fsync(stream.fileno())
+            if maintenance_authorization is not None:
+                _maintenance_exact_record(root, path, failure)
+            else:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(raw)
+                    stream.flush()
+                    os.fsync(stream.fileno())
             parent_fd = os.open(evidence_dir, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(parent_fd)
@@ -1752,6 +1893,7 @@ def _run_post_worker_remainder(
     seen_bootstrap_signatures: set[str],
     seen_branch_factors: set[str] | None = None,
     final_review_hook: Callable[..., dict] | None = None,
+    author_fallback_hook=None, maintenance_authorization=None,
 ) -> None:
     """Execute post-worker verification, test execution, and correction loop."""
     prior_changes = worker_res["changes"]
@@ -1790,6 +1932,7 @@ def _run_post_worker_remainder(
             receipt, receipt_path, receipt_sha = persist_pre_review_tests(
                 root, evidence_dir, task, worker_res, current_worker[1],
                 correction_count, state_check, state,
+                **({"maintenance_authorization": maintenance_authorization} if maintenance_authorization is not None else {}),
             )
             req_feedback = required_selector_gate_feedback(receipt, current_worker[1])
             if req_feedback is not None:
@@ -1819,6 +1962,7 @@ def _run_post_worker_remainder(
                     evidence_dir=evidence_dir, state_check=state_check, worker=current_worker,
                     worker_result_path=worker_result_path, receipt=receipt, receipt_path=receipt_path,
                     receipt_sha=receipt_sha, correction_count=correction_count, seen_convs=seen_convs,
+                    maintenance_authorization=maintenance_authorization,
                 )
                 reviewer_res, _st, _sha, _txt = validate_run(
                     root, reviewer_dir, "verifier", reviewer_run_id, initial_head, task, sources,
@@ -1830,7 +1974,7 @@ def _run_post_worker_remainder(
                     reviewer_path=(reviewer_dir / "result.json").relative_to(root).as_posix(),
                     correction_count=correction_count,
                 )
-                check_state(root, initial_head, initial_refs, task_candidate, task, sources)
+                state_check()
 
                 if reviewer_res["status"] == "VERIFIED":
                     if reviewer_res.get("findings"):
@@ -1843,6 +1987,14 @@ def _run_post_worker_remainder(
                         raise ProposalError("Qoder final review requires the captured current Gemini role policy")
                     # Production supplies the independent helper; tests/legacy callers
                     # leave this hook disabled. Preserve the real Gemini VERIFIED result.
+                    if maintenance_authorization is not None:
+                        marker = evidence_dir / f"maintenance-final-started-{correction_count}.json"
+                        final_path = root / ".local/two-site-refactor/qoder-reviews" / (current_worker[1] + ".json")
+                        if os.path.lexists(marker) and not os.path.lexists(final_path):
+                            raise ProposalError("MAINTENANCE_FINAL_REVIEW_RECONCILIATION_REQUIRED")
+                        _maintenance_exact_record(root, marker, {"authorization": maintenance_authorization,
+                            "worker_run_id": current_worker[0], "reviewer_run_id": reviewer_run_id,
+                            "proposal_sha256": current_worker[1], "native_sha256": receipt_sha})
                     qoder_receipt = final_review_hook(
                         root, task_candidate, current_worker[0], reviewer_run_id,
                         current_worker[1], timeout=timeout,
@@ -1869,14 +2021,13 @@ def _run_post_worker_remainder(
                         "qoder_review_receipt_sha256": hashlib.sha256(qoder_bytes).hexdigest(),
                         "decision": value["decision"],
                     }
-                    fd = os.open(history_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
-                    with os.fdopen(fd, "wb") as output:
-                        output.write(serialize_json(history)); output.flush(); os.fsync(output.fileno())
-                    parent_fd = os.open(evidence_dir, os.O_RDONLY | os.O_DIRECTORY)
-                    try:
-                        os.fsync(parent_fd)
-                    finally:
-                        os.close(parent_fd)
+                    if maintenance_authorization is not None and os.path.lexists(history_path):
+                        if bounded_file_bytes(root, history_path, MAX_CONTEXT, "retained Qoder decision history") != serialize_json(history):
+                            raise ProposalError("maintenance Qoder decision history changed")
+                    else:
+                        if maintenance_authorization is None and os.path.lexists(history_path):
+                            raise ProposalError("Qoder decision history already exists")
+                        _maintenance_exact_record(root, history_path, history)
                     if value["decision"] == "APPROVE":
                         state["state"] = "READY_FOR_CODEX"
                         state["blockers"] = []
@@ -1907,16 +2058,26 @@ def _run_post_worker_remainder(
 
         correction_count += 1
         feedback_path = evidence_dir / f"feedback-correction-{correction_count}.json"
-        if feedback_path.exists():
-            raise ProposalError(f"feedback path already exists: {feedback_path}")
-        write_json(feedback_path, feedback_payload)
+        if maintenance_authorization is not None:
+            _maintenance_exact_record(root, feedback_path, feedback_payload)
+        else:
+            if feedback_path.exists():
+                raise ProposalError(f"feedback path already exists: {feedback_path}")
+            write_json(feedback_path, feedback_payload)
         feedback_sha = file_sha256(feedback_path)
 
-        worker_run_id, worker_dir = run_provider_session(
-            root, task_candidate, "worker", f"{run_prefix}-worker-{correction_count}", timeout,
-            state_check, feedback=feedback_path, proposal=worker_result_path, cli=cli,
-            expected_head=initial_head,
-        )
+        if maintenance_authorization is not None:
+            from scripts.two_site_qoder_author import maintenance_author_phase
+            worker_run_id, worker_dir = maintenance_author_phase(root, f"{run_prefix}-worker-{correction_count}-qa",
+                task=task, sources=sources, source_head=initial_head, authorization=maintenance_authorization,
+                timeout=timeout, state_check=state_check, feedback=feedback_path, proposal=worker_result_path)
+        else:
+            worker_run_id, worker_dir = run_provider_session(
+                root, task_candidate, "worker", f"{run_prefix}-worker-{correction_count}", timeout,
+                state_check, feedback=feedback_path, proposal=worker_result_path, cli=cli,
+                expected_head=initial_head,
+                **({"author_fallback_hook": author_fallback_hook} if author_fallback_hook is not None else {}),
+            )
         worker_res, worker_st, worker_sha, worker_txt = validate_run(
             root, worker_dir, "worker", worker_run_id, initial_head, task, sources,
             seen_convs, prior_worker=current_worker, expected_feedback_sha=feedback_sha
@@ -1941,7 +2102,8 @@ def _run_post_worker_remainder(
 
 
 def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli: Path | None, state: dict,
-                 *, final_review_hook: Callable[..., dict] | None = None) -> dict:
+                 *, final_review_hook: Callable[..., dict] | None = None,
+                 author_fallback_hook=None, maintenance_authorization=None) -> dict:
     root = root.resolve(strict=True)
     task_candidate = Path(os.path.abspath(task_path if task_path.is_absolute() else root / task_path))
     if not task_candidate.is_relative_to(root):
@@ -1950,6 +2112,8 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
         raise ProposalError("invalid run-prefix: must be canonical identifier up to 60 chars")
     if not 10 <= timeout <= 900:
         raise ProposalError("timeout must be between 10 and 900 seconds")
+    if (author_fallback_hook is not None or maintenance_authorization is not None) and final_review_hook is None:
+        raise ProposalError("Qoder author requires independent final Qoder review")
 
     with pipeline_lock(root) as pipeline_dir:
         if git(root, "branch", "--show-current") != BRANCH:
@@ -1960,7 +2124,8 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
         if git(root, "status", "--porcelain=v1", "--untracked-files=all"):
             raise ProposalError("pipeline requires clean worktree")
         initial_refs = ref_snapshot(root)
-        task, sources = load_task(root, task_candidate)
+        task, sources = (load_task(root, task_candidate) if maintenance_authorization is None else
+                         load_task(root, task_candidate, maintenance_authorization=maintenance_authorization))
         # Broker supplies this provenance only for a fresh ordinary cycle.
         # Frozen quota continuations use their separate same-lineage route.
         if "TWO_SITE_AUTOPILOT_RUN_ID" in os.environ:
@@ -1980,9 +2145,16 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
         state["semantic_task_fingerprint"] = semantic_attempt["fingerprint"]
 
         evidence_dir.mkdir(mode=0o700)
+        if maintenance_authorization is not None:
+            _maintenance_exact_record(root, evidence_dir / "maintenance-started.json", {
+                "schema_version": 1, "source_head": initial_head, "protected_refs": initial_refs,
+                "task_sha256": file_sha256(task_candidate), "sources_sha256": hashlib.sha256(serialize_json(sources)).hexdigest(),
+                "authorization": maintenance_authorization, "run_prefix": run_prefix,
+                "semantic_task_fingerprint": semantic_attempt["fingerprint"]})
 
         def state_check() -> None:
-            check_state(root, initial_head, initial_refs, task_candidate, task, sources)
+            check_state(root, initial_head, initial_refs, task_candidate, task, sources,
+                        **({"maintenance_authorization": maintenance_authorization} if maintenance_authorization is not None else {}))
 
         state.setdefault("pre_review_test_path", None)
         state.setdefault("pre_review_test_sha256", None)
@@ -1994,10 +2166,17 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
         seen_bootstrap_signatures: set[str] = set()
         seen_branch_factors: set[str] = set()
 
-        worker_run_id, worker_dir = run_provider_session(
-            root, task_candidate, "worker", f"{run_prefix}-worker-0", timeout,
-            state_check, cli=cli, expected_head=initial_head,
-        )
+        if maintenance_authorization is not None:
+            from scripts.two_site_qoder_author import maintenance_author_phase
+            worker_run_id, worker_dir = maintenance_author_phase(root, f"{run_prefix}-worker-0-qa",
+                task=task, sources=sources, source_head=initial_head,
+                authorization=maintenance_authorization, timeout=timeout, state_check=state_check)
+        else:
+            worker_run_id, worker_dir = run_provider_session(
+                root, task_candidate, "worker", f"{run_prefix}-worker-0", timeout,
+                state_check, cli=cli, expected_head=initial_head,
+                **({"author_fallback_hook": author_fallback_hook} if author_fallback_hook is not None else {}),
+            )
         worker_res, worker_st, worker_sha, worker_txt = validate_run(
             root, worker_dir, "worker", worker_run_id, initial_head, task, sources, seen_convs
         )
@@ -2033,9 +2212,10 @@ def run_pipeline(root: Path, task_path: Path, run_prefix: str, timeout: int, cli
             seen_bootstrap_signatures=seen_bootstrap_signatures,
             seen_branch_factors=seen_branch_factors,
             final_review_hook=final_review_hook,
+            author_fallback_hook=author_fallback_hook, maintenance_authorization=maintenance_authorization,
         )
 
-        check_state(root, initial_head, initial_refs, task_candidate, task, sources)
+        state_check()
     return state
 
 
@@ -2045,6 +2225,7 @@ def main() -> int:
     parser.add_argument("--task", type=Path, required=True, help="path to task definition JSON")
     parser.add_argument("--run-prefix", type=str, required=True, help="canonical unique prefix for run IDs")
     parser.add_argument("--qoder-final-review", action="store_true", help="trusted Broker opt-in to independent final Qoder review")
+    parser.add_argument("--qoder-author-fallback", action="store_true", help="trusted Broker opt-in to qualified Qoder author variant")
     parser.add_argument("--timeout", type=int, default=300, help="timeout per model invocation in seconds")
     parser.add_argument("--cli", type=Path, default=None, help="path to existing Antigravity CLI executable")
     args = parser.parse_args()
@@ -2063,6 +2244,9 @@ def main() -> int:
         if args.qoder_final_review:
             from scripts.two_site_qoder_review import review_proposal
             review_options["final_review_hook"] = review_proposal
+        if args.qoder_author_fallback:
+            from scripts.two_site_qoder_author import fallback_from_failed
+            review_options["author_fallback_hook"] = fallback_from_failed
         run_pipeline(args.root, args.task, args.run_prefix, args.timeout, args.cli, state, **review_options)
     except QuotaBlockError as exc:
         state["state"] = "TASK_BLOCKED"

@@ -12,13 +12,14 @@ import stat
 import subprocess
 import time
 
-from scripts.two_site_ai_config import load_runtime_config
+from scripts.two_site_ai_config import load_ai_config, load_runtime_config
 
 MAX_STREAM_BYTES = 16_000_000
 MAX_RESULT_BYTES = 64_000
 SETTINGS = {"general": {"enableAutoUpdate": False}}
 TOOLS = {"coordinator": ("Bash", "Read", "Edit", "Write", "Glob", "Grep"),
-         "final_reviewer": ("Read", "Glob", "Grep"), "receipt_formatter": ()}
+         "final_reviewer": ("Read", "Glob", "Grep"), "receipt_formatter": (),
+         "proposal_author": ()}
 COORDINATOR_SCHEMA_REL = Path("docs/refactor/two-server/templates/codex-autopilot-cycle.schema.json")
 
 
@@ -138,6 +139,25 @@ def _settings_args(runtime: dict) -> list[str]:
     return result
 
 
+def _execution_settings(root: Path, roleconfig: dict) -> dict:
+    """Return one documented Qoder settings object for this configured model.
+
+    The model selector remains role data.  The execution limit is optional so
+    historical configurations keep their exact argv; when present it is bound
+    dynamically to the selected role model rather than to a model name in code.
+    """
+    policy = load_ai_config(root)
+    settings = {"general": {"enableAutoUpdate": False}}
+    execution = policy.get("qoder_execution")
+    if execution is not None:
+        settings["modelConfigs"] = {"customOverrides": [{
+            "match": {"model": roleconfig["model"], "overrideScope": "core"},
+            "modelConfig": {"generateContentConfig": {
+                "maxOutputTokens": execution["max_output_tokens"]}},
+        }]}
+    return settings
+
+
 def qoder_identity(path: Path, runtime: dict, temporary: Path, roleconfig: dict | None = None) -> dict:
     runtime = _runtime(runtime); path = Path(path)
     _need(str(path) == runtime["path"], "QODER_RUNTIME_PATH_MISMATCH")
@@ -189,17 +209,36 @@ def _coordinator_output_contract(root: Path) -> str:
 
 
 def qoder_command(path: Path, root: Path, run_dir: Path, prompt: str, roleconfig: dict,
-                  *, role: str = "coordinator") -> list[str]:
+                  *, role: str = "coordinator", response_schema: dict | None = None) -> list[str]:
     """Caller supplies exact prompt bytes to stdin and owns bounded capture/exit."""
     _role(roleconfig); _need(role in TOOLS, "QODER_ROLE")
-    limit = 320000 if role == "final_reviewer" else 160000
+    limit = 320000 if role in {"final_reviewer", "proposal_author"} else 160000
     _need(type(prompt) is str and 0 < len(prompt.encode("utf-8")) <= limit, "QODER_PROMPT_BOUND")
     root = Path(root).resolve(strict=True); run_dir = Path(run_dir).resolve(strict=True)
     _need(run_dir.is_relative_to(root) and run_dir != root, "QODER_RUN_DIRECTORY")
     runtime = _runtime(load_runtime_config(root)); _need(str(path) == runtime["path"], "QODER_RUNTIME_PATH_MISMATCH")
     contract = (["--append-system-prompt", _coordinator_output_contract(root)]
                 if role in {"coordinator", "receipt_formatter"} else [])
-    return [str(path), *_settings_args(runtime), *contract, "--cwd", str(root), "--model", roleconfig["model"],
+    if role == "proposal_author":
+        _need(type(response_schema) is dict and response_schema.get("type") == "object"
+              and response_schema.get("additionalProperties") is False
+              and type(response_schema.get("properties")) is dict
+              and set(response_schema.get("required", [])) == set(response_schema["properties"]),
+              "QODER_AUTHOR_SCHEMA")
+        contract = ["--append-system-prompt", "You are a tool-free proposal author. Return ONLY one "
+                    "Worker JSON object matching this closed schema; no coordinator receipt, tools, "
+                    "commands, delegation or edits.\n" + json.dumps(response_schema, ensure_ascii=False,
+                                                                  separators=(",", ":"))]
+    else:
+        _need(response_schema is None, "QODER_UNEXPECTED_RESPONSE_SCHEMA")
+    if role == "proposal_author":
+        _need(len(prompt.encode("utf-8")) + len(contract[1].encode("utf-8")) <= limit,
+              "QODER_AUTHOR_COMPLETE_PROMPT_BOUND")
+    settings = _execution_settings(root, roleconfig)
+    settings_args = ["--settings", json.dumps(settings, separators=(",", ":"))]
+    if runtime.get("config_dir"):
+        settings_args += _settings_args(runtime)[2:]
+    return [str(path), *settings_args, *contract, "--cwd", str(root), "--model", roleconfig["model"],
         "--reasoning-effort", roleconfig["reasoning_effort"], "--thinking", "adaptive",
         "--output-format", "stream-json", "--no-session-persistence", "--permission-mode", "auto",
         "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',

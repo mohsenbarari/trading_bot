@@ -43,11 +43,12 @@ assignment_id=""
 bundle_rel=""
 accepted_head=""
 closeout_head=""
+authority_context=""
 
 while (($#)); do
   case "$1" in
     --verify-commit) verify_commit=true; shift ;;
-    --stage|--assignment|--bundle|--accepted-head|--closeout-head)
+    --stage|--assignment|--bundle|--accepted-head|--closeout-head|--authority-review-context)
       (($# >= 2)) || die "missing value for $1"
       case "$1" in
         --stage) stage_id="$2" ;;
@@ -55,6 +56,7 @@ while (($#)); do
         --bundle) bundle_rel="$2" ;;
         --accepted-head) accepted_head="$2" ;;
         --closeout-head) closeout_head="$2" ;;
+        --authority-review-context) authority_context="$2" ;;
       esac
       shift 2
       ;;
@@ -176,6 +178,7 @@ validate_closeout_content() {
 }
 
 if $verify_commit; then
+  test -z "$authority_context" || die "verify-commit does not accept an authority context"
   [[ "$closeout_head" =~ ^[0-9a-f]{40}$ ]] || die "closeout head must be a full lowercase SHA"
   test -s "$closeout_receipt" || die "closeout pre-action receipt is missing"
   [[ "$(git -C "$repo_root" rev-parse HEAD)" == "$closeout_head" ]] || die "HEAD differs from closeout head"
@@ -227,6 +230,11 @@ validate_closeout_content
 patch_sha256="$(patch_hash_cached)"
 raw_receipt="$tmp_dir/receipt.json"
 
+bridge_context_args=()
+if test -n "$authority_context"; then
+  bridge_context_args=(--authority-review-context "$authority_context")
+fi
+
 read -r -d '' review_prompt <<EOF || true
 Act as CODEX_FINAL_REVIEWER for only the mechanical closeout of one already-approved
 two-site Stage. This is a pre-action review of the exact staged Git patch, not a review
@@ -254,7 +262,7 @@ EOF
   printf '\nMACHINE_GENERATED_EXACT_STAGED_CLOSEOUT_DIFF:\n'
   git -C "$repo_root" diff --cached --binary --full-index --no-ext-diff "$accepted_head"
 } | PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$review_bridge" --root "$repo_root" \
-  --schema "$schema_path" --output-last-message "$raw_receipt"
+  --schema "$schema_path" --output-last-message "$raw_receipt" "${bridge_context_args[@]}"
 
 test -s "$raw_receipt" || die "Qoder did not produce a closeout receipt"
 jq -e . "$raw_receipt" >/dev/null || die "Qoder closeout receipt is not valid JSON"

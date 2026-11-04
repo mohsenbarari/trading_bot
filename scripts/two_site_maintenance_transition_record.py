@@ -696,6 +696,18 @@ def build_maintenance_transition_record(
 
 def validate_maintenance_transition_record(record: object) -> dict[str, Any]:
     """Validate a maintenance-transition candidate record and return detached copy."""
+    if type(record) is dict and record.get("kind") == "QODER_BUSINESS_EFFECT_RECONCILIATION_V1":
+        from scripts.two_site_qoder_business_reconcile import validate_business_transition_record
+        try:
+            return validate_business_transition_record(record)
+        except ValueError as exc:
+            raise MaintenanceTransitionRecordError("Qoder business reconciliation record invalid") from exc
+    if type(record) is dict and record.get("kind") == "QODER_AUTOMATION_MAINTENANCE_V1":
+        from scripts.two_site_qoder_maintenance import validate_transition_record
+        try:
+            return validate_transition_record(record)
+        except ValueError as exc:
+            raise MaintenanceTransitionRecordError("Qoder maintenance record invalid") from exc
     if type(record) is not dict:
         raise MaintenanceTransitionRecordError("record must be a dict")
     if not _exact_keyset(record, _RECORD_KEYS):

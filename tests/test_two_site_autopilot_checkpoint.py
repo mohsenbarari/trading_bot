@@ -1109,11 +1109,28 @@ class PostValidationCheckpointPublicationCallTests(unittest.TestCase):
     def _setup_cycle_env(self, temp_dir: Path) -> tuple[Path, Path, Path]:
         root = temp_dir / "repo"
         root.mkdir(parents=True, exist_ok=True)
-        state_root = root / "state"
+        state_root = root / ".local/two-site-refactor/autopilot"
         (state_root / "runs").mkdir(parents=True, exist_ok=True)
-        codex = temp_dir / "fake_codex"
+        # This class isolates checkpoint publication after validation, not model
+        # execution. Supply the current canonical Qoder policy/runtime instead
+        # of pretending the retired Codex fixture is a configured coordinator.
+        import hashlib
+        import shutil
+        from scripts import two_site_ai_config as config
+        from scripts import two_site_proposal_runner as runner
+        codex = temp_dir / "synthetic_qodercli"
         codex.write_text("#!/bin/sh\nexit 0\n")
         codex.chmod(0o755)
+        for relative in (config.AI_CONFIG_REL,
+                         Path("docs/refactor/two-server/templates/codex-autopilot-cycle.schema.json")):
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(runner.ROOT / relative, target)
+        runtime = {"schema_version": 1, "coordinator": {"path": str(codex),
+            "version": "synthetic-publication-fixture", "sha256": hashlib.sha256(codex.read_bytes()).hexdigest()}}
+        target = root / config.AI_RUNTIME_REL
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(runtime) + "\n"); target.chmod(0o600)
         return root, codex, state_root
 
     def _execute_run_cycle(
@@ -1133,9 +1150,39 @@ class PostValidationCheckpointPublicationCallTests(unittest.TestCase):
         mock_proc.__enter__.return_value = mock_proc
         mock_proc.__exit__.return_value = None
 
+        from scripts import two_site_ai_config as config
+        import hashlib
+        selected = config.role_settings(root, "coordinator")
+        self.assertEqual(selected["provider"], "qoder")
+        runtime = config.load_runtime_config(root)["coordinator"]
+        identity = {**runtime, "provider": "qoder", "logged_in": True, "auto_update_enabled": False,
+                    "model": selected["model"], "reasoning": selected["reasoning_effort"]}
+        self.assertEqual(identity["sha256"], hashlib.sha256(codex.read_bytes()).hexdigest())
+        final_reviews = []
+
         def fake_capture(process, stdin, stdout_path, stderr_path, timeout, max_output=None):
-            run_dir = stdout_path.parent
-            (run_dir / "result.json").write_text(json.dumps(codex_result, ensure_ascii=False))
+            self.assertTrue(stdin)  # Current Qoder receives its actual prompt on stdin.
+            sid = "synthetic-checkpoint-coordinator-session"
+            events = [{"type": "system", "subtype": "init", "session_id": sid,
+                       "model": selected["model"], "tools": ["Read"]},
+                      {"type": "result", "subtype": "success", "is_error": False,
+                       "stop_reason": "end_turn", "session_id": sid, "num_turns": 1,
+                       "result": json.dumps(codex_result, ensure_ascii=False)}]
+            stdout_path.write_text("".join(json.dumps(event) + "\n" for event in events))
+            stderr_path.write_text("")
+
+        def fake_final_review(r, head, result):
+            # This is the same validation-boundary double as fake_transition;
+            # actual SDK/receipt custody is covered by final-review tests.
+            final_reviews.append((r, head, result))
+            return {"unit_test_validation_boundary": True}
+
+        def fixture_git(_root, *args):
+            if args == ("config", "--get", "user.name"):
+                return "Checkpoint fixture"
+            if args == ("config", "--get", "user.email"):
+                return "checkpoint@example.invalid"
+            raise AssertionError("unexpected Git operation in publication-only unit")
 
         def fake_validate_repository(r, require_clean=True):
             call_events.append(("validate_repository", r, require_clean))
@@ -1153,6 +1200,7 @@ class PostValidationCheckpointPublicationCallTests(unittest.TestCase):
             return transition_result
 
         def fake_publish(st_root, res, rep):
+            self.assertEqual(final_reviews, [(root, res["head_before"], res)])
             call_events.append(("publish_accepted_checkpoint", st_root, res, rep))
             if on_publish is not None:
                 on_publish(st_root, res, rep)
@@ -1160,9 +1208,10 @@ class PostValidationCheckpointPublicationCallTests(unittest.TestCase):
         with (
             patch("subprocess.Popen", return_value=mock_proc),
             patch("scripts.two_site_codex_autopilot.prompt_for_cycle", return_value="test prompt"),
-            patch("scripts.two_site_codex_autopilot.codex_identity", return_value={"sha256": "s", "runtime": "r"}),
-            patch("scripts.two_site_codex_autopilot.file_sha256", return_value="s"),
-            patch("scripts.two_site_codex_autopilot.codex_runtime_identity", return_value="r"),
+            patch("scripts.two_site_codex_autopilot.coordinator_identity", return_value=identity),
+            patch("scripts.two_site_codex_autopilot.buildwrap_coordinator_command", side_effect=lambda _r, _d, cmd, **_kw: cmd),
+            patch("scripts.two_site_codex_autopilot.git", side_effect=fixture_git),
+            patch("scripts.two_site_qoder_review.validate_result_review", side_effect=fake_final_review),
             patch("scripts.two_site_codex_autopilot.write_supervisor_state"),
             patch("scripts.two_site_codex_autopilot._heartbeat_running_cycle", return_value=None),
             patch("scripts.two_site_codex_autopilot.capture_bounded_process", side_effect=fake_capture),

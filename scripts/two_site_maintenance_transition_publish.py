@@ -78,6 +78,7 @@ def publish_maintenance_transition_locked(
     root: Path,
     state_root: Path,
     maintenance_commits: list[dict[str, Any]],
+    *, qoder_execution_path: Path | None = None, business_execution_path: Path | None = None,
 ) -> dict[str, Any]:
     """Publish a reviewed maintenance-transition record with one-shot no-replace semantics.
 
@@ -86,6 +87,16 @@ def publish_maintenance_transition_locked(
     Holds Broker client lock across all prechecks, publication, and postchecks.
     Returns detached record dict ONLY after Broker exits successfully.
     """
+    if business_execution_path is not None:
+        if qoder_execution_path is not None or state_root != root / _STATE_ROOT_REL or maintenance_commits != []:
+            raise MaintenanceTransitionPublishError("invalid business reconciliation publication")
+        from scripts.two_site_qoder_business_reconcile import publish_business_reconciliation_transition_locked
+        return publish_business_reconciliation_transition_locked(root, business_execution_path)
+    if qoder_execution_path is not None:
+        if state_root != root / _STATE_ROOT_REL or maintenance_commits != []:
+            raise MaintenanceTransitionPublishError("invalid Qoder maintenance publication")
+        from scripts.two_site_qoder_maintenance import publish_qoder_maintenance_transition_locked
+        return publish_qoder_maintenance_transition_locked(root, qoder_execution_path)
     if not isinstance(root, Path) or not root.is_absolute():
         raise MaintenanceTransitionPublishError("root must be an absolute pathlib.Path")
     expected_state_root = root / _STATE_ROOT_REL

@@ -87,9 +87,17 @@ def _bounded_text(value, limit):
   return True
 
 
+_MOCK_ASSERTIONS = tuple(
+  "UNITTEST_MOCK_TYPE_V1:" + method + "(type(_)," + cls +
+  ");if_unittest_mock_use_isinstance_and_check_sync_async"
+  for method in ("assertIs", "assertEqual") for cls in ("MagicMock", "AsyncMock")) + ('UNITTEST_MOCK_HASATTR_V1:assertFalse(hasattr(_,await_count));if_unittest_mock_check_isinstance_AsyncMock_and_iscoroutinefunction',)
+
+
 def _assertion_shape(value):
   if not _bounded_text(value, 512):
     return False
+  if value in _MOCK_ASSERTIONS:
+    return True
   try:
     expression = ast.parse(value, mode="eval")
     count = 0
@@ -194,6 +202,8 @@ def _diagnostic_artifact(data):
       if exception is not None and (not _bounded_text(exception, 160) or exception not in _EXCEPTIONS):
         raise ValueError
       if assertion is not None and not _assertion_shape(assertion):
+        raise ValueError
+      if assertion in _MOCK_ASSERTIONS and exception != "builtins.AssertionError":
         raise ValueError
       if (exception is None or record["partial"]) and not value["partial"]:
         raise ValueError

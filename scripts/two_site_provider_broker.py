@@ -736,6 +736,11 @@ def execute_pipeline(root: Path, request: dict, task_path: Path, scope: Assignme
     # This policy is supplied by the trusted launcher, never by a queued request.
     if os.environ.get("TWO_SITE_QODER_FINAL_REVIEW_REQUIRED") == "1":
         command.append("--qoder-final-review")
+    from scripts.two_site_qoder_author import author_policy_enabled
+    if author_policy_enabled(root):
+        if os.environ.get("TWO_SITE_QODER_FINAL_REVIEW_REQUIRED") != "1":
+            raise BrokerError("Qoder author fallback requires independent final Qoder review")
+        command.append("--qoder-author-fallback")
     environment = os.environ.copy()
     environment.pop("TWO_SITE_AUTOPILOT_RUN_ID", None)
     environment.pop("TWO_SITE_MAINTENANCE_RUN_ID", None)

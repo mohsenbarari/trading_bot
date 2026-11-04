@@ -76,6 +76,23 @@ def test_duplicate_or_nonfinite_json_is_rejected(tmp_path, raw):
     with pytest.raises(config.AIConfigError): config.load_ai_config(tmp_path)
 
 
+@pytest.mark.parametrize("value", [True, 32767, 1048577, "262144", None])
+def test_qoder_output_budget_is_typed_and_bounded(tmp_path, value):
+    path = write_policy(tmp_path); data = json.loads(path.read_text())
+    data["qoder_execution"] = {"max_output_tokens": value}
+    path.write_text(json.dumps(data)); path.chmod(0o600)
+    with pytest.raises(config.AIConfigError, match="AI_CONFIG_QODER_OUTPUT_TOKENS"):
+        config.load_ai_config(tmp_path)
+
+
+def test_qoder_execution_rejects_open_shape(tmp_path):
+    path = write_policy(tmp_path); data = json.loads(path.read_text())
+    data["qoder_execution"] = {"max_output_tokens": 262144, "model": "hardcoded"}
+    path.write_text(json.dumps(data)); path.chmod(0o600)
+    with pytest.raises(config.AIConfigError, match="AI_CONFIG_QODER_EXECUTION_FIELDS"):
+        config.load_ai_config(tmp_path)
+
+
 @pytest.mark.parametrize("kind", ["symlink", "hardlink", "group-write", "oversize"])
 def test_unsafe_policy_file_is_rejected(tmp_path, kind):
     path = write_policy(tmp_path)

@@ -94,8 +94,6 @@ fi
 phase="idle"
 if /usr/bin/pgrep -f "$integration_root/scripts/two_site_proposal_pipeline.py" >/dev/null 2>&1; then
   phase="gemini_pipeline"
-elif /usr/bin/pgrep -f "(/codex|/codex-[^/ ]+\.pin) exec .*--cd $integration_root( |$)" >/dev/null 2>&1; then
-  phase="codex_coordinator"
 elif /usr/bin/pgrep -f "qodercli .*--cwd $integration_root( |$)" >/dev/null 2>&1; then
   phase="qoder_coordinator"
 elif [[ "$supervisor_count" -gt 0 ]]; then
@@ -386,6 +384,75 @@ if [[ "$supervisor_count" -gt 0 && "$broker_count" -eq 0 && "$restart_eligible" 
         action="preflight_failed"
       fi
     fi
+  fi
+fi
+
+# Qoder maintenance is a separate typed action. The protected host LKG entry
+# validates exact owned failure/job/Source/CPP before any model or source effect.
+# COMPLETE, STOP and a live Supervisor never enter this route.
+if [[ "${tmux_observation:-error}" == "absent" && "${supervisor_count:-1}" -eq 0
+      && ( "$state" == "BLOCKED" || "$state" == "FAILED" || "$state" == "CONTINUE" || "$state" == "MAINTENANCE_CONTINUE" )
+      && ! -e "$state_root/STOP" && ! -L "$state_root/STOP"
+      && ! -e "$integration_root/STOP" && ! -L "$integration_root/STOP" ]]; then
+  maintenance_entry="/var/lib/two-site-qoder-maintenance/launcher.py"
+  if [[ -f "$maintenance_entry" && ! -L "$maintenance_entry"
+        && "$(/usr/bin/stat -c %a -- "$maintenance_entry" 2>/dev/null || true)" == "600"
+        && "$(/usr/bin/stat -c %h -- "$maintenance_entry" 2>/dev/null || true)" == "1"
+        && -O "$maintenance_entry" ]]; then
+    maintenance_stdout="$(/usr/bin/mktemp "$report_root/.maintenance.stdout.XXXXXX")"
+    maintenance_stderr="$(/usr/bin/mktemp "$report_root/.maintenance.stderr.XXXXXX")"
+    maintenance_exit=0
+    (ulimit -f 128; /usr/bin/timeout 60 /usr/bin/python3 -I -B "$maintenance_entry" --root "$integration_root" --inspect >"$maintenance_stdout" 2>"$maintenance_stderr") || maintenance_exit="$?"
+    maintenance_action="NOT_ELIGIBLE"
+    if [[ "$maintenance_exit" -eq 0 && "$(/usr/bin/stat -c %s -- "$maintenance_stdout")" -le 8192 ]]; then
+      maintenance_action="$(/usr/bin/jq -er 'if (keys == ["action"]) then .action else empty end' "$maintenance_stdout" 2>/dev/null || true)"
+    fi
+    if [[ "$maintenance_action" == "REPAIR_TERMINAL_FAILURE" || "$maintenance_action" == "FINISH_OWNED_MAINTENANCE"
+          || "$maintenance_action" == "CONTINUE_OWNED_PROVIDER" || "$maintenance_action" == "RESUME_REVIEWED_MAINTENANCE"
+          || "$maintenance_action" == "BUSINESS_RECONCILIATION" || "$maintenance_action" == "AUTHORITY_LIFECYCLE" ]]; then
+      restart_eligible=false
+      provider_probe=false
+      if /usr/bin/tmux has-session -t '=two-site-qoder-maintenance' 2>/dev/null; then
+        action="qoder_maintenance_already_running"
+      else
+        printf -v maintenance_command '%q ' /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
+          /usr/bin/python3 -I -B "$maintenance_entry" --root "$integration_root"
+        if /usr/bin/tmux new-session -d -s two-site-qoder-maintenance -c "$integration_root" "$maintenance_command"; then
+          action="qoder_maintenance_started"
+        else
+          action="qoder_maintenance_start_failed"
+        fi
+      fi
+    fi
+    for maintenance_pair in stdout stderr; do
+      if [[ "$maintenance_pair" == stdout ]]; then
+        maintenance_tmp="$maintenance_stdout"; maintenance_target="$report_root/maintenance-preflight.latest.log"
+      else
+        maintenance_tmp="$maintenance_stderr"; maintenance_target="$report_root/maintenance-preflight.latest.stderr.log"
+      fi
+      if [[ ! -L "$maintenance_target" ]] \
+          && { [[ ! -e "$maintenance_target" ]] || [[ -f "$maintenance_target" && -O "$maintenance_target" && "$(/usr/bin/stat -c %h -- "$maintenance_target")" == 1 ]]; }; then
+        /usr/bin/mv -f -- "$maintenance_tmp" "$maintenance_target"
+        /usr/bin/chmod 600 "$maintenance_target"
+      else
+        /usr/bin/unlink -- "$maintenance_tmp"
+      fi
+    done
+  fi
+fi
+
+# Accepted work remains accepted if capsule refresh fails. This is a no-model
+# retry from a strict matching CONTINUE checkpoint; it cannot adopt maintenance.
+if [[ "${tmux_observation:-error}" == "absent" && "${supervisor_count:-1}" -eq 0
+      && "$state" == "CONTINUE" && "$protected_refs_ok" == true
+      && ! -e "$state_root/STOP" && ! -L "$state_root/STOP"
+      && ! -e "$integration_root/STOP" && ! -L "$integration_root/STOP" ]]; then
+  refresh_entry="/var/lib/two-site-qoder-maintenance/launcher.py"
+  if [[ -f "$refresh_entry" && ! -L "$refresh_entry" && -O "$refresh_entry"
+        && "$(/usr/bin/stat -c %a -- "$refresh_entry" 2>/dev/null || true)" == 600
+        && "$(/usr/bin/stat -c %h -- "$refresh_entry" 2>/dev/null || true)" == 1 ]]; then
+    # Do not print private metadata or make refresh failure a replay trigger.
+    /usr/bin/timeout 90 /usr/bin/python3 -I -B "$refresh_entry" --root "$integration_root" --refresh --monitor-fd 9 >/dev/null 2>&1 || true
   fi
 fi
 

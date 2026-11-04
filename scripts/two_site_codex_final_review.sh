@@ -38,6 +38,7 @@ assignment_id=""
 bundle_rel=""
 base_sha=""
 head_sha=""
+coverage_manifest=""
 
 while (($#)); do
   case "$1" in
@@ -45,7 +46,7 @@ while (($#)); do
       check_only=true
       shift
       ;;
-    --stage|--assignment|--bundle|--base|--head)
+    --stage|--assignment|--bundle|--base|--head|--coverage-manifest)
       (($# >= 2)) || die "missing value for $1"
       case "$1" in
         --stage) stage_id="$2" ;;
@@ -53,6 +54,7 @@ while (($#)); do
         --bundle) bundle_rel="$2" ;;
         --base) base_sha="$2" ;;
         --head) head_sha="$2" ;;
+        --coverage-manifest) coverage_manifest="$2" ;;
       esac
       shift 2
       ;;
@@ -72,6 +74,7 @@ require_command realpath
 require_command date
 require_command sha256sum
 require_command awk
+require_command cmp
 test -f "$review_bridge" || die "Qoder review bridge is missing"
 test -f "$schema_path" || die "review schema is missing: $schema_path"
 jq -e . "$schema_path" >/dev/null || die "review schema is not valid JSON"
@@ -83,6 +86,7 @@ validate_source_authorization() {
 }
 
 if $check_only; then
+  test -z "$coverage_manifest" || die "check-only does not accept coverage data"
   /usr/bin/python3 "$review_bridge" --root "$repo_root" --check >/dev/null || die "Qoder CLI is not ready"
   validate_source_authorization || die "explicit source-review authorization is missing: $source_authorization"
   test -z "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" || \
@@ -164,10 +168,21 @@ adequate. For APPROVE, decision.accepted_commit must equal $head_sha. For every 
 verdict it must be null. Never infer approval from missing evidence.
 EOF
 
+if test -n "$coverage_manifest"; then
+  PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$repo_root/scripts/two_site_qoder_authority.py" \
+    --root "$repo_root" --check-stage-evidence "$coverage_manifest" >"$tmp_dir/exact-stage-evidence.json"
+fi
+
 {
   printf '%s\n' "$review_prompt"
-  printf '\nMACHINE_GENERATED_EXACT_REVIEW_DIFF:\n'
-  git -C "$repo_root" diff --binary --full-index --no-ext-diff "$base_sha" "$head_sha"
+  if test -n "$coverage_manifest"; then
+    printf '\nCOMPLETE_EXACT_DIFF_COVERAGE_MANIFEST: %s\n' "$coverage_manifest"
+    printf 'The trusted host validated every complete diff byte with fresh independent Qoder chunk approvals and the exact current whole tracked native matrix. Read the COMPLETE manifest, raw SDK chunk proofs and native matrix, full approved masterplan/governance, Stage card, current dependencies/source and full review bundle. This is evidence for your independent whole-Stage decision, never automatic Stage acceptance. Reject missing coverage, unresolved cross-file findings or inadequate evidence.\n'
+    cat "$tmp_dir/exact-stage-evidence.json"
+  else
+    printf '\nMACHINE_GENERATED_EXACT_REVIEW_DIFF:\n'
+    git -C "$repo_root" diff --binary --full-index --no-ext-diff "$base_sha" "$head_sha"
+  fi
 } | PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$review_bridge" --root "$repo_root" \
   --schema "$schema_path" --output-last-message "$raw_receipt"
 
@@ -208,6 +223,12 @@ reviewed_epoch="$(date -u -d "$reviewed_at" +%s 2>/dev/null)" || die "review tim
 now_epoch="$(date -u +%s)"
 review_age="$((now_epoch - reviewed_epoch))"
 ((review_age >= -300 && review_age <= 900)) || die "review timestamp is outside the validity window"
+
+if test -n "$coverage_manifest"; then
+  PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 "$repo_root/scripts/two_site_qoder_authority.py" \
+    --root "$repo_root" --check-stage-evidence "$coverage_manifest" >"$tmp_dir/exact-stage-evidence-after.json"
+  cmp -s "$tmp_dir/exact-stage-evidence.json" "$tmp_dir/exact-stage-evidence-after.json" || die "Stage evidence changed during final review"
+fi
 
 receipt_tmp="$bundle_abs/.CODEX_FINAL_REVIEW.json.tmp"
 markdown_tmp="$bundle_abs/.CODEX_FINAL_REVIEW.md.tmp"

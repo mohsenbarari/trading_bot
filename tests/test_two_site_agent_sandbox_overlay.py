@@ -25,8 +25,8 @@ GATE_SOURCE = Path(__file__).resolve().parent.parent / GATE_PATH
 if not GATE_SOURCE.is_file():
     GATE_SOURCE = Path(GATE_PATH)
 with GATE_SOURCE.open("rb") as gate_stream:
-    REAL_GATE_BYTES = gate_stream.read(12001)
-assert len(REAL_GATE_BYTES) <= 12000
+    REAL_GATE_BYTES = gate_stream.read(16001)
+assert len(REAL_GATE_BYTES) <= 16000
 REAL_GATE_SIZE = len(REAL_GATE_BYTES)
 REAL_GATE_SHA = hashlib.sha256(REAL_GATE_BYTES).hexdigest()
 

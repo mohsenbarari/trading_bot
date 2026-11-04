@@ -385,7 +385,7 @@ class TestWiringIntegration(unittest.TestCase):
             repo = _make_repo()
             norm_repo = validate_accepted_repository(repo)
             status_file = state_root / "status.json"
-            status_file.write_text(json.dumps({"head": repo["head"], "state": "CONTINUE"}))
+            status_file.write_text(json.dumps({"head": repo["head"], "state": "RUNNING"}))
             status_file.chmod(0o600)
 
             record = {"new_repository": copy.deepcopy(norm_repo)}
@@ -408,6 +408,11 @@ class TestWiringIntegration(unittest.TestCase):
                 ok, reason = run_preflight(root)
                 self.assertTrue(ok)
                 self.assertEqual(reason, "READY")
+                # Completed CONTINUE boundaries require their genuine matching
+                # CPP; maintenance admission remains only a legacy running path.
+                status_file.write_text(json.dumps({"head": repo["head"], "state": "CONTINUE"}))
+                self.assertEqual(run_preflight(root), (False, "STALE_CHECKPOINT"))
+                status_file.write_text(json.dumps({"head": repo["head"], "state": "RUNNING"}))
 
             with mock.patch(
                 "scripts.two_site_autopilot_monitor_preflight._load_accepted_checkpoint",

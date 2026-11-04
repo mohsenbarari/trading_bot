@@ -10,6 +10,29 @@
 هر Stage همچنان در
 [`MASTER_PLAN.md`](MASTER_PLAN.md) و Task Card همان Stage قرار دارد.
 
+## مرجع اجرایی جاری — ۴ نوامبر ۲۰۲۶
+
+مالک پروژه تمام نقش‌های اجرایی پیشین Codex را به Qoder منتقل کرده است. برای
+اجرای جاری، نقش Coordinator و پذیرش نهایی متعلق به دو نشست مستقل Qoder است؛
+Gemini Worker و Gemini Reviewer نیز نشست‌های جدا دارند. مدل و استدلال هر نقش
+از `automation-models.json` خوانده می‌شود. ابزار قطعی Supervisor گیت‌ها و ادامهٔ
+کار را اجرا می‌کند و به اشتراک Codex یا بازبودن این گفتگو وابسته نیست.
+جزئیات مسیر فعال و حدود اثبات در [QODER_AUTOMATION.md](QODER_AUTOMATION.md) و
+[PROPOSAL_AUTOMATION.md](PROPOSAL_AUTOMATION.md) نگهداری می‌شود.
+
+نام‌های `CODEX_FINAL_REVIEWER`، `CODEX_*_REVIEW.json` و اسکریپت‌های
+`two_site_codex_*_review.sh` در قراردادهای قدیمی، شناسه‌های سازگارند؛ سه درگاه
+فعال Stage، governance و closeout اکنون Qoder را اجرا می‌کنند و فایل execution
+کنار receipt، provider/model/session واقعی را ثبت می‌کند. مجوز ارسالِ این مسیر
+`QODER_SOURCE_REVIEW.md` است؛ نصب یا احراز هویت Codex پیش‌نیاز آن نیست. receipt
+تاریخی به نام نویسندهٔ واقعی خود باقی می‌ماند و بازنویسی نمی‌شود.
+
+تمام اشاره‌های بعدی به اختیار نهایی Codex، در اجرای جاری به نقش مستقل Qoder
+با همان گیت‌های دقیق Source، Scope، آزمون، شواهد و Git ارجاع دارند. این تطبیق
+نقش، پذیرش خودکار Stage، مجوز خارجی، تغییر protected refs یا اقدام انسانی
+Web Writer ایجاد نمی‌کند. قرارداد typed gateway، takeover و bootstrap قدیمی
+در ادامه صرفاً سابقهٔ غیرفعال است؛ فعال‌سازی دوبارهٔ آن مسیر لازم یا مجاز نیست.
+
 ## اصل سراسری مهندسی — امن، آسان و دقیق
 
 مالک پروژه در ۲۰۲۶-۰۹-۰۵ این اصل را برای تمام پروژه تصریح کرد. هدف اتوماسیون کاهش

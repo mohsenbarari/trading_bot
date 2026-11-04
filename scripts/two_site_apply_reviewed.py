@@ -116,6 +116,7 @@ def apply_reviewed(root, task_path, worker, reviewer, sha):
                             worker, reviewer, sha, applied=True)
         _need(checked["state"] == "BYTES_VALID", "APPLY_POSTCHECK_FAILED")
         return {"state": "APPLIED_BYTES_VERIFIED", "changed_paths": applied, "git_committed": False,
+                "applied_review": "PASSED", "next_action": "stage_exact_paths_then_commit",
                 "approval_receipt": str(final_review.REVIEW_REL / (sha + ".json")), "review": checked}
     except BaseException as error:
         code = str(error) if type(error) is ApplyReviewedError else type(error).__name__

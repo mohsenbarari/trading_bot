@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "profile": "QODER_AUTHORITY_LIFECYCLE_V1",
+  "enabled": true,
+  "renewal_window_seconds": 86400,
+  "max_extension_seconds": 604800,
+  "max_control_bytes": 524288,
+  "planner_role": "coordinator",
+  "reviewer_role": "final_reviewer",
+  "next_stage_publication_enabled": true,
+  "next_stage_scope_authority": "DISTINCT_QODER_SDK_REVIEW_OF_CANONICAL_STAGE_AND_EXACT_SCOPE_PATCH",
+  "forbidden_scope_patterns": [
+    ".local/**",
+    ".aws/**",
+    ".ssh/**",
+    "production-data/**",
+    "data/**",
+    "uploads/**",
+    ".env",
+    ".env.*",
+    ".codex/**",
+    "scripts/two_site_qoder_authority.py",
+    "docs/refactor/two-server/templates/automation-authority-policy.json",
+    "docs/refactor/two-server/templates/automation-*.json",
+    "scripts/two_site_qoder_host.py",
+    "scripts/two_site_maintenance_lkg.py",
+    "scripts/two_site_maintenance_quota.py",
+    "scripts/two_site_qoder_business_reconcile.py",
+    "scripts/two_site_qoder_maintenance.py",
+    "scripts/two_site_codex_autopilot.py",
+    "scripts/two_site_coordinator_sandbox.py",
+    "scripts/two_site_review_bridge.py",
+    "scripts/two_site_codex_closeout_review.sh",
+    "scripts/two_site_codex_final_review.sh",
+    "scripts/two_site_autopilot_monitor.sh",
+    "scripts/two_site_autopilot_tmux.sh"
+  ],
+  "review_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "decision",
+      "findings",
+      "proposal_sha256",
+      "source_head"
+    ],
+    "properties": {
+      "decision": {
+        "type": "string",
+        "enum": [
+          "APPROVE",
+          "REQUEST_CHANGES"
+        ]
+      },
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "proposal_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      },
+      "source_head": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{40}$"
+      }
+    }
+  }
+}

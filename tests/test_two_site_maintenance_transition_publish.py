@@ -199,7 +199,11 @@ class TestMaintenanceTransitionPublish(unittest.TestCase):
         self.assertIs(publish_mod.publish_maintenance_transition_bytes_noreplace, trans_file_mod.publish_maintenance_transition_bytes_noreplace)
         self.assertIs(publish_mod.verify_declared_maintenance_git_chain, trans_git_mod.verify_declared_maintenance_git_chain)
         sig = inspect.signature(publish_maintenance_transition_locked)
-        self.assertEqual(len(sig.parameters), 3)
+        self.assertEqual(list(sig.parameters), ["root", "state_root", "maintenance_commits",
+            "qoder_execution_path", "business_execution_path"])
+        for name in ("qoder_execution_path", "business_execution_path"):
+            self.assertIs(sig.parameters[name].kind, inspect.Parameter.KEYWORD_ONLY)
+            self.assertIsNone(sig.parameters[name].default)
 
     def test_publish_maintenance_transition_locked_success_and_read_back(self) -> None:
         record, _, chk_repo, chk_sha, norm_repo, raw_repo, commits = self._make_sample_payload()

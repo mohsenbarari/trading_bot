@@ -343,3 +343,35 @@ def test_control_change_during_actual_loader_replay_is_rejected(registered, monk
     monkeypatch.setattr(assignment_scope, "load_expected_assignment_scope", changing)
     with pytest.raises(sandbox.CoordinatorSandboxError, match="SANDBOX_ASSIGNMENT_CONTROL_CHANGED"):
         command(registered)
+
+
+# The fixture uses real strict SDK replay and the real closeout --verify-commit path.
+from tests.test_two_site_qoder_authority import closed_stage
+
+
+def test_authority_review_mounts_source_git_and_only_two_controls_readonly(closed_stage, monkeypatch):
+    root, shared, context, _ = closed_stage
+    run = root / ".local/authority-review-run"; run.mkdir()
+    monkeypatch.setattr(sandbox, "_AUTH_ROOT", run / "no-host-auth")
+    with pytest.raises(sandbox.CoordinatorSandboxError):
+        sandbox.buildwrap_coordinator_command(root, run, ["/usr/bin/true"], environment={})
+    command = sandbox.buildwrap_coordinator_command(root, run, ["/usr/bin/true"], environment={
+        "TWO_SITE_ASSIGNMENT_ID": "pretend-active", "TWO_SITE_ASSIGNMENT_SHA256": "0" * 64},
+        authority_review_context=context)
+    assert bindings(command, "--bind") == [(str(run / "coordinator-qoder-state"), "/root/.qoder")]
+    readonly = bindings(command, "--ro-bind")
+    assert (str(root), str(root)) in readonly and (str(shared / ".git"), str(shared / ".git")) in readonly
+    assert (str(shared / ".local/two-site-refactor/worktrees.yaml"),) * 2 in readonly
+    expected_assignment = shared / ".local/two-site-refactor/assignments" / (context["assignment_id"] + ".md")
+    assert (str(expected_assignment), str(expected_assignment)) in readonly
+    assert all(source != str(shared) for source, _ in readonly)
+    env = {command[i + 1]: command[i + 2] for i, token in enumerate(command) if token == "--setenv"}
+    assert not any(key.startswith("TWO_SITE_ASSIGNMENT") for key in env)
+    assert ["--cap-drop", "ALL"] == command[command.index("--cap-drop"):command.index("--cap-drop") + 2]
+
+
+def test_authority_review_flag_cannot_bypass_genuine_context(workspace):
+    root, run, _ = workspace
+    with pytest.raises(sandbox.CoordinatorSandboxError, match="AUTHORITY_REVIEW_CONTEXT"):
+        sandbox.buildwrap_coordinator_command(root, run, ["/usr/bin/true"], environment={},
+            authority_review_context={"approved": True})

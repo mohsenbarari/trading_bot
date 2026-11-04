@@ -243,6 +243,16 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
                 if len(context) >= 32:
                     raise runner.ProposalError("model-policy source requires one context slot; maximum context_files is 32")
                 task = {**task, "context_files": [*context, policy_path]}
+        from scripts.two_site_qoder_author import AUTHOR_POLICY_REL, author_policy_enabled
+        if os.path.lexists(root / AUTHOR_POLICY_REL):
+            author_policy_enabled(root)  # Closed policy validation; disabled is still a real input.
+            context = task.get("context_files")
+            if not isinstance(context, list) or any(type(path) is not str for path in context):
+                raise runner.ProposalError("invalid context_files for author-policy source")
+            if AUTHOR_POLICY_REL.as_posix() not in context:
+                if len(context) >= 32:
+                    raise runner.ProposalError("author-policy source requires one context slot; maximum context_files is 32")
+                task = {**task, "context_files": [*context, AUTHOR_POLICY_REL.as_posix()]}
         if startup is not None and startup.route == "one_shot":
             try:
                 require_proposal_utf8_budget_profile(
@@ -364,14 +374,22 @@ def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
     head = runner.git(root, "rev-parse", "HEAD")
     worker_dir = autopilot.proposal_run_dir(root, worker)
     reviewer_dir = autopilot.proposal_run_dir(root, reviewer)
-    snapshot = runner.unique_json(runner.bounded_file_text(root, worker_dir / "task.json", 3 * runner.MAX_CONTEXT, "worker snapshot"))
+    _, snapshot = runner.read_task_snapshot(root, worker_dir / "task.json", "worker snapshot")
     if not applied:
         if runner.git(root, "status", "--porcelain=v1", "--untracked-files=all"):
             raise runner.ProposalError("pre-apply review requires clean Git")
-        task, sources = runner.load_task(root, task_path)
+        authorization = snapshot.get("maintenance_authorization")
+        task, sources = (runner.load_task(root, task_path) if authorization is None else
+            runner.load_task(root, task_path, maintenance_authorization=authorization))
     else:
         task, sources = snapshot["task"], snapshot["sources"]
-        current_task = runner.unique_json(runner.bounded_file_text(root, task_path, runner.MAX_CONTEXT, "task"))
+        authorization = snapshot.get("maintenance_authorization")
+        if authorization is not None:
+            verified_task, verified_sources = runner.load_task(root, task_path,
+                maintenance_authorization=authorization, evidence_only=True)
+            if verified_task != task or verified_sources != sources:
+                raise runner.ProposalError("maintenance Task/source evidence changed")
+        current_task = runner.unique_json(runner.bounded_file_text(root, task_path, 320000 if authorization is not None else runner.MAX_CONTEXT, "task"))
         if current_task != task:
             raise runner.ProposalError("task changed after review")
     binding = {"gemini_worker_run_id": worker, "gemini_reviewer_run_id": reviewer, "proposal_sha256": digest}
@@ -384,9 +402,7 @@ def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
         root, worker_dir, "worker", worker, head, task, sources, conversations,
         prior_worker=prior,
     )
-    reviewer_snapshot = runner.unique_json(runner.bounded_file_text(
-        root, reviewer_dir / "task.json", 3 * runner.MAX_CONTEXT, "reviewer snapshot"
-    ))
+    _, reviewer_snapshot = runner.read_task_snapshot(root, reviewer_dir / "task.json", "reviewer snapshot")
     reviewer_status = runner.unique_json(runner.bounded_file_text(
         root, reviewer_dir / "status.json", runner.MAX_CONTEXT, "reviewer status"
     ))
@@ -423,13 +439,15 @@ def review(root: Path, task_path: Path, worker: str, reviewer: str, digest: str,
         if dirty != set(changes):
             raise runner.ProposalError("dirty paths differ from exact proposal")
         for name, source in sources.items():
-            path = runner.relative_file(root, name)
+            path = root / name if authorization is not None else runner.relative_file(root, name)
+            if authorization is not None and (path.resolve(strict=False) != path or not path.is_relative_to(root)):
+                raise runner.ProposalError("maintenance source path alias")
             expected = changes[name]["content"] if name in changes else source["content"]
             if expected is None:
                 if os.path.lexists(path):
                     raise runner.ProposalError("unexpected new source file")
                 continue
-            actual = runner.bounded_file_text(root, path, runner.MAX_CONTEXT, "applied source")
+            actual = runner.bounded_file_text(root, path, 320000 if authorization is not None else runner.MAX_CONTEXT, "applied source")
             if actual != expected:
                 raise runner.ProposalError("applied/source bytes mismatch: " + name)
             if name in changes:

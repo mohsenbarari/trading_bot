@@ -11,6 +11,7 @@ from scripts.two_site_codex_autopilot import (
     validate_accepted_repository,
     validate_repository,
 )
+from scripts.two_site_qoder_maintenance import QoderMaintenanceError
 from scripts.two_site_root_maintenance_bridge import (
     RootMaintenanceBridgeError,
     read_root_maintenance_bridge_locked,
@@ -59,18 +60,21 @@ def require_reviewed_maintenance_transition_locked(
     if not isinstance(state_root, Path) or state_root != root / STATE_ROOT_REL:
         raise MaintenanceTransitionStartupError("state_root must match canonical expected path")
 
-    try:
-        record = read_root_maintenance_bridge_locked(root, state_root, repository)
-    except (KeyboardInterrupt, SystemExit):
-        raise
-    except RootMaintenanceBridgeError:
-        raise MaintenanceTransitionStartupError("root maintenance bridge verification failed") from None
-
+    record = None
+    if record is None:
+        try:
+            record = read_root_maintenance_bridge_locked(root, state_root, repository)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except RootMaintenanceBridgeError:
+            raise MaintenanceTransitionStartupError("root maintenance bridge verification failed") from None
     if record is None:
         try:
             record = read_maintenance_transition_locked(root, state_root)
         except (KeyboardInterrupt, SystemExit):
             raise
+        except QoderMaintenanceError:
+            raise MaintenanceTransitionStartupError("Qoder maintenance verification failed") from None
         except MainMaintenanceRouteError:
             raise MaintenanceTransitionStartupError("main maintenance verification failed") from None
         except Exception:
@@ -105,6 +109,10 @@ def require_reviewed_maintenance_transition_locked(
     elif type(record) is not dict:
         raise MaintenanceTransitionStartupError("invalid root maintenance bridge record")
 
+    _validate_transition_repository(root, state_root, repository, record)
+
+
+def _validate_transition_repository(root, state_root, repository, record):
     try:
         norm_current = validate_accepted_repository(repository)
     except (KeyboardInterrupt, SystemExit):
@@ -143,6 +151,33 @@ def require_reviewed_maintenance_transition_locked(
             raise MaintenanceTransitionStartupError("STOP check failed") from exc
 
 
+def authority_startup_locked(root: Path, state_root: Path, repository: object) -> bool:
+    """Only an independently verified explicit authority transition can admit it.
+
+    Caller holds AP. False preserves every historical startup route; known
+    authority errors never fall back. This function has no disk writes.
+    """
+    if not isinstance(root, Path) or not root.is_absolute() or state_root != root / STATE_ROOT_REL:
+        raise MaintenanceTransitionStartupError("invalid authority startup root")
+    policy = root / "docs/refactor/two-server/templates/automation-authority-policy.json"
+    if not os.path.lexists(policy):
+        return False
+    try:
+        from scripts.two_site_codex_autopilot import _load_accepted_checkpoint
+        from scripts.two_site_qoder_authority import validate_authority_transition_for_startup
+        record = validate_authority_transition_for_startup(root, _load_accepted_checkpoint(state_root), repository)
+        if record is None:
+            return False
+        if type(record) is not dict or type(record.get("new_repository")) is not dict:
+            raise ValueError("invalid authority transition")
+        _validate_transition_repository(root, state_root, repository, record)
+        return True
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except Exception as error:
+        raise MaintenanceTransitionStartupError("Qoder authority transition verification failed") from error
+
+
 WIRING_REPLACEMENTS: tuple[tuple[str, str, str], ...] = (
     (
         "scripts/two_site_codex_autopilot.py",
@@ -151,8 +186,6 @@ WIRING_REPLACEMENTS: tuple[tuple[str, str, str], ...] = (
             '            raise AutopilotError("prior epoch requires matching accepted checkpoint")'
         ),
         (
-            '        if root is None:\n'
-            '            raise AutopilotError("prior epoch requires matching accepted checkpoint")\n'
             '        if len(prior_epoch_names) > 1 or current_epoch_exists:\n'
             '            try:\n'
             '                from scripts.two_site_maintenance_transition_startup import (\n'
@@ -182,6 +215,8 @@ WIRING_REPLACEMENTS: tuple[tuple[str, str, str], ...] = (
             '            try:\n'
             '                checkpoint = _load_accepted_checkpoint(state_root)\n'
             '                if checkpoint is None or not _accepted_checkpoint_matches_repository(checkpoint, repo):\n'
+            '                    if state_val == "CONTINUE":\n'
+            '                        return False, "STALE_CHECKPOINT"\n'
             '                    from scripts.two_site_maintenance_transition_startup import (\n'
             '                        require_reviewed_maintenance_transition_locked,\n'
             '                    )\n'
@@ -204,6 +239,8 @@ WIRING_REPLACEMENTS: tuple[tuple[str, str, str], ...] = (
             '            try:\n'
             '                cp_recheck = _load_accepted_checkpoint(state_root)\n'
             '                if cp_recheck is None or not _accepted_checkpoint_matches_repository(cp_recheck, repo_recheck):\n'
+            '                    if state_val == "CONTINUE":\n'
+            '                        return False, "STALE_CHECKPOINT"\n'
             '                    from scripts.two_site_maintenance_transition_startup import (\n'
             '                        require_reviewed_maintenance_transition_locked,\n'
             '                    )\n'
@@ -217,5 +254,6 @@ WIRING_REPLACEMENTS: tuple[tuple[str, str, str], ...] = (
 __all__ = [
     "MaintenanceTransitionStartupError",
     "require_reviewed_maintenance_transition_locked",
+    "authority_startup_locked",
     "WIRING_REPLACEMENTS",
 ]

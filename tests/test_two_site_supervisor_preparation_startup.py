@@ -22,6 +22,47 @@ from scripts.two_site_codex_autopilot import (
 from scripts.two_site_preparation_contract import PreparationStartup
 
 
+@pytest.fixture(autouse=True)
+def _configured_qoder_controller(monkeypatch: pytest.MonkeyPatch):
+    """Keep supervisor fixtures on the current Qoder coordinator route."""
+    policy = {"schema_version": 1, "roles": {
+        "coordinator": {"provider": "qoder", "model": "fixture-qoder-controller", "reasoning_effort": "max"},
+        "final_reviewer": {"provider": "qoder", "model": "fixture-qoder-controller", "reasoning_effort": "max"},
+        "worker": {"provider": "antigravity", "model": "fixture-gemini", "reasoning_effort": "high"},
+        "reviewer": {"provider": "antigravity", "model": "fixture-gemini", "reasoning_effort": "high"}}}
+    identity = {"provider": "qoder", "path": "/fixture/qoder-controller", "version": "fixture",
+        "sha256": "4" * 64, "logged_in": True, "auto_update_enabled": False,
+        "model": "fixture-qoder-controller", "reasoning": "max", "runtime": {}}
+    monkeypatch.setattr("scripts.two_site_codex_autopilot.load_ai_config", lambda _root: policy)
+    monkeypatch.setattr("scripts.two_site_codex_autopilot.coordinator_identity",
+        lambda _root, _executable, _temporary: identity)
+    monkeypatch.setattr("scripts.two_site_codex_autopilot.coordinator_command",
+        lambda _root, executable, _run_dir, _prompt: [str(executable), "fixture-qoder"])
+    monkeypatch.setattr("scripts.two_site_codex_autopilot.buildwrap_coordinator_command",
+        lambda _root, _run_dir, command, **_kwargs: command)
+    monkeypatch.setattr(
+        "scripts.two_site_coordinator_broker_wait.finish_owned_request",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "scripts.two_site_codex_autopilot.finalize_qoder_output",
+        lambda run_dir, **_kwargs: json.loads((Path(run_dir) / "result.json").read_text()),
+    )
+    monkeypatch.setattr(
+        "scripts.two_site_qoder_review.validate_result_review",
+        lambda _root, _head, _result: None,
+    )
+    monkeypatch.setattr(
+        "scripts.two_site_codex_autopilot.git",
+        lambda _root, *args: (
+            "Fixture Qoder" if args == ("config", "--get", "user.name")
+            else "fixture-qoder@example.invalid"
+            if args == ("config", "--get", "user.email")
+            else pytest.fail(f"unexpected fixture git call: {args!r}")
+        ),
+    )
+
+
 def test_quota_prompt_excludes_ordinary_task_build_and_submit(tmp_path: Path) -> None:
     root, _codex, _state = _setup_workspace(tmp_path)
     template = Path(__file__).resolve().parents[1] / "docs/refactor/two-server/templates/CODEX_AUTOPILOT_PROMPT.md"
@@ -39,6 +80,31 @@ def test_quota_prompt_excludes_ordinary_task_build_and_submit(tmp_path: Path) ->
     assert "two_site_cycle_tools.py build --spec" in ordinary
     assert "two_site_provider_broker.py submit --task" in ordinary
     assert "ONLY_BEGIN" not in quota + ordinary
+
+
+def test_prompt_includes_bound_qoder_authority_feedback_when_state_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _controller, _state = _setup_workspace(tmp_path)
+    policy = root / "docs/refactor/two-server/templates/automation-authority-policy.json"
+    policy.write_text("{}\n")
+    checkpoint = root / ".local/two-site-refactor/autopilot/accepted_checkpoint.json"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_text("{}\n")
+    expected = {"kind": "QODER_AUTHORITY_FEEDBACK_V1", "state": "READY"}
+    observed: list[dict[str, object]] = []
+
+    def feedback(candidate_root: Path, before: dict[str, object]) -> dict[str, str]:
+        assert candidate_root == root
+        observed.append(before)
+        return expected
+
+    monkeypatch.setattr("scripts.two_site_qoder_authority.lifecycle_feedback", feedback)
+    before = _make_before()
+    prompt = prompt_for_cycle(root, 1, before)
+    context = json.loads(prompt.split("\n\nSUPERVISOR_CONTEXT_JSON:\n", 1)[1])
+    assert observed == [before]
+    assert context["authority_lifecycle_feedback"] == expected
 
 
 def test_quota_prompt_requires_exclusive_branch_and_no_callback(tmp_path: Path) -> None:

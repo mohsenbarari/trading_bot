@@ -61,6 +61,8 @@ else:
     proposal_dir = root / ".local/two-site-refactor/proposals"
     put(proposal_dir / worker / "result.json", worker_raw, raw=True)
     put(proposal_dir / worker / "task.json", snapshot)
+    put(proposal_dir / worker / "status.json", {"conversation_id": "synthetic-worker-session"})
+    put(proposal_dir / verifier / "status.json", {"conversation_id": "synthetic-reviewer-session"})
     put(proposal_dir / verifier / "result.json", reviewer_result)
     put(proposal_dir / verifier / "task.json", {**snapshot, "proposal": worker_raw.decode(), "test_evidence": native})
     binding = {"head": head, "proposal_sha256": sha,
@@ -104,6 +106,8 @@ def test_only_reviewed_unicode_bytes_are_applied_and_modes_preserved_no_git_comm
     approve(unit)
     result = apply.apply_reviewed(unit["root"], unit["task"], unit["worker"], unit["reviewer"], unit["sha"])
     assert result["state"] == "APPLIED_BYTES_VERIFIED" and result["git_committed"] is False
+    assert result["applied_review"] == "PASSED" and result["next_action"] == "stage_exact_paths_then_commit"
+    assert result["review"]["state"] == "BYTES_VALID"
     assert result["changed_paths"] == ["tests/test_old.py", "tests/test_new.py"]
     assert stat.S_IMODE((unit["root"] / "tests/test_old.py").stat().st_mode) == 0o750
     assert stat.S_IMODE((unit["root"] / "tests/test_new.py").stat().st_mode) == 0o644
@@ -192,3 +196,14 @@ def test_final_review_is_wrapped_outside_and_never_nested_inside(tmp_path, monke
     assert len(observed) == 1
     assert review._contained_command(tmp_path, tmp_path, command, {"TWO_SITE_COORDINATOR_SANDBOX": "1"}) == command
     assert len(observed) == 1
+
+
+@pytest.mark.parametrize("prior", ["worker", "reviewer"])
+def test_final_review_cannot_reuse_author_or_gemini_session(unit, prior):
+    root, task, worker, reviewer, sha = (unit[k] for k in ("root","task","worker","reviewer","sha"))
+    name = worker if prior == "worker" else reviewer
+    put(root / ".local/two-site-refactor/proposals" / name / "status.json",
+        {"conversation_id": "synthetic-final-session"})
+    with pytest.raises(review.QoderReviewError, match="SESSION_NOT_INDEPENDENT"):
+        review.review_proposal(root, task, worker, reviewer, sha, timeout=30)
+    assert not (root / review.REVIEW_REL / (sha + ".json")).exists()
