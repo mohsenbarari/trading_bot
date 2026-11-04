@@ -118,6 +118,10 @@ frontend/node_modules/
 !.cursor/skills/**
 !.cursor/rules/
 !.cursor/rules/**
+# Qoder: local agent state only. The generated repo wiki under
+# .qoder/repowiki/ is derived from this repository and can embed sensitive
+# paths, endpoints and configuration, so nothing here is ever tracked.
+.qoder/
 # IDE specific files
 mini_app_dist/
 mini_app_dist_staging/

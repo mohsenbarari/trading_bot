@@ -10,6 +10,7 @@
 .lego/
 .local/
 .pytest_cache/
+.qoder/
 
 # Docker
 Dockerfile
