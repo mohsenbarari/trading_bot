@@ -504,6 +504,7 @@ def capture_generation_process(
                 streams[stream].write(chunk)
                 total += len(chunk)
                 if stream is process.stdout:
+                    streams[stream].flush()  # Capture visibility, never completion authority.
                     policy.observe_stdout(chunk)
                 else:
                     policy.observe_stderr(chunk)

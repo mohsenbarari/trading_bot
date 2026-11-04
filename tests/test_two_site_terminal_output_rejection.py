@@ -268,26 +268,22 @@ def test_default_capture_is_unchanged_and_policy_selection_remains_gemini_only(t
         check.assert_not_called()
     assert (tmp_path / "stdout.bin").read_bytes() == b"ordinary default output\n"
     body = inspect.getsource(runner.run)
-    assert "if role_model in {WORKER_MODEL, MODEL}:" in body
+    assert "if input_framing is None:" in body
     assert "generation_policy = GenerationRecoveryPolicy(final_frame_check)" in body
     assert runner._provider_output_is_retryable(runner.ProposalError(MESSAGE)) is False
 
 
 def test_runner_publication_and_disposable_exit_stay_blocked_on_original_budget_error():
     # Reuse the existing offline CLI fixture, not provider/runtime acceptance.
-    from scripts import two_site_proposal_pipeline as pipeline
     from tests.test_two_site_proposal_runner import ProposalContracts
 
     fixture = ProposalContracts(methodName="test_valid_new_and_existing_file")
     fixture.setUp()
     try:
         fixture.task = dict(_task(), context_files=["source.py"])
-        # Use the unchanged real router's Gemini cohort, not a mocked model route.
-        fixture.task["task_id"] = next(
-            f"TERMINAL-BUDGET-{index}" for index in range(1000)
-            if pipeline.expected_role_model("worker", f"TERMINAL-BUDGET-{index}")
-            == runner.WORKER_MODEL
-        )
+        # Fresh roles use the real shared model policy, not historical routing.
+        fixture.task["task_id"] = "TERMINAL-BUDGET-CONFIGURED"
+        assert runner.configured_gemini_role(fixture.root, "worker")["model"] == runner.WORKER_MODEL
         fixture.save_task()
         _, fixture.sources = runner.load_task(fixture.root, fixture.task_path)
         policies, raised, disposed = [], [], []
@@ -328,7 +324,7 @@ def test_runner_publication_and_disposable_exit_stay_blocked_on_original_budget_
             with pytest.raises(runner.ProposalError) as caught:
                 fixture.invoke_fake_cli(run_id="terminal-budget-publication", raw_output=raw,
                                         capture_completion=completed)
-        assert len(raised) == 1 and caught.value is raised[0]
+        assert len(raised) == 1 and caught.value is raised[0], str(caught.value)
         assert type(caught.value) is runner.ProposalError and str(caught.value) == MESSAGE
         out = fixture.root / ".local/two-site-refactor/proposals/terminal-budget-publication"
         status = json.loads((out / "status.json").read_text())
@@ -440,3 +436,171 @@ def _assert_actual797_compatibility():
         with pytest.raises(AssertionError, match="unknown or partial"):
             _fixed_797_pair(right + b"\n", rejection=rejection, inverse=True)
     assert before_namespace == {name: id(value) for name, value in vars(runner).items()}
+
+
+# Real Python children below are synthetic failure evidence, never provider proof.
+OUTPUT_LIMIT_MESSAGE = "MODEL_OUTPUT_TRUNCATED: rescope to a smaller task"
+
+
+def _output_limit_events(role="worker"):
+    declared = runner.schema(role, _task(), _sources(), original_sources=_sources())
+    return [
+        {"event": "init", "conversation_id": CID,
+         "init": {"model": runner.WORKER_MODEL, "json_schema": declared,
+                  "tools": ["finish", "read_file"]}},
+        {"event": "step_update", "step_update": {
+            "conversation_id": CID, "step_index": 0,
+            "step_type": "user_input", "state": "DONE"}},
+        {"event": "step_update", "step_update": {
+            "conversation_id": CID, "step_index": 1,
+            "step_type": "agent_response", "state": "DONE"}},
+        {"event": "result", "result": {
+            "conversation_id": CID, "status": "ERROR", "num_turns": 1,
+            "response": "", "json_schema": json.loads(json.dumps(declared)),
+            "error": "Your previous response was cut off because it exceeded the output token limit"}},
+    ]
+
+
+def _encode_output_limit(events):
+    return b"".join(json.dumps(event).encode() + b"\n" for event in events)
+
+
+@pytest.mark.parametrize("role", ["worker", "verifier"])
+def test_bound_output_limit_raises_only_existing_nonretryable_error(role):
+    raw = _encode_output_limit(_output_limit_events(role))
+    with pytest.raises(runner.ProposalError, match="^MODEL_OUTPUT_TRUNCATED:") as caught:
+        _check(raw, role=role)
+    assert type(caught.value) is runner.ProposalError
+    assert str(caught.value) == OUTPUT_LIMIT_MESSAGE
+    assert not hasattr(caught.value, "quota_evidence")
+
+
+@pytest.mark.parametrize("fault", [
+    "init-cid", "terminal-cid", "nested-cid", "outer-cid", "model",
+    "init-schema", "terminal-schema", "schema-type-alias", "missing-schema",
+    "duplicate-init", "duplicate-terminal", "late-event", "malformed-step",
+    "tool", "top-tool", "subagent", "denial", "terminal-denial", "bool-turn", "wrong-turn",
+    "quota", "auth", "unknown", "explicit-error", "nonobject", "nonfinite",
+])
+def test_unqualified_error_does_not_gain_early_rejection(fault):
+    events = _output_limit_events()
+    if fault in {"init-cid", "outer-cid"}:
+        events[0 if fault == "init-cid" else 1]["conversation_id"] = "foreign"
+    elif fault == "terminal-cid":
+        events[-1]["result"]["conversation_id"] = "foreign"
+    elif fault == "nested-cid":
+        events[1]["step_update"]["conversation_id"] = "foreign"
+    elif fault == "model":
+        events[0]["init"]["model"] = "wrong-model"
+    elif fault in {"init-schema", "terminal-schema"}:
+        obj = events[0]["init"] if fault == "init-schema" else events[-1]["result"]
+        obj["json_schema"] = {"type": "string"}
+    elif fault == "schema-type-alias":
+        events[-1]["result"]["json_schema"]["additionalProperties"] = 0
+    elif fault == "missing-schema":
+        del events[-1]["result"]["json_schema"]
+    elif fault == "duplicate-init":
+        events.insert(1, events[0])
+    elif fault == "duplicate-terminal":
+        events.append(events[-1])
+    elif fault == "late-event":
+        events.append({"event": "agent_response"})
+    elif fault == "malformed-step":
+        events[1]["step_update"] = "malformed"
+    elif fault == "tool":
+        events[1]["step_update"].update(step_type="tool", tool_name="finish")
+    elif fault == "top-tool":
+        events[1]["tool_info"] = {}
+    elif fault == "subagent":
+        events[1]["step_update"]["subagent_info"] = {}
+    elif fault == "denial":
+        events[1]["denied_actions"] = ["read"]
+    elif fault == "terminal-denial":
+        events[-1]["result"]["denied_actions"] = ["read"]
+    elif fault == "bool-turn":
+        events[-1]["result"]["num_turns"] = True
+    elif fault == "wrong-turn":
+        events[-1]["result"]["num_turns"] = 2
+    elif fault in {"quota", "auth", "unknown"}:
+        events[-1]["result"]["error"] = {
+            "quota": "quota exhausted; output token limit exceeded",
+            "auth": "authentication failed; output token limit exceeded",
+            "unknown": "unrecognized backend error",
+        }[fault]
+    elif fault == "explicit-error":
+        events.insert(1, {"event": "error"})
+    elif fault == "nonobject":
+        events.insert(1, [])
+    elif fault == "nonfinite":
+        events[1]["malformed_number"] = float("nan")
+    assert _check(_encode_output_limit(events)) is False
+
+
+@pytest.mark.parametrize("fault", ["no-lf", "truncated", "duplicate-key", "unicode", "stderr"])
+def test_malformed_or_stderr_error_keeps_old_path(fault):
+    raw = _encode_output_limit(_output_limit_events())
+    stderr = b""
+    if fault == "no-lf":
+        raw = raw[:-1]
+    elif fault == "truncated":
+        raw = raw[:-9]
+    elif fault == "duplicate-key":
+        raw = raw.replace(b'"status": "ERROR"', b'"status": "ERROR", "status": "ERROR"')
+    elif fault == "unicode":
+        raw += b"\xff\n"
+    else:
+        stderr = b"existing stderr evidence\n"
+    assert _check(raw, stderr) is False
+
+
+def test_real_lingering_output_limit_is_blocked_and_owned_group_cleaned(tmp_path):
+    raw = _encode_output_limit(_output_limit_events())
+    policy = completion.GenerationRecoveryPolicy(_check)
+    with _child(tmp_path, raw) as process:
+        started = time.monotonic()
+        with pytest.raises(runner.ProposalError) as caught:
+            _capture(process, tmp_path, policy)
+        assert time.monotonic() - started < 5.0
+        assert type(caught.value) is runner.ProposalError
+        assert str(caught.value) == OUTPUT_LIMIT_MESSAGE
+        assert process.returncode == -signal.SIGKILL
+        _assert_rejected_cleanup(process, tmp_path, policy)
+        before = policy.failure_facts["before_cleanup"]
+        assert before["terminal_read_observed"] is True
+        assert before["input_written_bytes"] == len(INPUT)
+        assert before["input_writer_close_observed"] is True
+        assert policy.failure_facts["after_cleanup"]["owned_group_absent"] is True
+        assert before["stdout_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert (tmp_path / "stdout.bin").read_bytes() == raw
+    assert (tmp_path / "stderr.bin").read_bytes() == b""
+
+
+def test_error_before_full_input_cannot_use_qualified_shortcut(tmp_path):
+    raw = _encode_output_limit(_output_limit_events())
+    calls = []
+    def observe(stdout, stderr):
+        calls.append(True)
+        return _check(stdout, stderr)
+    policy = completion.GenerationRecoveryPolicy(observe)
+    with _child(tmp_path, raw, read_input=False, hang=False) as process:
+        with pytest.raises(runner.ProposalError, match="input was not completely written"):
+            _capture(process, tmp_path, policy, data=b"x" * (2 * 1024 * 1024))
+        assert calls == []
+        assert policy.failure_facts["before_cleanup"]["input_writer_close_observed"] is False
+        assert policy.failure_facts["before_cleanup"]["terminal_read_observed"] is False
+    assert (tmp_path / "stdout.bin").read_bytes() == raw
+
+
+def test_stdout_is_visible_before_observer_and_process_exit(tmp_path):
+    seen = []
+    def observe(stdout, stderr):
+        assert (tmp_path / "stdout.bin").read_bytes() == stdout
+        seen.append(True)
+        return _check(stdout, stderr)
+    raw = _encode_output_limit(_output_limit_events())
+    policy = completion.GenerationRecoveryPolicy(observe)
+    with _child(tmp_path, raw) as process:
+        with pytest.raises(runner.ProposalError, match="^MODEL_OUTPUT_TRUNCATED:"):
+            _capture(process, tmp_path, policy)
+        _assert_rejected_cleanup(process, tmp_path, policy)
+    assert seen == [True]

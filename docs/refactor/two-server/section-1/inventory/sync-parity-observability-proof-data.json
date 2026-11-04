@@ -7,13 +7,13 @@
   "scenario_key": "root-materialized-accepted-sync-proof-data-before-gemini-witness",
   "source_head": "34c7dcf72c8a6aacb5fb0ba41b0d14110c73799f",
   "canonical_gap_reference": "docs/refactor/two-server/section-1/inventory/scenario-records.json#P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
-  "packet_role": "ROOT_MATERIALIZED_PUBLIC_DATA_PENDING_GEMINI_WITNESS",
+  "packet_role": "ROOT_MATERIALIZED_PUBLIC_DATA_REQUIRING_INDEPENDENT_WITNESS",
   "root_materialization": {
     "authorship": "ROOT_MECHANICAL_PUBLIC_DATA",
     "source_base": "34c7dcf72c8a6aacb5fb0ba41b0d14110c73799f",
     "failed_task_id": "p1-00b-sync-parity-proof-capture-20261103-a001",
     "failed_task_accepted": false,
-    "fresh_gemini_witness_required": true,
+    "fresh_independently_reviewed_witness_required": true,
     "canonical_acceptance_claimed": false
   },
   "at_capture": {
@@ -142,7 +142,7 @@
     "raw_registration_delta_by_A": 0,
     "new_canonical_seed_credit_by_A": 0,
     "conditional_B_target": {
-      "requires": "Fresh actual acceptance of a Gemini witness for this distinct Root-materialized public DATA, then a fresh independently accepted canonical-integration B",
+      "requires": "One Owner-authorized manual Codex author, a distinct independent reviewer and real hermetic native acceptance of this exact DATA witness, followed by a NORMAL fresh Gemini canonical-integration B with every existing gate; no acceptance of either failed Gemini witness attempt is claimed.",
       "manifest_mapping_key": "sync_parity_observability_downstream_failure_registration_path",
       "desired_counts": {
         "baseline_evidenced_seed_count": 135,
@@ -181,7 +181,7 @@
     "resolution": "The reviewed projection preserves accepted historical byte/SHA proofs and permits a later verified400/65 live state. This packet captures398/67 only; it performs no canonical promotion and needs a fresh B. No further owner decision is pending."
   },
   "accounting": {
-    "proof_capture_status_on_exact_gemini_witness_acceptance": "COMPLETE_DATA_CAPTURE_ONLY",
+    "proof_capture_status_on_exact_independent_witness_acceptance": "COMPLETE_DATA_CAPTURE_ONLY",
     "captured_previously_accepted_behavior_units": 1,
     "captured_previously_accepted_scenarios": 2,
     "canonical_registration_status_at_capture": "PENDING_FRESH_B",

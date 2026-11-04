@@ -1,20 +1,17 @@
 # Automation Efficiency
 
-## Current authority — 2026-11-03
-- Owner replaced Codex with Qoder. Correct delivery, fewer errors/stops and continuation outrank token savings; use the smallest sufficient design and do not reopen AE cohorts as prerequisites.
-- `docs/refactor/two-server/templates/automation-models.json` owns fresh role models/efforts: Qoder coordinates and independently accepts; Gemini authors and separately reviews. CLI identity is local runtime configuration.
-- Current roles: Qwen3.8-Max/xhigh and Argon High/high. Models freeze per unit; historical runtime JSON preserves old provenance.
-- No user Stage approval. Human Web Writer, protected refs, production/external-action scope, exact bytes and independent review remain mandatory.
+## Authority — 2026-11-04
+- Qoder coordinates and independently accepts; Gemini authors and reviews in separate sessions. automation-models.json owns models/efforts, frozen per unit: Qwen3.8-Max/xhigh and Argon High/high. CLI identity is separate runtime configuration.
+- Correct delivery and continuation outrank token savings. Use the smallest sufficient design; do not reopen AE cohorts. User Stage approval is removed; human Web Writer, protected refs, production boundaries and serial Git remain.
 
-## Runtime
-- A final CLI timeout can wrap an earlier real output-limit ERROR: inspect the bounded raw terminal stream before classifying transient failure. If fixed DATA repeatedly exhausts thinking without code, materialize reviewed public DATA separately with explicit Root provenance and zero acceptance credit; send Gemini a fresh witness-only task through every normal gate. Preserve failed reservations and attempt budgets.
-- Outside Broker owns native/network-isolated tests and requires final-Qoder-review policy. Reuse native PASS only for identical source/task/candidate/selectors/environment; no nested or duplicate execution.
-- Contained Coordinator must load the actual Assignment through two exact public read-only control mounts, never the parent checkout or whole `.local` tree.
-- Only proven transient late Reviewer failures reuse Worker/native/reservation in finite persisted fresh-session batches. Semantic/quota failures, Source drift, accepted work or uncertain effects never permit blind replay or counter reset.
-- Qoder REQUEST_CHANGES returns to Gemini correction. Same-SHA final-review recovery preserves the original chain. Coordinator JSON has a closed system schema and at most one tool-free metadata repair; no semantic/provenance repair or Worker replay.
+## Execution
+- Outside Broker owns isolated native tests and required Qoder final review. Reuse PASS only for identical source/task/candidate/selectors/environment; never duplicate native execution.
+- Coordinator gets exactly two public Assignment controls read-only, never the parent checkout or private tree.
+- Only proven late Reviewer transients permit finite persisted fresh-session recovery. Semantic/quota failures, Source drift, uncertain effects or accepted work forbid blind replay, reservation release and counter reset.
+- Coordinator JSON permits one tool-free metadata repair, never semantic acceptance repair. Genuine matching committed CONTINUE checkpoints alone permit ordinary restart; retain every failed attempt.
+- A later CLI timeout can wrap a real output-limit ERROR. Strict identity/schema/tool-free qualification permits failure cleanup, never partial acceptance. Three proof-metadata tasks exhausted 65533 thinking tokens with zero code; smaller inputs alone did not fix it. Use the documented temporary manual author/distinct-reviewer/hermetic-test route for this witness, with honest provenance and no fabricated Gemini chain/checkpoint; then resume normal Gemini work.
 
-## Evidence and progress
-- Historical witnesses first validate live accounting, then reconstruct their accepted epoch from original SHA-pinned inert fixture DATA. New `records.seed_ids` require matching live counts; PENDING data belongs outside canonical records. Never execute archived blobs or rewrite old receipts/ledger.
-- Actual scenarios and Stage blockers closed measure progress; commits, test counts or bookkeeping do not. Preserve historical batch and High/origin gates.
-- Keep accepted checkpoints and failed attempts. Model migration is neither invented work acceptance nor savings. Qoder zero-token placeholders are UNKNOWN; Credits are separate. No paid baseline replay or telemetry-collection gate.
-- Qualify activation with genuine units. See `docs/refactor/two-server/QODER_AUTOMATION.md`.
+## Evidence
+- Historical witnesses validate live accounting then project original SHA-pinned inert DATA; never execute archived blobs. New canonical seed records need matching physical counts; PENDING data stays outside canonical records.
+- Measure actual scenarios and Stage blockers, preserving High/origin gates. Maintenance, commits and test counts confer no business credit.
+- Qoder zero-token placeholders are UNKNOWN; Credits are separate. No invented savings or paid baseline replay. See QODER_AUTOMATION.md and PROPOSAL_AUTOMATION.md.

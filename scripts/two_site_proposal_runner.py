@@ -3117,14 +3117,78 @@ def _validate_final_generation_frame(
     )
 
 
+
+def _raise_bound_output_limit_error(
+    stdout: bytes, task: dict, sources: dict, role: str,
+    force_full_paths: tuple[str, ...], expected_model: str, expected_cid: str,
+    *, original_sources: dict | None = None,
+) -> None:
+    """Reject one fully bound real ERROR; never make it recovery eligible."""
+    try:
+        raw = stdout.decode("utf-8")
+        if not raw.endswith("\n"):
+            return
+        events = [unique_json(line) for line in raw.splitlines() if line.strip()]
+        json.dumps(events, allow_nan=False)  # A malformed SDK number grants no shortcut.
+        if not events or any(type(event) is not dict for event in events):
+            return
+        initials = [event for event in events if event.get("event") == "init"]
+        terminals = [event for event in events if event.get("event") == "result"]
+        if (len(initials) != 1 or events[0] is not initials[0]
+                or len(terminals) != 1 or events[-1] is not terminals[0]):
+            return
+        init, terminal = initials[0], terminals[0]
+        envelope = terminal.get("result")
+        if (type(init.get("init")) is not dict
+                or init.get("conversation_id") != expected_cid
+                or init["init"].get("model") != expected_model
+                or type(envelope) is not dict or envelope.get("status") != "ERROR"
+                or envelope.get("conversation_id") != expected_cid
+                or type(envelope.get("num_turns")) is not int or envelope["num_turns"] != 1):
+            return
+        expected = schema(role, task, sources, force_full_paths,
+                          original_sources=original_sources)
+        if any(not _exact_equal(obj.get("json_schema"), expected)
+               for obj in (init["init"], envelope)):
+            return
+        for event in events:
+            kind = event.get("event")
+            if kind in {"init", "result", "step_update"} and type(event.get(kind)) is not dict:
+                return
+            if kind in {"error", "denied", "permission_denied"}:
+                return
+            for obj in (event, event.get("step_update"), envelope if event is terminal else None):
+                if type(obj) is not dict:
+                    continue
+                if (("conversation_id" in obj and obj["conversation_id"] != expected_cid)
+                        or ("model" in obj and obj["model"] != expected_model)
+                        or obj.get("denied_actions")
+                        or any(k in obj for k in ("tool_name", "tool_info", "subagent_info"))
+                        or obj.get("step_type") in {"tool", "subagent"}):
+                    return
+    except (ProposalError, UnicodeError, TypeError, ValueError):
+        return
+    try:
+        _parse_stream(raw, task, sources, role, force_full_paths, expected_model,
+                      original_sources=original_sources)
+    except ProposalError as error:
+        if (type(error) is ProposalError
+                and str(error) == "MODEL_OUTPUT_TRUNCATED: rescope to a smaller task"):
+            raise
+
+
 def _generation_final_frame_check(
     stdout: bytes, stderr: bytes, task: dict, sources: dict, role: str,
     force_full_paths: tuple[str, ...], expected_model: str, expected_cid: str,
     *, original_sources: dict | None = None,
 ) -> bool:
-    """Keep recovery closed; promptly reject only the owned worker byte gate."""
+    """Keep recovery closed; promptly reject bound output limits or byte gates."""
     if stderr:
         return False
+    _raise_bound_output_limit_error(
+        stdout, task, sources, role, force_full_paths, expected_model, expected_cid,
+        original_sources=original_sources,
+    )
     try:
         _validate_final_generation_frame(
             stdout.decode("utf-8"), task, sources, role, force_full_paths,
