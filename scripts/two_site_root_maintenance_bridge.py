@@ -231,10 +231,14 @@ def _validate_external_main_transition(record, prior, current):
     _require(_hex(old, 40) and _hex(new, 40) and old != new)
     before, after = prior['protected_refs'], current['protected_refs']
     refs = {'refs/heads/main', 'refs/remotes/origin/main', 'refs/heads/candidate/wa-ir-standby-v1'}
+    origin = 'refs/remotes/origin/main'
     _require(type(before) is dict and type(after) is dict and set(before) == set(after) == refs
              and all(_hex(value, 40) for value in (*before.values(), *after.values()))
              and before['refs/heads/main'] == old and after['refs/heads/main'] == new
-             and all(before[ref] == after[ref] for ref in refs if ref != 'refs/heads/main'))
+             and before['refs/heads/candidate/wa-ir-standby-v1']
+                 == after['refs/heads/candidate/wa-ir-standby-v1']
+             and (before[origin] == after[origin]
+                  or (before[origin] == old and after[origin] == new)))
     rows = transition['commits']
     _require(type(rows) is list and 1 <= len(rows) <= 32)
     cursor, heads = old, {old}
@@ -257,6 +261,8 @@ def _verify_external_main_git(root, record):
             (['cat-file', '-t', old], b'commit\n', 64),
             (['cat-file', '-t', new], b'commit\n', 64),
             (['rev-parse', '--verify', 'refs/heads/main'], (new + '\n').encode('ascii'), 64),
+            (['rev-parse', '--verify', 'refs/remotes/origin/main'],
+             (record['repository']['protected_refs']['refs/remotes/origin/main'] + '\n').encode('ascii'), 64),
             (['rev-list', '--reverse', '--parents', old + '..' + new], expected, 4096),
             (['merge-base', '--is-ancestor', old, new], b'', 64),
             (['merge-base', '--all', head, new], (old + '\n').encode('ascii'), 64),

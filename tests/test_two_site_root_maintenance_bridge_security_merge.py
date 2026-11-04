@@ -226,7 +226,8 @@ def test_v3_shared_startup_and_monitor_never_fallback(lab,monkeypatch,fault):
         ap.validate_rescope_epoch_startup(lab['state'],lab['repository'],root=lab['root'])
     from scripts import two_site_autopilot_monitor_preflight as monitor
     monkeypatch.setattr(monitor,'validate_repository',lab['repository_oracle'])
-    helpers.private(lab['state']/'status.json',ap.serialize_json(dict(head=lab['marker']['head'],state='CONTINUE')))
+    helpers.private(lab['state']/'status.json',ap.serialize_json(
+        dict(head=lab['marker']['head'],state='RETRYABLE_FAILURE')))
     assert monitor.run_preflight(lab['root'])==(True,'READY')
     if fault=='posthold':_publish(lab,lab['v3_record'],post_edit=lambda p:p.update(broker_posthold_completed=False))
     elif fault=='wrong_marker':_publish(lab,lab['v3_record'],marker_edit=lambda m:m.update(security_commit='0'*40))

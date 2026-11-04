@@ -26,6 +26,7 @@ V2_MARKER = b'ROOT_MAINTENANCE_BRIDGE_EXTERNAL_MAIN_V2: '
 V2_KIND = 'ROOT_MAINTENANCE_BRIDGE_EXTERNAL_MAIN_V2'
 V2_POST = 'ROOT_CURRENT_SOURCE_MAINTENANCE_HANDOFF_NORMAL_POSTHOLD_V2'
 MAIN = 'refs/heads/main'
+ORIGIN = 'refs/remotes/origin/main'
 ERROR = '^root maintenance bridge verification failed$'
 
 
@@ -144,6 +145,16 @@ def test_real_v2_main_ff_detached_result_and_no_read_side_effects(lab):
     result['external_main_transition']['commits'].clear()
     result['new_repository']['control_blobs'].clear()
     assert helpers.run(lab) == expected and helpers.custody(lab) == before
+
+
+def test_real_v2_accepts_same_fast_forward_for_main_and_origin(lab):
+    old=lab['external']['old_main'];new=lab['external']['new_main']
+    helpers.git(lab['root'],'update-ref',ORIGIN,new,old)
+    record=copy.deepcopy(lab['v2_record'])
+    record['repository']['protected_refs'][ORIGIN]=new
+    _publish(lab,record)
+    assert helpers.run(lab)['new_repository']['protected_refs']=={
+        **lab['prior']['protected_refs'],MAIN:new,ORIGIN:new}
 
 
 def test_full_v1_reader_still_rejects_real_external_main_ref_drift(lab):
@@ -348,7 +359,7 @@ def test_v2_real_startup_autopilot_monitor_routes_never_legacy_fallback(lab, mon
     from scripts import two_site_autopilot_monitor_preflight as monitor
     monkeypatch.setattr(monitor, 'validate_repository', lab['repository_oracle'])
     helpers.private(lab['state'] / 'status.json',
-        ap.serialize_json(dict(head=lab['record']['repository']['head'], state='CONTINUE')))
+        ap.serialize_json(dict(head=lab['record']['repository']['head'], state='RETRYABLE_FAILURE')))
     assert monitor.run_preflight(lab['root']) == (True, 'READY')
     if fault == 'posthold':
         _publish(lab, lab['v2_record'], post_edit=lambda post: post.update(broker_posthold_completed=False))
