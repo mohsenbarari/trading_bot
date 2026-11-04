@@ -41,6 +41,11 @@ if not hasattr(CYCLE_RUN_RE, "match"):
 RUNS_DIRNAME: str = "runs"
 MAX_RUNS_ENTRIES: int = 512
 MAX_RUN_CHILD_ENTRIES: int = 128
+OPAQUE_RUN_DIRECTORIES: frozenset[str] = frozenset({
+    "coordinator-qoder-state",
+    "output-contract-repair",
+    "root-packet-cap-correction",
+})
 
 PENDING_EXACT_NAMES: frozenset[str] = frozenset({
     "quota-wait.json",
@@ -67,6 +72,7 @@ __all__ = [
     "MAX_RUN_CHILD_ENTRIES",
     "PENDING_EXACT_NAMES",
     "PendingColdAdoptionError",
+    "OPAQUE_RUN_DIRECTORIES",
     "RUNS_DIRNAME",
     "assert_no_pending_cold_adoption_artifacts_locked",
 ]
@@ -320,6 +326,7 @@ def assert_no_pending_cold_adoption_artifacts_locked(state_root: Path) -> None:
                         "Run child entry count exceeds maximum",
                     )
 
+                    opaque_directories: list[tuple[Path, tuple[int, ...]]] = []
                     for child_name in child_entries:
                         if _is_pending_artifact_name(child_name):
                             raise PendingColdAdoptionError("Pending cold adoption artifact detected")
@@ -340,7 +347,27 @@ def assert_no_pending_cold_adoption_artifacts_locked(state_root: Path) -> None:
                         if stat.S_ISLNK(st_child.st_mode):
                             raise PendingColdAdoptionError("Run child must not be a symlink")
                         if stat.S_ISDIR(st_child.st_mode):
-                            raise PendingColdAdoptionError("Run child must not be a nested directory")
+                            # Qoder and its bounded repair/correction routes need
+                            # private per-run directories. They are opaque runtime
+                            # state, never cold-adoption records. Admit only this
+                            # closed name set and bind every directory identity
+                            # across the scan; all other nesting remains closed.
+                            if child_name not in OPAQUE_RUN_DIRECTORIES:
+                                raise PendingColdAdoptionError("Run child must not be a nested directory")
+                            if (st_child.st_uid != os.geteuid()
+                                    or (st_child.st_mode & 0o777) != 0o700
+                                    or (st_child.st_mode & 0o7000) != 0):
+                                raise PendingColdAdoptionError("Opaque run directory metadata invalid")
+                            try:
+                                real_child = child_path.resolve(strict=True)
+                            except OSError:
+                                raise PendingColdAdoptionError(
+                                    "Failed to resolve opaque run directory"
+                                ) from None
+                            if real_child != child_path:
+                                raise PendingColdAdoptionError("Opaque run directory contains symlinks")
+                            opaque_directories.append((child_path, _stat_fingerprint(st_child)))
+                            continue
                         if not stat.S_ISREG(st_child.st_mode):
                             raise PendingColdAdoptionError("Run child must be a regular file")
                         if st_child.st_uid != os.geteuid():
@@ -349,6 +376,18 @@ def assert_no_pending_cold_adoption_artifacts_locked(state_root: Path) -> None:
                             raise PendingColdAdoptionError("Run child must not have special mode bits")
                         if st_child.st_nlink != 1:
                             raise PendingColdAdoptionError("Run child must be single-link file")
+
+                    for opaque_path, opaque_fingerprint in opaque_directories:
+                        try:
+                            opaque_after = os.lstat(opaque_path)
+                        except OSError:
+                            raise PendingColdAdoptionError(
+                                "Failed to recheck opaque run directory"
+                            ) from None
+                        if _stat_fingerprint(opaque_after) != opaque_fingerprint:
+                            raise PendingColdAdoptionError(
+                                "Opaque run directory metadata changed during scan"
+                            )
 
                     st_run_after = os.fstat(run_fd)
                     if _stat_fingerprint(st_run_after) != _stat_fingerprint(st_run_before):

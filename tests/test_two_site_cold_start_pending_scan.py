@@ -216,6 +216,29 @@ class TestTwoSiteColdStartPendingScan(unittest.TestCase):
             assert_no_pending_cold_adoption_artifacts_locked(self.state_root)
         setuid_child.unlink()
 
+    def test_private_qoder_state_is_admitted_with_strict_metadata(self) -> None:
+        run_dir = self._create_historical_run(
+            "cycle-0008-20260917T010203Z-123456", 0o700
+        )
+        qoder_state = run_dir / "coordinator-qoder-state"
+        qoder_state.mkdir(mode=0o700)
+        (qoder_state / "provider-internal").mkdir(mode=0o700)
+        self.assertIsNone(assert_no_pending_cold_adoption_artifacts_locked(self.state_root))
+
+        os.chmod(qoder_state, 0o755)
+        with self.assertRaises(PendingColdAdoptionError):
+            assert_no_pending_cold_adoption_artifacts_locked(self.state_root)
+
+    def test_only_closed_runtime_directory_names_are_admitted(self) -> None:
+        run_dir = self._create_historical_run(
+            "cycle-0008-20260917T010204Z-123456", 0o700
+        )
+        for name in sorted(pending_scan_mod.OPAQUE_RUN_DIRECTORIES):
+            nested = run_dir / name
+            nested.mkdir(mode=0o700)
+            self.assertIsNone(assert_no_pending_cold_adoption_artifacts_locked(self.state_root))
+            nested.rmdir()
+
     def test_bounded_scandir_caps_and_early_abort(self) -> None:
         self._create_historical_run(VALID_RUN_1, 0o700)
 

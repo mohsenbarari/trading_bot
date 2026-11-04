@@ -30,7 +30,8 @@ ERROR = '^root maintenance bridge verification failed$'
 
 
 from tests.test_two_site_root_maintenance_bridge_external_main import (
-    MAIN, ERROR, lab, _external_chain, _publish, _record, _pure, _assert_live_proof_witness,
+    MAIN, ORIGIN, ERROR, lab, _external_chain, _publish, _record, _pure,
+    _assert_live_proof_witness,
 )
 
 
@@ -46,9 +47,8 @@ def test_same_actual_witness_detects_used_proof_omission_then_restores(lab, monk
     _assert_live_proof_witness(lab)
 
 
-@pytest.mark.parametrize('ref', [
-    'refs/heads/candidate/wa-ir-standby-v1', 'refs/remotes/origin/main'])
-def test_only_main_may_differ_from_checkpoint_real_other_refs_still_block(lab, ref):
+@pytest.mark.parametrize('ref', ['refs/heads/candidate/wa-ir-standby-v1'])
+def test_unrelated_protected_refs_still_block(lab, ref):
     helpers.git(lab['root'], 'update-ref', ref, lab['external']['new_main'])
     record = copy.deepcopy(lab['v2_record'])
     record['repository']['protected_refs'][ref] = lab['external']['new_main']
@@ -125,6 +125,8 @@ def test_actual_main_overlap_reaches_and_fails_only_common_base_gate(lab, monkey
         (['cat-file', '-t', old], b'commit\n'),
         (['cat-file', '-t', new], b'commit\n'),
         (['rev-parse', '--verify', MAIN], (new + '\n').encode()),
+        (['rev-parse', '--verify', ORIGIN],
+         (record['repository']['protected_refs'][ORIGIN] + '\n').encode()),
         (['rev-list', '--reverse', '--parents', old + '..' + new], rows),
         (['merge-base', '--is-ancestor', old, new], b''),
         (['merge-base', '--all', integration, new], (integration + '\n').encode()),
@@ -140,7 +142,7 @@ def test_actual_main_overlap_reaches_and_fails_only_common_base_gate(lab, monkey
         monkeypatch.setattr(subject, '_run_git_query', observed)
         with pytest.raises(subject.RootMaintenanceBridgeError, match=ERROR):
             helpers.run(lab)
-        assert seen[:6] == expected
+        assert seen[:7] == expected
         assert helpers.custody(lab) == before
     finally:
         monkeypatch.setattr(subject, '_run_git_query', actual)
