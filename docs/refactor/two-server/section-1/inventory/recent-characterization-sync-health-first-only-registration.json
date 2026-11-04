@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "assignment_scope_sha256": "80208105800094b4904f1d57dfaf3c9873bac20e1fd5a4083366e72f466e4dd1",
+  "task_id": "root-sync-health-first-registration-reader-repair-20261104-001",
+  "scenario_key": "manual-reader-compatible-first-health-registration-after-intercepted-immutable-task",
+  "source_head": "ed55b9167b16f074bb39fdca65c68dc018224a23",
+  "status": "PARTIAL_CANONICAL_INTEGRATION",
+  "receipt_type": "PARTIAL_CANONICAL_INTEGRATION",
+  "source": {
+    "accepted_source_commit": "ed55b9167b16f074bb39fdca65c68dc018224a23",
+    "accepted_parent": "75fe8987cbf278b9c484381c99c6501e71a49533"
+  },
+  "authorship": "CODEX_AUTHORED",
+  "manual_scope": {
+    "authority": "docs/refactor/two-server/PROPOSAL_AUTOMATION.md:66-100",
+    "operation_id": "root-sync-health-first-registration-reader-repair-20261104-001",
+    "actual_author_id": "iran_sms_precheck/Codex",
+    "required_distinct_reviewer_id": "market_final_acceptance/Codex",
+    "final_acceptance_and_Git_actor_id": "Root/Codex",
+    "new_registration_is_not_normal_Gemini_acceptance": true,
+    "intercepted_immutable_task": {
+      "path": ".local/two-site-refactor/tasks/p1-00b-sync-health-first-only-registration-20261104-d001.json",
+      "utf8_bytes": 31258,
+      "sha256": "0968d102305251fb494b2974211dd89daca86118aadeae77df533f40f982298f"
+    },
+    "intercepted_task_accepted": false,
+    "proposal_from_intercepted_task_reused": false,
+    "own_future_commit_or_checkpoint_claimed": false,
+    "terminal_failed_registration": {
+      "worker_run_id": "qoder-reg-d001-20261104-worker-0",
+      "controller_run_id": "cycle-0001-20261104T030743Z-2869230",
+      "worker_state": "BLOCKED",
+      "duration_seconds": 741.75,
+      "failure_classification": "MODEL_OUTPUT_TRUNCATED",
+      "proposal_produced": false,
+      "Reviewer_or_native_produced": false,
+      "bound_Broker_response_state": "COMPLETED",
+      "bound_Broker_exit_code": 1,
+      "bound_stdout_state": "TASK_BLOCKED",
+      "semantic_fingerprint": "c1095a896b84d6a9f3237a2833b7f24812928e4599c4f2a2d821108024912446",
+      "status_evidence": {
+        "path": ".local/two-site-refactor/proposals/qoder-reg-d001-20261104-worker-0/status.json",
+        "utf8_bytes": 4582,
+        "sha256": "6b4177bff83aeb51bc7e22ae5f3ff092e8cfdc0daf42fb4b291c4fd3eb18d5eb"
+      },
+      "Broker_response_evidence": {
+        "path": ".local/two-site-refactor/provider-broker/responses/91612aa7384a49deb8066223facc0647.json",
+        "utf8_bytes": 858,
+        "sha256": "a224d1b1e360aea562efac9922559ae28c3b7bbd2280979b57a9e3e603cb9f76"
+      },
+      "original_interrupted_Coordinator_exit_code": 130,
+      "original_Coordinator_and_failed_Task_preserved": true,
+      "failed_Task_accepted_or_replayed": false
+    }
+  },
+  "registered_unit": {
+    "task_id": "p1-00b-sync-health-summary-execute-first-only-20261104-c001",
+    "accepted_commit": "ed55b9167b16f074bb39fdca65c68dc018224a23",
+    "accepted_parent": "75fe8987cbf278b9c484381c99c6501e71a49533",
+    "generation_head": "75fe8987cbf278b9c484381c99c6501e71a49533",
+    "worker_run_id": "qoder-first-only-c001-20261104-worker-0-retry-1",
+    "worker_conversation_id": "bb159a22-dd7d-4716-ba3a-a1eb7e4d46fd",
+    "proposal_sha256": "8b2b0b5a25de2505223d2b9970370185294e9123d1d13d3322d9e6ee1a7e4d69",
+    "native_PASSED_receipt_sha256": "7b863524c553846810949d34e04620a57fb42692de9ab1c00f3f370ca3717baf",
+    "reviewer_run_id": "qoder-first-only-c001-20261104-reviewer-0",
+    "reviewer_conversation_id": "f4392ac0-aa23-47f6-b674-65d8bbe86ffc",
+    "reviewer_state": "VERIFIED",
+    "reviewer_findings": [],
+    "reviewer_result_sha256": "b216b9b04907fa88e53434a957a48c18fbd40c686c59fb0517244228d00cd2b3",
+    "Qoder_approval_receipt": {
+      "path": ".local/two-site-refactor/qoder-reviews/8b2b0b5a25de2505223d2b9970370185294e9123d1d13d3322d9e6ee1a7e4d69.json",
+      "utf8_bytes": 2486,
+      "sha256": "870af2e58de30e1c4c3b9bce0c6e083b62dfd4633f0783646bf39f06a9384f7d"
+    },
+    "authorship": "GEMINI_WORKER",
+    "transport_initialization_failure_run": "qoder-first-only-c001-20261104-worker-0",
+    "transport_failure_accepted": false,
+    "fresh_session_retry_is_not_substantive_correction": true
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_sync_health_summary_execute_failure.py",
+      "sha256": "6f955361d65efaf3ba04a357a38108f4d49e6a9f2d4ed225556ccf371738d10d",
+      "utf8_bytes": 17219,
+      "mode": "100644",
+      "last_commit": "ed55b9167b16f074bb39fdca65c68dc018224a23",
+      "canonical_symbol": "api/routers/sync.py:4890",
+      "seed_ids": [
+        "API-SYNC-GET-SYNC-GET-SYNC-HEALTH-L4890"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_sync_health_summary_execute_failure.py::SyncHealthSummaryExecuteFailureCharacterizationTests::test_first_summary_execute_exception_propagates_before_any_downstream_health_work"
+      ],
+      "characterized_boundary": "FIRST_SUMMARY_DB_EXECUTE_EXCEPTION_ONLY",
+      "excluded": [
+        "SECOND grouped-table execute failure",
+        "summary result consumption",
+        "health success or Redis fallback",
+        "HTTP Depends/full authorization",
+        "real persistence/service interiors",
+        "retry/reload/concurrency/origin/fullseed/High/Stage closure"
+      ]
+    }
+  ],
+  "manifest_registration": {
+    "added_key": "sync_health_first_summary_execute_failure_registration_path",
+    "added_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-sync-health-first-only-registration.json",
+    "before_utf8_bytes": 5482,
+    "before_sha256": "044dc7afa5b6491b1ab87b4eb9ab29dcde5ad1677400037c2c39e2f600db0c68",
+    "after_utf8_bytes": 5662,
+    "after_sha256": "ea23866be378404f12c3ae4475babf284aa834b3a1319cdf7e7bbdc8ee9ba54e",
+    "raw_membership_before": 400,
+    "raw_membership_after_on_exact_acceptance": 401,
+    "raw_remaining_after_on_exact_acceptance": 64,
+    "delta_distinct_seed_count": 1
+  },
+  "proof_limits": {
+    "record_proves_only_first_boundary": true,
+    "full_handler_and_full_seed_acceptance": "NOT_ASSESSED",
+    "actual_structural_requested_scenario_counts": "DEFER_TO_OFFICIAL_FULL_READER_AFTER_BASELINE_REPAIR",
+    "historical_288_177_snapshot_is_not_a_live_count_claim": true,
+    "no_origin_High_or_Stage_closure": true
+  },
+  "reconciliation": {
+    "canonical_base_capture_units_since_reconciliation": 0,
+    "registered_accepted_behavior_units": 1,
+    "units_since_reconciliation_on_exact_acceptance": 1,
+    "threshold": 5,
+    "group_reconciliation_complete": false,
+    "canonical_base_edited": false,
+    "capture_is_not_future_live_counter_constraint": true
+  },
+  "accounting": {
+    "added_behavior_units": 0,
+    "added_handler_scenarios": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 1,
+    "ledger_edited": false,
+    "ledger_prefix_bytes": 119459,
+    "ledger_prefix_sha256": "d9c33986c1559b00eded81378bd79d321902f9fd3626bfa54ad463f213c103e0",
+    "scenario_records_and_recent_characterization_edited": false
+  },
+  "prior_failed_combined": {
+    "task": {
+      "path": ".local/two-site-refactor/tasks/p1-00b-sync-health-query-failure-boundaries-20261104-c001.json",
+      "utf8_bytes": 35971,
+      "sha256": "9b38ae0b8569192d7d7e9add4ccfa643cbe031112ff0ec1ad83dbc283d59aa08"
+    },
+    "worker_run_id": "qoder-sync-health-c001-20261104-worker-0",
+    "worker_state": "BLOCKED",
+    "raw_init_conversation_id": "2e95c11a-6d57-48e2-af9c-6c07676d13cd",
+    "outer_status_conversation_id": null,
+    "raw_stream": {
+      "path": ".local/two-site-refactor/proposals/qoder-sync-health-c001-20261104-worker-0/stream.jsonl",
+      "utf8_bytes": 216646,
+      "sha256": "2fe2c8ea6f7d72a620347c2606058807e3a3a9aefa5b204243a4092cfb2e6a10"
+    },
+    "accepted": false,
+    "replayed_adopted_relabeled_or_reset": false
+  },
+  "retained_unregistered_units": [
+    {
+      "path": "tests/test_p1_00b_characterization_admin_users_search_fsm_boundary_failures_batch.py",
+      "utf8_bytes": 19966,
+      "sha256": "92868f6c675c111a497108424151e1e6645ebbfa7c9da3bead69ca4971d4c939",
+      "accepted_commit": "96e28da8375fc27b5f2eec4e7492726ee1092d28",
+      "handler_scenarios": 2,
+      "registered_or_counted_by_this_unit": false
+    }
+  ],
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}

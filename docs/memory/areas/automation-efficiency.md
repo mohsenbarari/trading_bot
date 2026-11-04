@@ -1,17 +1,18 @@
 # Automation Efficiency
 
 ## Authority — 2026-11-04
-- Qoder coordinates and independently accepts; Gemini authors and reviews in separate sessions. automation-models.json owns models/efforts, frozen per unit: Qwen3.8-Max/xhigh and Argon High/high. CLI identity is separate runtime configuration.
-- Correct delivery and continuation outrank token savings. Use the smallest sufficient design; do not reopen AE cohorts. User Stage approval is removed; human Web Writer, protected refs, production boundaries and serial Git remain.
+- Qoder coordinates/accepts; Gemini authors and reviews in distinct sessions. automation-models.json freezes Qwen3.8-Max/xhigh and Argon High/high per unit; CLI identity is separate.
+- Delivery/continuation outrank token savings; keep design small and AE cohorts closed. No user Stage approval; human Web Writer, protected refs, production boundaries and serial Git remain.
 
 ## Execution
-- Outside Broker owns isolated native tests and required Qoder final review. Reuse PASS only for identical source/task/candidate/selectors/environment; never duplicate native execution.
-- Coordinator gets exactly two public Assignment controls read-only, never the parent checkout or private tree.
-- Only proven late Reviewer transients permit finite persisted fresh-session recovery. Semantic/quota failures, Source drift, uncertain effects or accepted work forbid blind replay, reservation release and counter reset.
-- Before formatting or terminal decisions, Supervisor owns the bounded wait for its exact Broker request. Preserve bound dispatch/terminal custody and original SDK; one fresh coordination-only completion reuses the actual chain without Worker replay. Only genuine committed CONTINUE checkpoints permit ordinary restart.
-- A later CLI timeout can wrap a real output-limit ERROR. Strict identity/schema/tool-free qualification permits failure cleanup, never partial acceptance. Repeated proof-metadata tasks exhausted 65533 thinking tokens with zero code; smaller inputs did not fix it. Use the documented finite manual author/distinct-reviewer/native fallback for this failed metadata family, with honest provenance and no fabricated Gemini chain/checkpoint; normal Gemini business work remains the default.
+- Broker owns isolated native tests and Qoder final review. Reuse PASS only for identical source/task/candidate/selectors/environment.
+- Coordinator receives exactly two public Assignment controls read-only, never parent/private trees.
+- Only proven late Reviewer transients allow finite persisted fresh-session recovery. Semantic/quota failures, drift, uncertain effects or accepted work forbid blind replay, reservation release and counter reset.
+- Before terminal decisions/formatting, await the exact owned Broker within its original deadline; preserve custody and SDK. At most one fresh coordination-only completion reuses the chain without Worker replay. Ordinary restart requires a genuine committed CONTINUE checkpoint.
+- Qualified tool-free identity-bound output-limit ERROR permits cleanup, never partial acceptance. Metadata repeatedly exhausted thinking, including smaller inputs. Use documented finite manual author/distinct-reviewer/native fallback; preserve real provenance, never fake Gemini/checkpoints. Gemini remains the business default.
 
 ## Evidence
-- Historical witnesses validate live accounting then project original SHA-pinned inert DATA; never execute archived blobs. New canonical seed records need matching physical counts; PENDING data stays outside canonical records.
-- Measure actual scenarios and Stage blockers, preserving High/origin gates. Maintenance, commits and test counts confer no business credit.
+- Validate live accounting before projecting SHA-pinned inert history; never execute archived blobs. Canonical seed records need physical counts; pending data stays outside.
+- Receipts match the actual canonical reader envelope. Legacy admission is limited to pinned historical owners, retaining Source/SHA/ancestry/selector checks. All history/live checks of supplied packets propagate the same extra_documents override.
+- Raw membership, structural scenario proof and full-handler acceptance differ. Reader counts require whole-inventory PASS; invalid inventory makes them unavailable. Preserve High/origin gates. Maintenance and test/commit counts earn no business credit.
 - Qoder zero-token placeholders are UNKNOWN; Credits are separate. No invented savings or paid baseline replay. See QODER_AUTOMATION.md and PROPOSAL_AUTOMATION.md.

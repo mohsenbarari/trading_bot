@@ -486,6 +486,77 @@ CANONICAL_TOTAL_BUDGET_BYTES = 8_000_000
 _BLOB_FAILED = object()
 
 
+# Exact immutable historical owner DATA accepted before the standard
+# supplemental envelope. No general namespace or new-receipt exemption.
+# Raw SHA admission preserves each frozen original envelope and its gates; all
+# records still enter the ordinary ancestry, Source SHA and AST proof loop.
+_HISTORICAL_OWNER_RECEIPTS = {
+    'business_768_market_overrides_a2_path': (
+        'docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-market-overrides-a2.json',
+        '0d0309ad5e1fc40f4124fd82cdf968bb2894f45767fb952b3ce4eb5f3888dec2',
+    ),
+    'business_768_market_overrides_b3_path': (
+        'docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-market-overrides-b3.json',
+        'af9f4670001c071f76cfb75f99ce1b6929e6f6742354bf057cf2ff1bdcb111ab',
+    ),
+    'business_768_live786_manual783_path': (
+        'docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-manual783-provenance.json',
+        '685032585be7452977b4fda3bf4dbb2cbaf37c127131743a69c1fdf233ac9a5f',
+    ),
+    'business_768_live786_five_source_closeout_path': (
+        'docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-five-source-closeout-manual.json',
+        '46b231dbcf808f556bb5f798c50fc9444a4e6fc7ce1dfa8ec5e6d8855567a4d3',
+    ),
+    'business_768_live786_reset_execute_singleton_path': (
+        'docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-reset-execute-singleton.json',
+        '4ef4ffe40f33dfe4328573bdca380b220e33306e1bee5f18d5baf54aef7170a2',
+    ),
+    'business_768_live786_replace_execute_singleton_path': (
+        'docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-replace-execute-singleton.json',
+        'cf251e42b72c41490e205499dbc269704d75ba422dbf730ef1027d29101d579c',
+    ),
+    'business_768_live786_verifier_only_path': (
+        'docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-verifier-only.json',
+        '09c03b798d7c268a987874c1ebe3e834ed534edc97eade4be9b68e097d27f960',
+    ),
+    'business_768_live786_authority_registration_after_security_path': (
+        'docs/refactor/two-server/section-1/inventory/recent-characterization-business-768-live786-authority-registration-security.json',
+        '676426367cb4fd92ace6cd9f2bd04c90fb70bc8f24e357c3fe4293004f56c113',
+    ),
+    'business_768_current_session_body_registration_path': (
+        'docs/refactor/two-server/section-1/inventory/current-session-body-registration.json',
+        '9ef13f20a2c85cc813e79e6e209398cddb25c6f60a66eb12e47013d63cc49049',
+    ),
+    'business_768_current_session_group_union_path': (
+        'docs/refactor/two-server/section-1/inventory/current-session-five-source-union.json',
+        '5d9734c108edd3269cd56c264bed8079ded467d5c63a648c84db6eb639f6ab82',
+    ),
+    'business_768_current_session_group_closeout_path': (
+        'docs/refactor/two-server/section-1/inventory/current-session-five-source-closeout.json',
+        '8eabc7b2fde077e6404eaee184a359ad2dc79add1a4a7b5ab1a2ed2d5c6b31b2',
+    ),
+    'business_768_post_security_five_registration_path': (
+        'docs/refactor/two-server/section-1/inventory/post-security-five-source-registration.json',
+        '56f5d4e76c4cd9edc97689fda6025e9fae9e059a80f3c8a995f457fa7d709bbe',
+    ),
+    'business_768_post_security_five_closeout_path': (
+        'docs/refactor/two-server/section-1/inventory/post-security-five-source-closeout.json',
+        '2bfe90e91579d0457b7a3d8008733b53f90d6af5033c4111e33f238e28d934fd',
+    ),
+}
+
+# The two frozen wrappers describe this one same physical proof; their scenario
+# labels/provenance remain distinct metadata. No new or third owner may alias it.
+_HISTORICAL_PROOF_ALIAS_OWNERS = frozenset({
+    "business_768_live786_manual783_path",
+    "business_768_live786_five_source_closeout_path",
+})
+_HISTORICAL_PROOF_FIELDS = (
+    "path", "sha256", "utf8_bytes", "mode", "last_commit", "parent",
+    "seed_ids", "test_selectors",
+)
+
+
 def _selector_bindings(scope: ast.Module | ast.ClassDef) -> dict[str, ast.AST | None]:
     """Index only direct definitions; same-scope writes invalidate a name."""
     cells = {}
@@ -562,6 +633,7 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
     """Classify current canonical P1-00b evidence, bound to the current HEAD."""
     root = Path(root).resolve(strict=True)
     loaded: dict[str, tuple[dict, str]] = {}
+    historical_origins: dict[int, str] = {}
     blobs: dict[tuple, object] = {}
     definitions: dict[tuple[str, str], dict] = {}
     consumed_bytes = 0
@@ -663,6 +735,10 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
             match = re.fullmatch(r"continuation_([1-9][0-9]?)_path", key) if type(key) is str else None
             if match is not None and 2 <= int(match[1]) <= 64:
                 numbered_sources[int(match[1])] = sources[key]
+            elif key in _HISTORICAL_OWNER_RECEIPTS:
+                if sources[key] != _HISTORICAL_OWNER_RECEIPTS[key][0]:
+                    raise runner.ProposalError("canonical historical owner path invalid")
+                supplemental_sources[key] = sources[key]
             elif (type(key) is str and not key.startswith("continuation_")
                   and re.fullmatch(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*_path", key)
                   and type(sources[key]) is str
@@ -796,8 +872,15 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
         # predecessors, but cannot impersonate a base or a linked continuation.
         if len(audited) + len(supplemental_sources) > 64:
             raise runner.ProposalError("canonical predecessor graph invalid")
-        for path in supplemental_sources.values():
-            document, _ = load(path)
+        for key, path in supplemental_sources.items():
+            document, document_sha = load(path)
+            historical = _HISTORICAL_OWNER_RECEIPTS.get(key)
+            if historical is not None:
+                if document_sha != historical[1]:
+                    raise runner.ProposalError(f"immutable historical owner receipt invalid: {path}")
+                historical_origins[id(document)] = key
+                docs.append(document)
+                continue
             status = document.get("status")
             assignment = document.get("assignment_id")
             high_blockers = document.get("canonical_blockers")
@@ -830,6 +913,8 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
             docs.append(document)
 
         current_seen: set[tuple[str, str]] = set()
+        current_proofs: dict[tuple[str, str], tuple[str | None, dict]] = {}
+        aliased_current: set[tuple[str, str]] = set()
         proven: set[str] = set()
         invalid_current: set[str] = set()
         unknown: set[str] = set()
@@ -867,9 +952,24 @@ def inspect_canonical_evidence(root: Path, behavior_id: str | None = None) -> di
                 current = last_commit == latest_touch
                 if current:
                     for seed in seed_ids:
-                        if (seed, path) in current_seen:
-                            raise runner.ProposalError(f"conflicting current evidence: {seed}")
-                        current_seen.add((seed, path))
+                        cell = (seed, path)
+                        origin = historical_origins.get(id(doc))
+                        if cell in current_seen:
+                            previous_origin, previous_record = current_proofs[cell]
+                            # Typed JSON preserves list order and bool/int distinctions.
+                            # Both instances still execute the ordinary proof below;
+                            # proven is a set, so this alias never adds another credit.
+                            if (cell in aliased_current
+                                    or frozenset((origin, previous_origin)) != _HISTORICAL_PROOF_ALIAS_OWNERS
+                                    or json.dumps([record.get(field) for field in _HISTORICAL_PROOF_FIELDS],
+                                                  ensure_ascii=False, separators=(",", ":"))
+                                    != json.dumps([previous_record.get(field) for field in _HISTORICAL_PROOF_FIELDS],
+                                                  ensure_ascii=False, separators=(",", ":"))):
+                                raise runner.ProposalError(f"conflicting current evidence: {seed}")
+                            aliased_current.add(cell)
+                        else:
+                            current_proofs[cell] = (origin, record)
+                        current_seen.add(cell)
                 proof_commit = head if current else last_commit
                 try:
                     if not ancestor(last_commit):
