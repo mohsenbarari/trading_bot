@@ -44,13 +44,14 @@
     "business_768_current_session_group_union_path": "docs/refactor/two-server/section-1/inventory/current-session-five-source-union.json",
     "business_768_current_session_group_closeout_path": "docs/refactor/two-server/section-1/inventory/current-session-five-source-closeout.json",
     "business_768_post_security_five_registration_path": "docs/refactor/two-server/section-1/inventory/post-security-five-source-registration.json",
-    "business_768_post_security_five_closeout_path": "docs/refactor/two-server/section-1/inventory/post-security-five-source-closeout.json"
+    "business_768_post_security_five_closeout_path": "docs/refactor/two-server/section-1/inventory/post-security-five-source-closeout.json",
+    "sync_parity_observability_downstream_failure_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-sync-parity-proof-data-integration.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
-    "reconciled_new_seed_count": 263,
-    "evidenced_seed_count": 398,
-    "remaining_seed_count": 67
+    "reconciled_new_seed_count": 265,
+    "evidenced_seed_count": 400,
+    "remaining_seed_count": 65
   },
   "coverage_status": "PARTIAL",
   "canonical_blockers": [

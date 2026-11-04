@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "assignment_scope_sha256": "80208105800094b4904f1d57dfaf3c9873bac20e1fd5a4083366e72f466e4dd1",
+  "task_id": "root-p1-00b-sync-canonical-integration-20261104-001",
+  "scenario_key": "owner-authorized-manual-sync-canonical-integration-after-failed-fresh-gemini-b",
+  "source_head": "92e7183cdf30ca78791c3775b2573490db4daf34",
+  "status": "PARTIAL_CANONICAL_INTEGRATION",
+  "receipt_type": "PARTIAL_CANONICAL_INTEGRATION",
+  "source": {
+    "accepted_source_commit": "3ac62a6396f92d5c4d330b76843ca88cfdcb4ae0",
+    "accepted_parent": "cd5e42f2a61a115e79ad855514de74aaf88d0843"
+  },
+  "proof_data_reference": {
+    "path": "docs/refactor/two-server/section-1/inventory/sync-parity-observability-proof-data.json",
+    "utf8_bytes": 13821,
+    "sha256": "36ce97b62b714e9cf6339a7bd06306ec6b18af495942ca7a72ddab2d8e283a71",
+    "accepted_revision_commit": "92e7183cdf30ca78791c3775b2573490db4daf34"
+  },
+  "accepted_witness_reference": {
+    "path": "tests/test_p1_00b_characterization_sync_parity_observability_proof_data_witness.py",
+    "utf8_bytes": 9649,
+    "sha256": "de22a42de323891fb030c657e3b1ef0f4d8396c69329f020795c628035822246",
+    "accepted_commit": "92e7183cdf30ca78791c3775b2573490db4daf34",
+    "authorship": "CODEX_AUTHORED",
+    "author": "iran_sms_precheck/Codex",
+    "independent_reviewer": "market_final_acceptance/Codex",
+    "public_apis": [
+      "load_sync_parity_proof_data_controls",
+      "assert_sync_parity_proof_data"
+    ]
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_sync_parity_observability_downstream_failures.py",
+      "sha256": "60af10dffb832584b55ab8462af9d7a730a1ef0c76b1983f6069214ed5c39a1f",
+      "utf8_bytes": 18621,
+      "mode": "100644",
+      "last_commit": "3ac62a6396f92d5c4d330b76843ca88cfdcb4ae0",
+      "canonical_symbol": "api/routers/sync.py:4805",
+      "seed_ids": [
+        "API-SYNC-GET-SYNC-GET-SYNC-PARITY-SNAPSHOT-L4805"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_sync_parity_observability_downstream_failures.py::SyncParityObservabilityDownstreamFailureCharacterizationTests::test_parity_snapshot_builder_valueerror_becomes_400_before_server_mode_decoration"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_sync_parity_observability_downstream_failures.py",
+      "sha256": "60af10dffb832584b55ab8462af9d7a730a1ef0c76b1983f6069214ed5c39a1f",
+      "utf8_bytes": 18621,
+      "mode": "100644",
+      "last_commit": "3ac62a6396f92d5c4d330b76843ca88cfdcb4ae0",
+      "canonical_symbol": "api/routers/sync.py:4833",
+      "seed_ids": [
+        "API-SYNC-POST-SYNC-RECORD-SYNC-PARITY-STATUS-L4833"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_sync_parity_observability_downstream_failures.py::SyncParityObservabilityDownstreamFailureCharacterizationTests::test_parity_status_redis_store_failure_becomes_503_and_skips_parity_summary_telemetry"
+      ]
+    }
+  ],
+  "promotion_assessment": {
+    "promoted_seed_ids": [
+      "API-SYNC-GET-SYNC-GET-SYNC-PARITY-SNAPSHOT-L4805",
+      "API-SYNC-POST-SYNC-RECORD-SYNC-PARITY-STATUS-L4833"
+    ],
+    "delta_distinct_seed_count": 2,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 263,
+      "evidenced": 398,
+      "remaining": 67
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 265,
+      "evidenced": 400,
+      "remaining": 65
+    },
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "accounting": {
+    "canonical_registration_status_on_exact_acceptance": "COMPLETE_ON_EXACT_ACCEPTANCE",
+    "ledger_integration_status_on_exact_acceptance": "COMPLETE_ON_EXACT_ACCEPTANCE",
+    "canonical_manifest_count_integration_status_on_exact_acceptance": "COMPLETE_ON_EXACT_ACCEPTANCE",
+    "group_reconciliation_complete": false,
+    "added_behavior_units": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 2,
+    "other_unreconciled_units_reference": "proof_data_reference/accounting/other_unreconciled_accepted_units",
+    "ledger_prefix_binding": {
+      "path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+      "unchanged_ledger_utf8_bytes": 116148,
+      "unchanged_ledger_sha256": "80b1fa5e71bbf440a2ce09f3236f935cbf0882ce2ecd1cc80679a6765912dbdb"
+    }
+  },
+  "strict_canonical_progress": {
+    "proven": 288,
+    "partial": 177,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "manual_acceptance_reference": {
+    "path": ".local/two-site-refactor/manual-cycle-repair-20261104-01/ROOT-MAINTENANCE-COMMIT.json",
+    "utf8_bytes": 1618,
+    "sha256": "f8d3713b437218e1596857d200263a7c3237e383bc80afd3d3af14f9848c8266",
+    "kind": "MANUAL_CODEX_AUTHORED_INDEPENDENTLY_REVIEWED_MAINTENANCE_NOT_NORMAL_MODEL_CHAIN",
+    "commit": "92e7183cdf30ca78791c3775b2573490db4daf34",
+    "parent": "2f1ff993da68b3ce26d9267c6ba7aae433d07f33",
+    "native_pre_sha256": "d08cc4ed3f2839f26628e444882b3066fc64b1d600633a19142c83b4f3ff914a",
+    "native_post_sha256": "ef8da3b3cf5087a50e07818a03b6feff93cd0d643c98c82aa96392792a561ef6",
+    "independent_review_sha256": "ea889981c9ae1efd90aae69055fccc032aa7767b7ea71d65d0951a71cb9a32d4",
+    "checkpoint_written": false,
+    "business_credit": 0,
+    "seed_credit": 0
+  },
+  "authorship": "CODEX_AUTHORED",
+  "manual_exception": {
+    "kind": "ONE_OWNER_AUTHORIZED_MANUAL_B_AFTER_FAILED_FRESH_GEMINI_B",
+    "authority": "docs/refactor/two-server/PROPOSAL_AUTOMATION.md:66-100",
+    "operation_id": "root-p1-00b-sync-canonical-integration-20261104-001",
+    "actual_author": "iran_sms_precheck/Codex",
+    "independent_review_and_real_hermetic_native_required": true,
+    "accepted_DATA_condition_retained_unchanged": true,
+    "authorship_route_override_only": "Required fresh normal Gemini B was actually attempted and failed. One explicit Owner-authorized manual authorship exception follows; the accepted DATA condition is neither rewritten nor claimed met by failure. Normal Gemini remains the subsequent default.",
+    "failed_task": {
+      "path": ".local/two-site-refactor/tasks/p1-00b-sync-parity-proof-data-canonical-integration-20261104-b001.json",
+      "utf8_bytes": 17729,
+      "sha256": "25653cce891e7b63586b5b3c9bc59894bbde85d29234273839f7d3f2a0eb1ff0"
+    },
+    "failed_worker_run_id": "p100b-b001-canonical-integration-worker-0",
+    "failed_controller_run_id": "cycle-0001-20261104T010709Z-2661408",
+    "failed_status": {
+      "path": ".local/two-site-refactor/proposals/p100b-b001-canonical-integration-worker-0/status.json",
+      "utf8_bytes": 3062,
+      "sha256": "0d855e32740f97e3a1616b2f941fce769015cca74444c99c9abccc5ffccef8bc"
+    },
+    "failed_stream": {
+      "path": ".local/two-site-refactor/proposals/p100b-b001-canonical-integration-worker-0/stream.jsonl",
+      "utf8_bytes": 8752,
+      "sha256": "2b3c77963868e2da4965000476a438a903cceca68fac7b9bc080c693e8339d08"
+    },
+    "failed_attempt_accepted": false,
+    "observed_failure": "ACK SUCCESS then business agent DONE631.078s output65536/thinking65533/zero business deltas; NO final business result ERROR. Outer915s timeout; Worker BLOCKED924.951s. No proposal/native/reviewer/acceptance.",
+    "own_future_commit_or_checkpoint_claimed": false,
+    "normal_Gemini_cycle_or_checkpoint_claimed": false
+  }
+}
