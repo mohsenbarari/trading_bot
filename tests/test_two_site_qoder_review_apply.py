@@ -32,7 +32,7 @@ else:
  data=json.loads(sys.stdin.read().rsplit('\\n',1)[1])
  model=sys.argv[sys.argv.index('--model')+1]
  result={'decision':'APPROVE','findings':[],'proposal_sha256':data['proposal_sha256'],'source_head':data['source_head']}
- print(json.dumps({'type':'system','subtype':'init','session_id':'synthetic-final-session','model':model,'tools':['Read','Glob','Grep','mcp_list'],'mcp_servers':[],'plugins':[]}))
+ print(json.dumps({'type':'system','subtype':'init','session_id':'synthetic-final-session','model':model,'tools':['mcp_list'],'mcp_servers':[],'plugins':[]}))
  print(json.dumps({'type':'result','subtype':'success','is_error':False,'stop_reason':'end_turn','session_id':'synthetic-final-session','num_turns':1,'result':json.dumps(result)}))
 '''); binary.chmod(0o700)
     runtime = {"schema_version": 1, "coordinator": {"path": str(binary), "version": "1.2.3",

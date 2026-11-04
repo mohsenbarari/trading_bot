@@ -18,7 +18,7 @@ MAX_STREAM_BYTES = 16_000_000
 MAX_RESULT_BYTES = 64_000
 SETTINGS = {"general": {"enableAutoUpdate": False}}
 TOOLS = {"coordinator": ("Bash", "Read", "Edit", "Write", "Glob", "Grep"),
-         "final_reviewer": ("Read", "Glob", "Grep"), "receipt_formatter": (),
+         "final_reviewer": (), "receipt_formatter": (),
          "proposal_author": ()}
 COORDINATOR_SCHEMA_REL = Path("docs/refactor/two-server/templates/codex-autopilot-cycle.schema.json")
 
@@ -139,7 +139,7 @@ def _settings_args(runtime: dict) -> list[str]:
     return result
 
 
-def _execution_options(root: Path, roleconfig: dict) -> tuple[dict, list[str]]:
+def _execution_options(root: Path, roleconfig: dict, role: str) -> tuple[dict, list[str]]:
     """Return documented Qoder settings and one bounded thinking mode.
 
     The model selector remains role data.  The execution limit is optional so
@@ -151,7 +151,8 @@ def _execution_options(root: Path, roleconfig: dict) -> tuple[dict, list[str]]:
     """
     policy = load_ai_config(root)
     settings = {"general": {"enableAutoUpdate": False}}
-    thinking = ["--thinking", "adaptive"]
+    _need(role in TOOLS, "QODER_ROLE")
+    options = ["--thinking", "adaptive"]
     execution = policy.get("qoder_execution")
     if execution is not None:
         settings["modelConfigs"] = {"customOverrides": [{
@@ -159,9 +160,14 @@ def _execution_options(root: Path, roleconfig: dict) -> tuple[dict, list[str]]:
             "modelConfig": {"generateContentConfig": {
                 "maxOutputTokens": execution["max_output_tokens"]}},
         }]}
-        if "max_thinking_tokens" in execution:
-            thinking = ["--thinking-budget", str(execution["max_thinking_tokens"])]
-    return settings, thinking
+        budget = execution.get("role_max_thinking_tokens", {}).get(
+            role, execution.get("max_thinking_tokens"))
+        if budget is not None:
+            options = ["--thinking-budget", str(budget)]
+        if "max_model_request_retries" in execution:
+            options += ["--max-model-request-retries",
+                        str(execution["max_model_request_retries"])]
+    return settings, options
 
 
 def qoder_identity(path: Path, runtime: dict, temporary: Path, roleconfig: dict | None = None) -> dict:
@@ -214,6 +220,27 @@ def _coordinator_output_contract(root: Path) -> str:
         + json.dumps(schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
+def _final_reviewer_output_contract() -> str:
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["decision", "findings", "proposal_sha256", "source_head"],
+        "properties": {
+            "decision": {"type": "string", "enum": ["APPROVE", "REQUEST_CHANGES"]},
+            "findings": {"type": "array", "maxItems": 32,
+                         "items": {"type": "string", "minLength": 1, "maxLength": 4096}},
+            "proposal_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        },
+    }
+    return ("You are a tool-free final semantic reviewer. Return ONLY one JSON object matching "
+            "this complete closed schema. Do not use tools, execute commands, edit, delegate, "
+            "return Markdown, or add prose outside the JSON. APPROVE requires findings=[]; "
+            "REQUEST_CHANGES requires concrete nonempty findings. Copy the exact proposal SHA "
+            "and source head supplied in the user prompt. TERMINAL_RESULT_SCHEMA_JSON:\n"
+            + json.dumps(schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+
+
 def qoder_command(path: Path, root: Path, run_dir: Path, prompt: str, roleconfig: dict,
                   *, role: str = "coordinator", response_schema: dict | None = None) -> list[str]:
     """Caller supplies exact prompt bytes to stdin and owns bounded capture/exit."""
@@ -224,7 +251,9 @@ def qoder_command(path: Path, root: Path, run_dir: Path, prompt: str, roleconfig
     _need(run_dir.is_relative_to(root) and run_dir != root, "QODER_RUN_DIRECTORY")
     runtime = _runtime(load_runtime_config(root)); _need(str(path) == runtime["path"], "QODER_RUNTIME_PATH_MISMATCH")
     contract = (["--append-system-prompt", _coordinator_output_contract(root)]
-                if role in {"coordinator", "receipt_formatter"} else [])
+                if role in {"coordinator", "receipt_formatter"}
+                else ["--append-system-prompt", _final_reviewer_output_contract()]
+                if role == "final_reviewer" else [])
     if role == "proposal_author":
         _need(type(response_schema) is dict and response_schema.get("type") == "object"
               and response_schema.get("additionalProperties") is False
@@ -240,7 +269,7 @@ def qoder_command(path: Path, root: Path, run_dir: Path, prompt: str, roleconfig
     if role == "proposal_author":
         _need(len(prompt.encode("utf-8")) + len(contract[1].encode("utf-8")) <= limit,
               "QODER_AUTHOR_COMPLETE_PROMPT_BOUND")
-    settings, thinking = _execution_options(root, roleconfig)
+    settings, thinking = _execution_options(root, roleconfig, role)
     settings_args = ["--settings", json.dumps(settings, separators=(",", ":"))]
     if runtime.get("config_dir"):
         settings_args += _settings_args(runtime)[2:]

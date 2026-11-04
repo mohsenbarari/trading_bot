@@ -99,6 +99,7 @@ def test_command_has_no_prompt_in_argv_no_resume_and_explicit_minimal_policy(tmp
     assert argv[argv.index("--reasoning-effort") + 1] == role()["reasoning_effort"]
     assert "--thinking" not in argv
     assert argv[argv.index("--thinking-budget") + 1] == "32768"
+    assert argv[argv.index("--max-model-request-retries") + 1] == "0"
     settings = json.loads(argv[argv.index("--settings") + 1])
     assert settings == {"general": {"enableAutoUpdate": False}, "modelConfigs": {
         "customOverrides": [{"match": {"model": role()["model"], "overrideScope": "core"},
@@ -109,7 +110,14 @@ def test_command_has_no_prompt_in_argv_no_resume_and_explicit_minimal_policy(tmp
     assert not {"--continue", "--resume", "--session-id", "--remote"} & set(argv)
     assert argv[argv.index("--tools") + 1:-1] == list(driver.TOOLS["coordinator"])
     readonly = driver.qoder_command(binary, tmp_path, run_dir, prompt, role(), role="final_reviewer")
-    assert readonly[readonly.index("--tools") + 1:-1] == ["Read", "Glob", "Grep"]
+    assert readonly[readonly.index("--tools") + 1:-1] == [""]
+    assert readonly[readonly.index("--thinking-budget") + 1] == "65536"
+    assert readonly[readonly.index("--max-model-request-retries") + 1] == "0"
+    author = driver.qoder_command(binary, tmp_path, run_dir, prompt, role(),
+        role="proposal_author", response_schema={"type": "object", "additionalProperties": False,
+            "required": ["value"], "properties": {"value": {"type": "string"}}})
+    assert author[author.index("--thinking-budget") + 1] == "65536"
+    assert author[author.index("--max-model-request-retries") + 1] == "0"
     assert list(run_dir.iterdir()) == []
 
 
@@ -124,6 +132,7 @@ def test_json_only_new_qoder_model_max_effort_reaches_real_argv_builder(tmp_path
     assert argv[argv.index("--model") + 1] == "synthetic-new-model"
     assert argv[argv.index("--reasoning-effort") + 1] == "max"
     assert argv[argv.index("--thinking-budget") + 1] == "32768"
+    assert argv[argv.index("--max-model-request-retries") + 1] == "0"
     settings = json.loads(argv[argv.index("--settings") + 1])
     assert settings["modelConfigs"]["customOverrides"][0]["match"]["model"] == "synthetic-new-model"
     assert settings["modelConfigs"]["customOverrides"][0]["modelConfig"] == {
@@ -140,6 +149,7 @@ def test_historical_policy_without_execution_override_keeps_minimal_settings(tmp
         "general": {"enableAutoUpdate": False}}
     assert argv[argv.index("--thinking") + 1] == "adaptive"
     assert "--thinking-budget" not in argv
+    assert "--max-model-request-retries" not in argv
 
 
 def test_only_genuine_bound_terminal_json_creates_result(tmp_path):
@@ -209,9 +219,10 @@ def test_allowed_tool_activity_is_not_confused_with_proposal_only_policy(tmp_pat
     assert driver.finalize_qoder_output(tmp_path) == FINAL
 
 
-def test_final_reviewer_cannot_use_coordinator_edit_tool(tmp_path):
-    values = events(); values[0]["tools"] = ["Read"]
-    values[2]["message"]["content"] = [{"type": "tool_use", "name": "Edit"}]
+@pytest.mark.parametrize("name", ["Read", "Glob", "Grep", "Edit", "Bash", "mcp_call"])
+def test_final_reviewer_cannot_use_any_tool(tmp_path, name):
+    values = events(); values[0]["tools"] = ["mcp_list"]
+    values[2]["message"]["content"] = [{"type": "tool_use", "name": name}]
     stream(tmp_path, values)
     with pytest.raises(driver.QoderError, match="QODER_FORBIDDEN_TOOL"):
         driver.finalize_qoder_output(tmp_path, role="final_reviewer")
@@ -234,7 +245,14 @@ def test_coordinator_system_instruction_embeds_actual_complete_closed_schema(tmp
     assert "entire canonical approved two-site plan" in system
     assert "STDIN PRIVATE SYNTHETIC" not in " ".join(argv)
     final_argv = driver.qoder_command(binary, tmp_path, run_dir, "Final role's own four-key contract", role(), role="final_reviewer")
-    assert "--append-system-prompt" not in final_argv
+    assert final_argv.count("--append-system-prompt") == 1
+    final_system = final_argv[final_argv.index("--append-system-prompt") + 1]
+    final_schema = json.loads(final_system.split("TERMINAL_RESULT_SCHEMA_JSON:\n", 1)[1])
+    assert final_schema["additionalProperties"] is False
+    assert final_schema["required"] == ["decision", "findings", "proposal_sha256", "source_head"]
+    assert set(final_schema["properties"]) == set(final_schema["required"])
+    assert "tool-free final semantic reviewer" in final_system
+    assert "Final role's own four-key contract" not in " ".join(final_argv)
 
 
 def test_formatter_is_a_tool_free_capability_profile_using_configured_coordinator(tmp_path):

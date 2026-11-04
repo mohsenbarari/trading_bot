@@ -18,6 +18,10 @@ _MAX_BYTES = 65536
 _QODER_OUTPUT_MIN = 32768
 _QODER_OUTPUT_MAX = 1048576
 _QODER_THINKING_MIN = 1024
+_QODER_EXECUTION_ROLES = frozenset({
+    "coordinator", "final_reviewer", "proposal_author", "receipt_formatter",
+})
+_QODER_MODEL_RETRY_MAX = 2
 
 
 class AIConfigError(ValueError):
@@ -90,9 +94,10 @@ def load_ai_config(root: Path) -> dict:
               "AI_CONFIG_EFFORT")
     if "qoder_execution" in value:
         execution = value["qoder_execution"]
-        _need(type(execution) is dict and set(execution) in (
-                  {"max_output_tokens"},
-                  {"max_output_tokens", "max_thinking_tokens"}),
+        allowed = {"max_output_tokens", "max_thinking_tokens",
+                   "role_max_thinking_tokens", "max_model_request_retries"}
+        _need(type(execution) is dict and "max_output_tokens" in execution
+              and set(execution) <= allowed,
               "AI_CONFIG_QODER_EXECUTION_FIELDS")
         maximum = execution["max_output_tokens"]
         _need(type(maximum) is int and _QODER_OUTPUT_MIN <= maximum <= _QODER_OUTPUT_MAX,
@@ -101,6 +106,19 @@ def load_ai_config(root: Path) -> dict:
             thinking = execution["max_thinking_tokens"]
             _need(type(thinking) is int and _QODER_THINKING_MIN <= thinking < maximum,
                   "AI_CONFIG_QODER_THINKING_TOKENS")
+        if "role_max_thinking_tokens" in execution:
+            budgets = execution["role_max_thinking_tokens"]
+            _need(type(budgets) is dict and budgets
+                  and set(budgets) <= _QODER_EXECUTION_ROLES,
+                  "AI_CONFIG_QODER_ROLE_THINKING_FIELDS")
+            _need(all(type(budget) is int
+                      and _QODER_THINKING_MIN <= budget < maximum
+                      for budget in budgets.values()),
+                  "AI_CONFIG_QODER_ROLE_THINKING_TOKENS")
+        if "max_model_request_retries" in execution:
+            retries = execution["max_model_request_retries"]
+            _need(type(retries) is int and 0 <= retries <= _QODER_MODEL_RETRY_MAX,
+                  "AI_CONFIG_QODER_MODEL_RETRIES")
     return copy.deepcopy(value)
 
 

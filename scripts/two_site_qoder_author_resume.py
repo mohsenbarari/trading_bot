@@ -176,7 +176,12 @@ def _tool_free_command(command):
     separators = [index for index, item in enumerate(command) if item == "--"]
     need(len(separators) <= 1, "AUTHOR_RESUME_COMMAND_WRAPPER")
     argv = command if not separators else command[separators[0] + 1:]
-    need(len(argv) == 24 and Path(argv[0]).is_absolute(), "AUTHOR_RESUME_COMMAND_SHAPE")
+    need(len(argv) in {24, 26} and Path(argv[0]).is_absolute(),
+         "AUTHOR_RESUME_COMMAND_SHAPE")
+    if len(argv) == 26:
+        need(argv[13] == "--max-model-request-retries" and argv[14].isdigit()
+             and 0 <= int(argv[14]) <= 2, "AUTHOR_RESUME_MODEL_RETRIES")
+        argv = argv[:13] + argv[15:]
     positions = {1: "--settings", 3: "--append-system-prompt", 5: "--cwd",
         7: "--model", 9: "--reasoning-effort",
         13: "--output-format", 15: "--no-session-persistence",

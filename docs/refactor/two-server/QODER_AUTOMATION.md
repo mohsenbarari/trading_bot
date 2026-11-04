@@ -11,10 +11,15 @@
 
 پیکربندی جاری نقش‌های Qoder، `DeepSeek-Flash` با استدلال `max` است. محدودیت
 خروجی از `qoder_execution.max_output_tokens` و سقف استدلال داخلی از
-`qoder_execution.max_thinking_tokens` همین فایل خوانده می‌شود. سقف استدلال،
-سطح `max` را کاهش نمی‌دهد؛ فقط مانع مصرف همهٔ خروجی در thinking و نرسیدن به JSON
-نهایی می‌شود. سقف خروجی با تنظیم مستند `modelConfigs.customOverrides` فقط به مدل
-همان نقش متصل می‌شود؛ مقدارهای فعلی ۲۶۲٬۱۴۴ و ۳۲٬۷۶۸ هستند. مسیر تنظیم خروجی
+`qoder_execution.max_thinking_tokens` همین فایل خوانده می‌شود؛
+`role_max_thinking_tokens` برای نقش‌های سنگین override محدود و صریح می‌دهد.
+مقدار جاری Coordinator و formatter برابر ۳۲٬۷۶۸ و مقدار Proposal Author و Final
+Reviewer برابر ۶۵٬۵۳۶ است. سقف استدلال، سطح `max` را کاهش نمی‌دهد؛ فقط مرز مصرف
+thinking پیش از JSON نهایی را تعیین می‌کند. سقف خروجی با تنظیم مستند
+`modelConfigs.customOverrides` فقط به مدل همان نقش متصل می‌شود؛ مقدار جاری
+۲۶۲٬۱۴۴ است. `max_model_request_retries=0` retry پنهانی همان درخواست مدل را
+غیرفعال می‌کند؛ بازیابی فقط با run-id تازه و تصمیم کنترلر بیرونی انجام می‌شود.
+مسیر تنظیم خروجی
 جایگزین پرچم عددی CLI شده است، چون
 نسخهٔ جاری Qoder برای آن پرچم فقط مقادیر نام‌گذاری‌شدهٔ محدود را می‌پذیرد و عدد
 دلخواه را به provider منتقل نمی‌کند. حذف بخش اختیاری، argv تاریخی را دقیقاً حفظ
@@ -43,8 +48,11 @@ Coordinator یا بکارگیری یک PASS برای ورودی تغییرکرد
 ۱. با `scripts/two_site_autopilot_tmux.sh stop` پایان امن واحد جاری را درخواست کنید.
 ۲. فقط `model` و `reasoning_effort` نقش مورد نظر را در automation-models.json تغییر دهید.
 اگر سقف خروجی یا استدلال لازم است، فقط `qoder_execution.max_output_tokens` و
-`qoder_execution.max_thinking_tokens` را در همان فایل و در بازهٔ بستهٔ
-اعتبارسنجی‌شده تغییر دهید؛ آن‌ها را در Python یا command line هاردکد نکنید.
+`qoder_execution.max_thinking_tokens` یا overrideهای بستهٔ
+`qoder_execution.role_max_thinking_tokens` را در همان فایل و در بازهٔ
+اعتبارسنجی‌شده تغییر دهید. سیاست retry نیز فقط از
+`qoder_execution.max_model_request_retries` می‌آید؛ هیچ‌یک را در Python یا
+command line هاردکد نکنید.
 ۳. شناسه و effort باید واقعاً در CLI/حساب انتخاب‌شده پشتیبانی شوند. پیکربندی نامعتبر
 صریحاً رد می‌شود؛ downgrade یا fallback پنهان انجام نمی‌شود.
 ۴. پیکربندی را اعتبارسنجی، بازبینی و کامیت کنید و با
@@ -80,6 +88,11 @@ Supervisor و مانیتور ابزارهای قطعی این مالکیت‌ا�
 تازه جداگانه به شواهد قبلی متصل می‌شود؛ Source، Scope، refs، بایت‌های کامیت و
 تمام تأییدهای واقعی دوباره کنترل می‌شوند. شکست transport، خطای معنایی یا
 شواهد نامعتبر مشمول این بازیابی نیست و پذیرش ساختگی ایجاد نمی‌کند.
+
+Proposal Author و Final Reviewer ابزار ندارند. تمام Task، source، candidate،
+آزمون native و بازبینی Gemini در ورودی bounded همان نشست قرار می‌گیرد و قرارداد
+JSON بسته در system prompt تکرار می‌شود. اجرای تازه حق Read/Grep/Glob یا retry
+داخلی مدل ندارد؛ شواهد و رسیدهای تاریخی حذف یا بازنویسی نمی‌شوند.
 
 شکست گذرای Reviewer پس از Worker/native معتبر، همان شواهد را حفظ می‌کند.
 حداکثر دو batch ادامهٔ تازه، با شمارنده‌های حفظ‌شده و نشست‌های مستقل اجرا می‌شوند؛

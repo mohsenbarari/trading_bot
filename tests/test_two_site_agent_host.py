@@ -411,7 +411,7 @@ class HostTests(unittest.TestCase):
         self.assertEqual('qoder', configured['provider'])
         self.assertTrue(configured['model'])
         self.assertTrue(configured['reasoning_effort'])
-        self.assertEqual(('Read', 'Glob', 'Grep'), qoder.TOOLS['final_reviewer'])
+        self.assertEqual((), qoder.TOOLS['final_reviewer'])
         bridge = (root / 'scripts/two_site_review_bridge.py').read_text()
         self.assertIn('config.role_settings(root, "final_reviewer")', bridge)
         self.assertIn('role="final_reviewer"', bridge)

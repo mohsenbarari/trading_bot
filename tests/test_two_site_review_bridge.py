@@ -30,7 +30,7 @@ elif 'status' in sys.argv: print(json.dumps({'logged_in':True}))
 else:
  sys.stdin.read()
  model=sys.argv[sys.argv.index('--model')+1]
- print(json.dumps({'type':'system','subtype':'init','session_id':'synthetic-schema-session','model':model,'tools':['Read','mcp_list'],'mcp_servers':[],'plugins':[]}))
+ print(json.dumps({'type':'system','subtype':'init','session_id':'synthetic-schema-session','model':model,'tools':['mcp_list'],'mcp_servers':[],'plugins':[]}))
  print(json.dumps({'type':'result','subtype':'success','is_error':False,'stop_reason':'end_turn','session_id':'synthetic-schema-session','num_turns':1,'result':json.dumps({'verdict':'APPROVE'})}))
 '''); binary.chmod(0o700)
     write(root / config.AI_RUNTIME_REL, {"schema_version": 1, "coordinator": {

@@ -145,7 +145,7 @@ def job(tmp_path, monkeypatch):
         a.write_new(d / "plan.json", a.encode(plan))
         result = {"decision": "APPROVE", "findings": [], "proposal_sha256": a.digest(a.encode(plan)), "source_head": before["head"]}
         events = [{"type": "system", "subtype": "init", "session_id": session, "model": settings["model"],
-            "tools": ["Read", "Glob", "Grep"], "mcp_servers": [], "plugins": []},
+            "tools": ["mcp_list"], "mcp_servers": [], "plugins": []},
             {"type": "assistant", "session_id": session, "message": {"role": "assistant", "content": [{"type": "text", "text": "synthetic review"}]}},
             {"type": "result", "subtype": "success", "is_error": False, "session_id": session, "num_turns": 1,
              "stop_reason": "end_turn", "permission_denials": [], "result": json.dumps(result), "usage": {"input_tokens": 0, "output_tokens": 0}}]
@@ -305,7 +305,7 @@ def closed_stage(tmp_path, monkeypatch):
         raw = (json.dumps(receipt, sort_keys=True) + "\n").encode(); target = root / bundle / filename; target.write_bytes(raw)
         run_rel = Path(".local/two-site-refactor/review-bridge/runs") / (token * 32); run = root / run_rel; run.mkdir(mode=0o700, parents=True)
         events = [{"type": "system", "subtype": "init", "session_id": session, "model": selected["model"],
-            "tools": ["Read", "Glob", "Grep"], "mcp_servers": [], "plugins": []},
+            "tools": ["mcp_list"], "mcp_servers": [], "plugins": []},
             {"type": "result", "subtype": "success", "is_error": False, "session_id": session,
              "num_turns": 1, "stop_reason": "end_turn", "permission_denials": [], "result": json.dumps(receipt)}]
         stream = "".join(json.dumps(e) + "\n" for e in events).encode()
@@ -416,7 +416,7 @@ def reviewed_stage(closed_stage, monkeypatch):
         run = directory / name; run.mkdir(mode=0o700)
         a.write_new(run / "plan.json", a.encode(plan))
         result = {"decision": "APPROVE", "findings": [], "proposal_sha256": a.digest(a.encode(plan)), "source_head": context["source_head"]}
-        stream = (json.dumps({"type": "system", "subtype": "init", "session_id": session, "model": settings["model"], "tools": ["Read", "Glob", "Grep"], "mcp_servers": [], "plugins": []}) + "\n" +
+        stream = (json.dumps({"type": "system", "subtype": "init", "session_id": session, "model": settings["model"], "tools": ["mcp_list"], "mcp_servers": [], "plugins": []}) + "\n" +
             json.dumps({"type": "result", "subtype": "success", "is_error": False, "session_id": session, "num_turns": 1, "stop_reason": "end_turn", "permission_denials": [], "result": json.dumps(result)}) + "\n").encode()
         a.write_new(run / "stream.jsonl", stream)
         a.write_new(run / "prompt.txt", a._review_prompt(plan).encode())
@@ -662,7 +662,7 @@ def _synthetic_chunk_approval(root, directory, runtime, index):
     run = directory / ("review-" + str(index).zfill(4)); run.mkdir(mode=0o700)
     settings = ai.role_settings(root, "final_reviewer"); session = "synthetic-exact-chunk-" + str(index)
     value = {"decision": "APPROVE", "findings": [], "proposal_sha256": a.digest(a.encode(plan)), "source_head": plan["repository"]["head"]}
-    events = [{"type": "system", "subtype": "init", "session_id": session, "model": settings["model"], "tools": ["Read"],
+    events = [{"type": "system", "subtype": "init", "session_id": session, "model": settings["model"], "tools": ["mcp_list"],
         "mcp_servers": [], "plugins": []}, {"type": "result", "subtype": "success", "is_error": False, "session_id": session,
         "num_turns": 1, "stop_reason": "end_turn", "permission_denials": [], "result": json.dumps(value)}]
     stream = "".join(json.dumps(e) + "\n" for e in events).encode(); prompt = a._review_prompt(plan).encode()
@@ -754,7 +754,7 @@ def _synthetic_closeout_review(root, plan):
     role_raw = (root / ai.AI_CONFIG_REL).read_bytes(); role = json.loads(role_raw)["roles"]["final_reviewer"]
     relative = Path(".local/two-site-refactor/review-bridge/runs") / ("c" * 32); run = root / relative; run.mkdir(parents=True, exist_ok=True)
     session = "synthetic-producer-closeout"; stream = (json.dumps({"type": "system", "subtype": "init", "session_id": session,
-        "model": role["model"], "tools": ["Read"], "mcp_servers": [], "plugins": []}) + "\n" + json.dumps({"type": "result",
+        "model": role["model"], "tools": ["mcp_list"], "mcp_servers": [], "plugins": []}) + "\n" + json.dumps({"type": "result",
         "subtype": "success", "is_error": False, "session_id": session, "num_turns": 1, "stop_reason": "end_turn", "permission_denials": [],
         "result": json.dumps(receipt)}) + "\n").encode()
     prompt = b"SYNTHETIC COMPLETE CLOSEOUT REVIEW PROMPT"
@@ -839,7 +839,7 @@ def test_scope_proposal_is_actual_configured_coordinator_sdk_and_bound_to_protec
     monkeypatch.setattr(ai, "load_runtime_config", lambda _: {"coordinator": runtime})
     prompt = a._scope_proposal_prompt(root, context, eligible, expires).encode(); assert len(prompt) < a.LIMIT
     events = [{"type": "system", "subtype": "init", "session_id": "synthetic-coordinator-scope-author", "model": settings["model"],
-        "tools": ["Read"], "mcp_servers": [], "plugins": []}, {"type": "result", "subtype": "success", "is_error": False,
+        "tools": ["mcp_list"], "mcp_servers": [], "plugins": []}, {"type": "result", "subtype": "success", "is_error": False,
         "session_id": "synthetic-coordinator-scope-author", "num_turns": 1, "stop_reason": "end_turn", "permission_denials": [], "result": json.dumps(value)}]
     stream = "".join(json.dumps(e) + "\n" for e in events).encode(); a.write_new(directory / "stream.jsonl", stream); a.write_new(directory / "prompt.txt", prompt)
     capture = {"kind": "QODER_NEXT_SCOPE_PROPOSAL_V1", "source_head": context["source_head"], "expires_at": expires,

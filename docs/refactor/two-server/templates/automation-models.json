@@ -2,7 +2,12 @@
   "schema_version": 1,
   "qoder_execution": {
     "max_output_tokens": 262144,
-    "max_thinking_tokens": 32768
+    "max_thinking_tokens": 32768,
+    "role_max_thinking_tokens": {
+      "proposal_author": 65536,
+      "final_reviewer": 65536
+    },
+    "max_model_request_retries": 0
   },
   "roles": {
     "coordinator": {

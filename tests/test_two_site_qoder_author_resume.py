@@ -160,6 +160,40 @@ def test_process_custody_accepts_current_bounded_thinking_form(episode):
         os.killpg(candidate.pid, signal.SIGKILL); candidate.wait(timeout=5)
 
 
+@pytest.mark.parametrize("retries", [0, 1, 2])
+def test_process_custody_accepts_bounded_model_retry_control(episode, retries):
+    _, directory, process, values, _ = episode
+    stopped(process); (directory / resume.CUSTODY).unlink()
+    command = tool_free_command()
+    index = command.index("--output-format")
+    command[index:index] = ["--max-model-request-retries", str(retries)]
+    candidate = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        custody = resume.persist_author_process(directory, candidate, **values,
+            command_sha256=resume.digest(resume.encode(command)))
+        assert custody["owner"]["pid"] == candidate.pid
+    finally:
+        os.killpg(candidate.pid, signal.SIGKILL); candidate.wait(timeout=5)
+
+
+@pytest.mark.parametrize("retries", [-1, 3, "adaptive"])
+def test_process_custody_rejects_unbounded_or_noninteger_model_retry_control(episode, retries):
+    _, directory, process, values, _ = episode
+    stopped(process); (directory / resume.CUSTODY).unlink()
+    command = tool_free_command()
+    index = command.index("--output-format")
+    command[index:index] = ["--max-model-request-retries", str(retries)]
+    candidate = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    try:
+        with pytest.raises(resume.AuthorResumeError, match="MODEL_RETRIES"):
+            resume.persist_author_process(directory, candidate, **values,
+                command_sha256=resume.digest(resume.encode(command)))
+    finally:
+        os.killpg(candidate.pid, signal.SIGKILL); candidate.wait(timeout=5)
+
+
 @pytest.mark.parametrize("artifact", sorted(resume.SUCCESS | {"capture.json"}))
 def test_any_completed_or_partly_published_success_requires_reconciliation_not_fresh_generation(episode, artifact):
     _, directory, process, _, _ = episode

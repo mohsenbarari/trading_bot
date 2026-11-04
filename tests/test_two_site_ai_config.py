@@ -102,6 +102,39 @@ def test_qoder_thinking_budget_is_typed_bounded_and_below_output(tmp_path, value
         config.load_ai_config(tmp_path)
 
 
+def test_qoder_role_thinking_budgets_are_closed_and_detached(tmp_path):
+    path = write_policy(tmp_path); data = json.loads(path.read_text())
+    loaded = config.load_ai_config(tmp_path)
+    assert loaded["qoder_execution"]["role_max_thinking_tokens"] == {
+        "proposal_author": 65536, "final_reviewer": 65536}
+    loaded["qoder_execution"]["role_max_thinking_tokens"]["proposal_author"] = 1024
+    assert config.load_ai_config(tmp_path) == data
+
+
+@pytest.mark.parametrize("budgets,code", [
+    ({}, "AI_CONFIG_QODER_ROLE_THINKING_FIELDS"),
+    ({"unknown": 65536}, "AI_CONFIG_QODER_ROLE_THINKING_FIELDS"),
+    ({"proposal_author": True}, "AI_CONFIG_QODER_ROLE_THINKING_TOKENS"),
+    ({"proposal_author": 1023}, "AI_CONFIG_QODER_ROLE_THINKING_TOKENS"),
+    ({"proposal_author": 262144}, "AI_CONFIG_QODER_ROLE_THINKING_TOKENS"),
+])
+def test_qoder_role_thinking_budgets_fail_closed(tmp_path, budgets, code):
+    path = write_policy(tmp_path); data = json.loads(path.read_text())
+    data["qoder_execution"]["role_max_thinking_tokens"] = budgets
+    path.write_text(json.dumps(data)); path.chmod(0o600)
+    with pytest.raises(config.AIConfigError, match=code):
+        config.load_ai_config(tmp_path)
+
+
+@pytest.mark.parametrize("value", [True, -1, 3, "0", None])
+def test_qoder_model_request_retries_are_typed_and_bounded(tmp_path, value):
+    path = write_policy(tmp_path); data = json.loads(path.read_text())
+    data["qoder_execution"]["max_model_request_retries"] = value
+    path.write_text(json.dumps(data)); path.chmod(0o600)
+    with pytest.raises(config.AIConfigError, match="AI_CONFIG_QODER_MODEL_RETRIES"):
+        config.load_ai_config(tmp_path)
+
+
 @pytest.mark.parametrize("kind", ["symlink", "hardlink", "group-write", "oversize"])
 def test_unsafe_policy_file_is_rejected(tmp_path, kind):
     path = write_policy(tmp_path)

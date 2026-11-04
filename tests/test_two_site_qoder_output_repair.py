@@ -40,6 +40,11 @@ def fx(tmp_path, monkeypatch):
     write(root / helper.config.AI_RUNTIME_REL, runtime)
     role = {"provider": "qoder", "model": "fixture-configured-model", "reasoning_effort": "high"}
     ai = {"schema_version": 1, "roles": {"coordinator": role, "final_reviewer": role}}
+    public_template = (Path(__file__).resolve().parents[1] / helper.config.AI_CONFIG_REL)
+    public_policy = json.loads(public_template.read_text())
+    for name in ("coordinator", "final_reviewer"):
+        public_policy["roles"][name] = copy.deepcopy(role)
+    write(root / helper.config.AI_CONFIG_REL, public_policy)
     monkeypatch.setattr(helper.config, "load_ai_config", lambda _root: copy.deepcopy(ai))
     identity = {"provider": "qoder", **pin, "model": role["model"], "reasoning": "high",
                 "logged_in": True, "auto_update_enabled": False}
