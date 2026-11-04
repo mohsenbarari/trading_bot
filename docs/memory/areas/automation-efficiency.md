@@ -7,6 +7,7 @@
 - No user Stage approval. Human Web Writer, protected refs, production/external-action scope, exact bytes and independent review remain mandatory.
 
 ## Runtime
+- A final CLI timeout can wrap an earlier real output-limit ERROR: inspect the bounded raw terminal stream before classifying transient failure. If fixed DATA repeatedly exhausts thinking without code, materialize reviewed public DATA separately with explicit Root provenance and zero acceptance credit; send Gemini a fresh witness-only task through every normal gate. Preserve failed reservations and attempt budgets.
 - Outside Broker owns native/network-isolated tests and requires final-Qoder-review policy. Reuse native PASS only for identical source/task/candidate/selectors/environment; no nested or duplicate execution.
 - Contained Coordinator must load the actual Assignment through two exact public read-only control mounts, never the parent checkout or whole `.local` tree.
 - Only proven transient late Reviewer failures reuse Worker/native/reservation in finite persisted fresh-session batches. Semantic/quota failures, Source drift, accepted work or uncertain effects never permit blind replay or counter reset.

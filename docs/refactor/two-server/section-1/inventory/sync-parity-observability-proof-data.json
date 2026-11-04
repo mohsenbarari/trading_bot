@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "assignment_scope_sha256": "80208105800094b4904f1d57dfaf3c9873bac20e1fd5a4083366e72f466e4dd1",
+  "task_id": "root-sync-parity-accepted-proof-data-20261104-001",
+  "scenario_key": "root-materialized-accepted-sync-proof-data-before-gemini-witness",
+  "source_head": "34c7dcf72c8a6aacb5fb0ba41b0d14110c73799f",
+  "canonical_gap_reference": "docs/refactor/two-server/section-1/inventory/scenario-records.json#P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+  "packet_role": "ROOT_MATERIALIZED_PUBLIC_DATA_PENDING_GEMINI_WITNESS",
+  "root_materialization": {
+    "authorship": "ROOT_MECHANICAL_PUBLIC_DATA",
+    "source_base": "34c7dcf72c8a6aacb5fb0ba41b0d14110c73799f",
+    "failed_task_id": "p1-00b-sync-parity-proof-capture-20261103-a001",
+    "failed_task_accepted": false,
+    "fresh_gemini_witness_required": true,
+    "canonical_acceptance_claimed": false
+  },
+  "at_capture": {
+    "observed_source_head": "34c7dcf72c8a6aacb5fb0ba41b0d14110c73799f",
+    "manifest_path": "docs/refactor/two-server/section-1/inventory/seed-handler-coverage.json",
+    "manifest_utf8_bytes": 5300,
+    "manifest_sha256": "104bd90d521a6c113b95220dd501d9e556cd93183f5f0cf484f1983710e1089a",
+    "evidence_source_keys": 33,
+    "counts": {
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 263,
+      "evidenced_seed_count": 398,
+      "remaining_seed_count": 67
+    },
+    "packet_canonical_mapping_present": false,
+    "manifest_written_by_A": false,
+    "ledger_written_by_A": false,
+    "ledger_path": "docs/refactor/two-server/section-1/00-stage-ledger.md",
+    "ledger_prefix_utf8_bytes": 116148,
+    "ledger_prefix_sha256": "80b1fa5e71bbf440a2ce09f3236f935cbf0882ce2ecd1cc80679a6765912dbdb"
+  },
+  "accepted_unit": {
+    "module_path": "tests/test_p1_00b_characterization_sync_parity_observability_downstream_failures.py",
+    "module_utf8_bytes": 18621,
+    "module_sha256": "60af10dffb832584b55ab8462af9d7a730a1ef0c76b1983f6069214ed5c39a1f",
+    "mode": "100644",
+    "accepted_commit": "3ac62a6396f92d5c4d330b76843ca88cfdcb4ae0",
+    "parent_commit": "cd5e42f2a61a115e79ad855514de74aaf88d0843",
+    "proposal_source_head": "cd5e42f2a61a115e79ad855514de74aaf88d0843",
+    "task_id": "p1-00b-sync-parity-observability-downstream-failures-20261103-c001",
+    "task_path": ".local/two-site-refactor/tasks/p1-00b-sync-parity-observability-downstream-failures-20261103-c001.json",
+    "scenario_key": "P1-00B-SYNC-PARITY-OBSERVABILITY-DOWNSTREAM-FAILURE-SEAMS.snapshot-builder-valueerror-and-parity-status-store-failure",
+    "authorship": "GEMINI_WORKER",
+    "worker_run_id": "p1-00b-sync-parity-c001-20261103T201727Z-worker-0",
+    "worker_conversation_id": "984ecc84-f348-4082-a6c9-d1558d2e6e8b",
+    "reviewer_run_id": "p1-00b-sync-parity-c001-20261103T201727Z-reviewer-0",
+    "reviewer_conversation_id": "aa9f2f3e-f327-48e5-897f-59a8a0e03771",
+    "reviewer_role": "verifier",
+    "model": "gemini-4-argon-high",
+    "effort": "high",
+    "proposal_sha256": "73b9406ce7bc65a31456b322940e60ec89f56f1b6a645f6f009d9ff726b6bb7b",
+    "gemini_reviewer_state": "VERIFIED",
+    "gemini_reviewer_result_sha256": "a3039df11286a8f043bc70e5b0c20d0b09889b06dbbff60475925f3137d051fa",
+    "gemini_findings": [],
+    "correction_count": 0,
+    "unsupported_specs": [],
+    "native_evidence_path": ".local/two-site-refactor/pipeline/p1-00b-sync-parity-c001-20261103T201727Z/pre-review-tests-0.json",
+    "native_evidence_utf8_bytes": 1937,
+    "native_evidence_sha256": "538d0ddd404094d7860e4f810a7a5a60f2ac14e182f877f6f6047c700b3c5c9c",
+    "native_state": "PASSED",
+    "native_returncode": 0,
+    "qoder_review_receipt_path": ".local/two-site-refactor/qoder-reviews/73b9406ce7bc65a31456b322940e60ec89f56f1b6a645f6f009d9ff726b6bb7b.json",
+    "qoder_review_receipt_utf8_bytes": 2505,
+    "qoder_review_receipt_sha256": "5eb774b62314b1b28b7a4adc963add6183ded342b0672185bab3494d3a9441c1",
+    "qoder_decision": "APPROVE",
+    "qoder_role_config": {
+      "provider": "qoder",
+      "model": "Qwen3.8-Max",
+      "reasoning_effort": "xhigh"
+    }
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_sync_parity_observability_downstream_failures.py",
+      "sha256": "60af10dffb832584b55ab8462af9d7a730a1ef0c76b1983f6069214ed5c39a1f",
+      "utf8_bytes": 18621,
+      "mode": "100644",
+      "accepted_commit": "3ac62a6396f92d5c4d330b76843ca88cfdcb4ae0",
+      "parent_commit": "cd5e42f2a61a115e79ad855514de74aaf88d0843",
+      "canonical_symbol": "api/routers/sync.py:4805",
+      "seed_id": "API-SYNC-GET-SYNC-GET-SYNC-PARITY-SNAPSHOT-L4805",
+      "seed_ids": [
+        "API-SYNC-GET-SYNC-GET-SYNC-PARITY-SNAPSHOT-L4805"
+      ],
+      "scenario": "parity_snapshot_builder_valueerror_becomes_400_before_server_mode_decoration",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_sync_parity_observability_downstream_failures.py::SyncParityObservabilityDownstreamFailureCharacterizationTests::test_parity_snapshot_builder_valueerror_becomes_400_before_server_mode_decoration"
+      ],
+      "historical_provenance": {
+        "family": "SYNC",
+        "method": "GET",
+        "surface_path": "/api/sync/parity/snapshot",
+        "handler": "sync.get_sync_parity_snapshot",
+        "mutation_class": "READ_OR_STREAM",
+        "operation_kind": "READ_QUERY",
+        "surface_inventory": "docs/refactor/two-server/section-1/inventory/surface-api.json"
+      },
+      "characterized_contract": "entrypoint=api/routers/sync.py:get_sync_parity_snapshot; frozen outcome: a parity snapshot builder ValueError becomes HTTPException status_code=400 whose detail equals both the literal 'parity-snapshot-builder-rejected' and str(builder_error), with exc.__cause__ being the identical builder error instance, raised before any snapshot['server_mode'] decoration; downstream calls: exactly one builder await with one positional argument that is the identical inert db probe object and kwargs exactly {'mode': 'deep', 'max_rows_per_table': 7}; db exposure: the inert probe records an empty attribute list (zero attribute access); detail excludes the server-mode sentinel; no mapping is returned (the handler return value stays the unreturned sentinel and is not a Mapping); skipped side effects: get_redis_client, record_sync_parity_summary and audit_log spies are all uncalled; real unpatched helpers exercised: _require_observability_key and constant_time_secret_equals; cleanup: every patched router/core/settings attribute is restored by object identity after the ExitStack.",
+      "exclusions": "success paths and pre-handler mode/limit validation already covered by tests/test_sync_health_endpoint.py; all other failure branches of the same handlers; persistence, retry, process-reload, concurrency and origin-matrix interactions."
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_sync_parity_observability_downstream_failures.py",
+      "sha256": "60af10dffb832584b55ab8462af9d7a730a1ef0c76b1983f6069214ed5c39a1f",
+      "utf8_bytes": 18621,
+      "mode": "100644",
+      "accepted_commit": "3ac62a6396f92d5c4d330b76843ca88cfdcb4ae0",
+      "parent_commit": "cd5e42f2a61a115e79ad855514de74aaf88d0843",
+      "canonical_symbol": "api/routers/sync.py:4833",
+      "seed_id": "API-SYNC-POST-SYNC-RECORD-SYNC-PARITY-STATUS-L4833",
+      "seed_ids": [
+        "API-SYNC-POST-SYNC-RECORD-SYNC-PARITY-STATUS-L4833"
+      ],
+      "scenario": "parity_status_redis_store_failure_becomes_503_and_skips_parity_summary_telemetry",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_sync_parity_observability_downstream_failures.py::SyncParityObservabilityDownstreamFailureCharacterizationTests::test_parity_status_redis_store_failure_becomes_503_and_skips_parity_summary_telemetry"
+      ],
+      "historical_provenance": {
+        "family": "SYNC",
+        "method": "POST",
+        "surface_path": "/api/sync/parity/status",
+        "handler": "sync.record_sync_parity_status",
+        "mutation_class": "MUTATION_OR_COMMAND",
+        "operation_kind": "CRUD_MUTATION",
+        "surface_inventory": "docs/refactor/two-server/section-1/inventory/surface-api.json"
+      },
+      "characterized_contract": "entrypoint=api/routers/sync.py:record_sync_parity_status; frozen outcome: a Redis set failure becomes HTTPException status_code=503 with detail exactly 'Could not store sync parity status' and __cause__ chaining to the identical Redis error; redis exposure: exactly one zero-argument get_redis_client call and exactly one set call with positional args ('sync:parity:latest_comparison', stored_value) and kwargs {'ex': 86400}; stored_value is canonical compact sorted JSON of the summary produced by the real summarize_parity_comparison, containing fresh=False, age_seconds>0, comparison counts 2/0/1, artifact_metadata exactly {'snapshot_mode': 'deep'}, artifact_metadata_complete=False, the ten ordered ARTIFACT_METADATA_REQUIRED_FIELDS excluding snapshot_mode, plus server_mode set to the server-mode sentinel and a Z-suffixed stored_at; telemetry: exactly one structured warning called with ('Could not store sync parity status',) and extra carrying event 'sync.parity_status.store_failed', the server-mode sentinel and the real _summarize_exception error_type/error_digest; skipped side effects: record_sync_parity_summary and audit_log are uncalled and the logger spy records empty info_calls and empty other_calls; the caller comparison object equals its expected input snapshot (unmutated); no mapping is returned; real unpatched helpers exercised: _require_observability_key, constant_time_secret_equals, _coerce_parity_status_max_age_seconds, _summarize_exception and summarize_parity_comparison; cleanup: every patched attribute is restored by object identity after the ExitStack.",
+      "exclusions": "success paths and pre-handler mode/limit validation already covered by tests/test_sync_health_endpoint.py; all other failure branches of the same handlers; persistence, retry, process-reload, concurrency and origin-matrix interactions."
+    }
+  ],
+  "canonical_integration": {
+    "status_at_capture": "PENDING_FRESH_B",
+    "packet_canonical_at_capture": false,
+    "counts_mutated_by_A": false,
+    "canonical_manifest_mapping_written_by_A": false,
+    "ledger_written_by_A": false,
+    "raw_registration_delta_by_A": 0,
+    "new_canonical_seed_credit_by_A": 0,
+    "conditional_B_target": {
+      "requires": "Fresh actual acceptance of a Gemini witness for this distinct Root-materialized public DATA, then a fresh independently accepted canonical-integration B",
+      "manifest_mapping_key": "sync_parity_observability_downstream_failure_registration_path",
+      "desired_counts": {
+        "baseline_evidenced_seed_count": 135,
+        "reconciled_new_seed_count": 265,
+        "evidenced_seed_count": 400,
+        "remaining_seed_count": 65
+      },
+      "delta_distinct_seed_count": 2,
+      "raw_registration_delta": 2,
+      "desired_live_membership": {
+        "surface": 465,
+        "baseline": 135,
+        "evidenced": 400,
+        "remaining": 65
+      }
+    }
+  },
+  "count_freeze_conflict": {
+    "status": "RESOLVED_BY_REVIEWED_HISTORICAL_PROJECTION",
+    "reviewed_maintenance_source": "34c7dcf72c8a6aacb5fb0ba41b0d14110c73799f",
+    "reviewed_helper_module": "tests/p1_00b_membership_history.py",
+    "retained_historical_witness_pins": [
+      {
+        "prefix_keys": 31,
+        "ends_with": "business_768_current_session_group_closeout_path",
+        "utf8_bytes": 5010,
+        "sha256": "390d43899fa2e3cd1ee3f9e7d7491524565ccaafdb08801676d8c77b6eca3f2e"
+      },
+      {
+        "prefix_keys": 32,
+        "ends_with": "business_768_post_security_five_registration_path",
+        "utf8_bytes": 5159,
+        "sha256": "06eca7deee14ce9d3126c5b7aa5f528881e2cf02bcd4175cc8e1e703f8ded366"
+      }
+    ],
+    "resolution": "The reviewed projection preserves accepted historical byte/SHA proofs and permits a later verified400/65 live state. This packet captures398/67 only; it performs no canonical promotion and needs a fresh B. No further owner decision is pending."
+  },
+  "accounting": {
+    "proof_capture_status_on_exact_gemini_witness_acceptance": "COMPLETE_DATA_CAPTURE_ONLY",
+    "captured_previously_accepted_behavior_units": 1,
+    "captured_previously_accepted_scenarios": 2,
+    "canonical_registration_status_at_capture": "PENDING_FRESH_B",
+    "ledger_integration_status_at_capture": "PENDING_FRESH_B",
+    "canonical_manifest_count_integration_status_at_capture": "PENDING_FRESH_B",
+    "group_reconciliation_complete": false,
+    "added_behavior_units": 0,
+    "accepted_full_seeds": 0,
+    "full_seed_acceptance": "NOT_ASSESSED",
+    "other_unreconciled_accepted_units": [
+      {
+        "path": "tests/test_p1_00b_characterization_admin_users_search_fsm_boundary_failures_batch.py",
+        "utf8_bytes": 19966,
+        "sha256": "92868f6c675c111a497108424151e1e6645ebbfa7c9da3bead69ca4971d4c939",
+        "accepted_commit": "96e28da8375fc27b5f2eec4e7492726ee1092d28",
+        "handler_scenarios": 2,
+        "registered_by_this_unit": false
+      }
+    ]
+  },
+  "strict_canonical_progress": {
+    "proven": 288,
+    "partial": 177,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}
