@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-QODER-HANDOFF-20261104-001",
+  "assignment_scope_sha256": "ade968b9b0aaf465eb40e807286c88d0a9afa733c8699b234e94188adbdc0a5a",
+  "task_id": "p1-00b-identity-users-boundary-registration-20261105-c001",
+  "scenario_key": "identity-users-delete-terminate-update-boundaries-canonical-registration",
+  "source_head": "1bdcfc89819056fc4e387a75e02efd0692688b66",
+  "status": "PARTIAL_CANONICAL_INTEGRATION",
+  "receipt_type": "PARTIAL_CANONICAL_INTEGRATION",
+  "source": {
+    "accepted_source_commit": "20741e609ca8851c5f5a73e5c2a36abf21e2b3f7",
+    "accepted_parent": "6004f5f8e4f86f10f11a8f700230c1f2a879505e"
+  },
+  "evidence_authority": "PREEXISTING_TRACKED_CHARACTERIZATION_TESTS_UNCHANGED_BY_THIS_UNIT",
+  "provenance_note": "The three evidence files are pre-existing tracked characterization tests unchanged by this unit; each record pins its own last_commit, sha256, mode and resolvable selectors. This receipt registers raw seed coverage only and adds no test, behavior, origin or Stage credit.",
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_users_delete.py",
+      "sha256": "1b6eda74b5faef1931e71b895ca24f648c6afe1c5c88bb9a0073ab60f9021bb0",
+      "utf8_bytes": 6759,
+      "mode": "100644",
+      "last_commit": "63a9d0b9f871cb4c8e7f1621271bbfed2614acfc",
+      "canonical_symbol": "api/routers/users.py:delete_user",
+      "seed_ids": [
+        "API-IDENTITY-DELETE-USERS-DELETE-USER-L655"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_delete.py::UsersDeleteCharacterizationTests::test_delete_user_success",
+        "tests/test_p1_00b_characterization_users_delete.py::UsersDeleteCharacterizationTests::test_delete_user_not_found",
+        "tests/test_p1_00b_characterization_users_delete.py::UsersDeleteCharacterizationTests::test_delete_user_already_soft_deleted",
+        "tests/test_p1_00b_characterization_users_delete.py::UsersDeleteCharacterizationTests::test_delete_user_middle_manager_cannot_mutate_super_admin",
+        "tests/test_p1_00b_characterization_users_delete.py::UsersDeleteCharacterizationTests::test_delete_user_account_failure_raises_500"
+      ],
+      "characterized_boundary": "DELETE lookup, not-found/soft-deleted guard, middle-manager authority denial, delete-account failure to HTTP 500, success audit summary",
+      "excluded": [
+        "HTTP dependency/full authorization stack",
+        "real database transaction interiors",
+        "origin interaction matrix",
+        "full-seed acceptance",
+        "Stage closure"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_terminate_sessions.py",
+      "sha256": "28c21ce842041261796a3c9a3d49692d9096792583d5b6782c3926d97067e052",
+      "utf8_bytes": 7169,
+      "mode": "100644",
+      "last_commit": "e993400d638f5472e26e17775dc513a17d521ddf",
+      "canonical_symbol": "api/routers/users.py:terminate_user_sessions",
+      "seed_ids": [
+        "API-IDENTITY-POST-USERS-TERMINATE-USER-SESSIONS-L691"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_terminate_sessions.py::UsersTerminateSessionsCharacterizationTests::test_terminate_user_sessions_success_lower_role_target",
+        "tests/test_p1_00b_characterization_users_terminate_sessions.py::UsersTerminateSessionsCharacterizationTests::test_terminate_user_sessions_not_found_when_missing",
+        "tests/test_p1_00b_characterization_users_terminate_sessions.py::UsersTerminateSessionsCharacterizationTests::test_terminate_user_sessions_not_found_when_is_deleted",
+        "tests/test_p1_00b_characterization_users_terminate_sessions.py::UsersTerminateSessionsCharacterizationTests::test_terminate_user_sessions_authorization_guard_middle_manager_targeting_super_admin",
+        "tests/test_p1_00b_characterization_users_terminate_sessions.py::UsersTerminateSessionsCharacterizationTests::test_terminate_user_sessions_force_clear_failure_propagates_and_skips_audit",
+        "tests/test_p1_00b_characterization_users_terminate_sessions.py::UsersTerminateSessionsCharacterizationTests::test_terminate_user_sessions_audit_failure_propagates_after_clearing_sessions"
+      ],
+      "characterized_boundary": "session termination lookup, not-found/is_deleted guard, middle-manager authority denial, force-clear failure propagation before audit, audit failure propagation after clearing",
+      "excluded": [
+        "HTTP dependency/full authorization stack",
+        "real Redis/session-store interiors",
+        "origin interaction matrix",
+        "full-seed acceptance",
+        "Stage closure"
+      ]
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_users_update_lookup_failure.py",
+      "sha256": "9b23c14c2cfab88035a69b796ded73583c8adadacd25264d950b427840b64c2f",
+      "utf8_bytes": 2992,
+      "mode": "100644",
+      "last_commit": "20741e609ca8851c5f5a73e5c2a36abf21e2b3f7",
+      "canonical_symbol": "api/routers/users.py:update_user",
+      "seed_ids": [
+        "API-IDENTITY-PUT-USERS-UPDATE-USER-L453"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_users_update_lookup_failure.py::UsersUpdateLookupFailureCharacterizationTests::test_update_user_lookup_failure_propagates_unchanged"
+      ],
+      "characterized_boundary": "update_user initial db.get lookup exception propagation before actor authority, audit, model dump or write calls",
+      "excluded": [
+        "update success paths",
+        "actor authority outcomes",
+        "real persistence/service interiors",
+        "origin interaction matrix",
+        "full-seed acceptance",
+        "Stage closure"
+      ]
+    }
+  ],
+  "promotion_assessment": {
+    "registered_seed_ids": [
+      "API-IDENTITY-DELETE-USERS-DELETE-USER-L655",
+      "API-IDENTITY-POST-USERS-TERMINATE-USER-SESSIONS-L691",
+      "API-IDENTITY-PUT-USERS-UPDATE-USER-L453"
+    ],
+    "delta_distinct_seed_count": 3,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 266,
+      "evidenced": 401,
+      "remaining": 64
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 269,
+      "evidenced": 404,
+      "remaining": 61
+    },
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "manifest_registration": {
+    "added_key": "identity_users_boundary_registration_path",
+    "added_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-identity-users-boundary-registration.json",
+    "before_utf8_bytes": 5662,
+    "before_sha256": "ea23866be378404f12c3ae4475babf284aa834b3a1319cdf7e7bbdc8ee9ba54e",
+    "after_utf8_bytes": 5825,
+    "after_sha256": "23b3a56d64c6596034eb722fdcdc55d5969112ac884479dc77d39b2c93857a6b",
+    "raw_evidenced_before": 401,
+    "raw_evidenced_after_on_exact_acceptance": 404,
+    "raw_remaining_after_on_exact_acceptance": 61,
+    "delta_distinct_seed_count": 3
+  },
+  "proof_limits": {
+    "record_proves_only_declared_handler_boundaries": true,
+    "full_handler_and_full_seed_acceptance": "NOT_ASSESSED",
+    "no_origin_High_or_Stage_closure": true
+  },
+  "reconciliation": {
+    "canonical_base_capture_units_since_reconciliation": 0,
+    "registered_evidence_files_in_this_unit": 3,
+    "units_since_reconciliation_on_exact_acceptance": 1,
+    "threshold": 5,
+    "group_reconciliation_complete": false,
+    "canonical_base_edited": false,
+    "capture_is_not_future_live_counter_constraint": true
+  },
+  "accounting": {
+    "added_behavior_units": 0,
+    "added_handler_scenarios": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 3,
+    "ledger_edited": false,
+    "scenario_records_and_recent_characterization_edited": false
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}
