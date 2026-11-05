@@ -6,6 +6,11 @@
   Then explicitly select the fully staged prediction epoch for the parser;
   receiving snapshots alone never changes its authority. Verify that selected
   epoch's fresh anchors and an actual unnamed cash offer through the pipeline.
+- Recently resolved historical group facts need a bounded export share by their
+  new availability time, using the existing source/availability index. Source
+  event time stays historical; cyclic history discovery alone delays corrected
+  review tags. Reconcile via the normal dirty-group queue. Conditional/late and
+  genuinely ambiguous older facts must keep their actual exclusion reason.
 
 - Engine v9: a fresh private normal-paper minute outranks unconfirmed physical
   offers; preserve fresh verified physical trades. Never use unsettled public

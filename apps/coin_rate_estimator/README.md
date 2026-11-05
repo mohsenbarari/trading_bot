@@ -164,6 +164,11 @@ the complete fresh grid is staged, explicitly select its epoch with
 `coin_estimator_prediction_epoch_fix.yml` and verify actual unnamed cash offers
 against fresh anchors. Merely receiving v9 while the active epoch remains v8
 leaves the parser using old prices and can keep valid offers pending review.
+After a bounded normal reparse, verify the corrected revisions reach the
+dashboard, not only the processor Store. Historical source times remain intact;
+the exporter reserves a bounded group share for newly available revisions while
+preserving live-source and history capacity. Conditional or late facts stay
+audit-only, and a price without enough contemporaneous evidence stays in review.
 
 Coin-group collector liveness, stored activity and model eligibility are also
 separate. The dashboard lists the selected five-minute live anchor and the
