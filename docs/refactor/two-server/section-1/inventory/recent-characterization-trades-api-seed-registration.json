@@ -1,0 +1,319 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-QODER-HANDOFF-20261105-002",
+  "assignment_scope_sha256": "e3150c15246bbb1f8fefc07c9594b3b098bc0b3e8934f85eccef706aa13a24f2",
+  "parent_assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "original_parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "task_id": "p1-00b-trades-api-seed-registration-20261105-c001",
+  "scenario_key": "trades-api-seed-evidence-canonical-registration",
+  "status": "PARTIAL_CANONICAL_INTEGRATION",
+  "receipt_type": "PARTIAL_CANONICAL_INTEGRATION",
+  "source": {
+    "accepted_source_commit": "8beb15d91b016e958c468d1bb819e90e9a4efe59",
+    "accepted_parent": "ee7781a61ba998d9418cb57a768fa4cb1a62b142",
+    "source_head": "8beb15d91b016e958c468d1bb819e90e9a4efe59",
+    "provenance": "PREEXISTING_TRACKED_CHARACTERIZATION_TESTS_UNCHANGED_BY_THIS_UNIT"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_webapp_offer_webapp_trade_success.py",
+      "sha256": "c2146f9b5bc1260f9f3a2265eb511d0c259c6ee74c30798baa1694b87454658f",
+      "utf8_bytes": 11009,
+      "mode": "100644",
+      "git_blob_sha1": "12fca510a10212d1c1c6e0d9e3943ef659f202b5",
+      "last_commit": "568d2a6f33ea67e9cb0db06ccd2cc5edd42ecac9",
+      "canonical_symbol": "api/routers/trades.py:4853",
+      "handler": "trades.create_trade",
+      "seed_ids": [
+        "API-TRADE-POST-TRADES-CREATE-TRADE-L4853"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_webapp_offer_webapp_trade_success.py::P100bWebappOfferWebappTradeSuccessCharacterizationTests::test_webapp_offer_webapp_create_trade_persists_combined_path_once"
+      ],
+      "characterized_boundary": "WEBAPP_OFFER_WEBAPP_CREATE_TRADE_PERSISTS_TRADE_AND_OFFER_REQUEST_ONCE",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_internal_offer_webapp_trade_success.py",
+      "sha256": "8807da3192eb96ef0e76b00ee646616e1270f19155cfbaf94b9d0c932e7f0d89",
+      "utf8_bytes": 9650,
+      "mode": "100644",
+      "git_blob_sha1": "d71bdbfde741299ddfcf2476bd3a7a5fa052a73e",
+      "last_commit": "576015656717066bf08194af3ebdcada49758bc3",
+      "canonical_symbol": "api/routers/trades.py:4853",
+      "handler": "trades.create_trade",
+      "seed_ids": [
+        "API-TRADE-POST-TRADES-CREATE-TRADE-L4853"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_internal_offer_webapp_trade_success.py::P100bInternalOfferWebappTradeSuccessCharacterizationTests::test_internal_offer_webapp_create_trade_persists_combined_path_once"
+      ],
+      "characterized_boundary": "INTERNAL_OFFER_WEBAPP_CREATE_TRADE_PERSISTS_COMBINED_PATH_ONCE",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_telegram_offer_webapp_trade_success.py",
+      "sha256": "9e770ea55476a83cf8cc37ec41f7b23315030088b6564c9cdc1a676e1f3e120a",
+      "utf8_bytes": 10063,
+      "mode": "100644",
+      "git_blob_sha1": "7685b880a047f850a34e86c4b2edb3c087b36c63",
+      "last_commit": "abcd79007dfdc9e609d6a78467628728afcfd574",
+      "canonical_symbol": "api/routers/trades.py:4853",
+      "handler": "trades.create_trade",
+      "seed_ids": [
+        "API-TRADE-POST-TRADES-CREATE-TRADE-L4853"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_telegram_offer_webapp_trade_success.py::P100bTelegramOfferWebappTradeSuccessCharacterizationTests::test_telegram_offer_webapp_create_trade_persists_on_foreign_home_once"
+      ],
+      "characterized_boundary": "TELEGRAM_OFFER_WEBAPP_CREATE_TRADE_PERSISTS_ON_FOREIGN_HOME_ONCE",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_webapp_offer_webapp_tier2_policy_snapshot.py",
+      "sha256": "933852669117d04ba842c2eaaca8d3a7de4b52930ed60cc3108e9a366df3b2f0",
+      "utf8_bytes": 16102,
+      "mode": "100644",
+      "git_blob_sha1": "830f3bb46edcb2f6f099ea6667a35649eb334caf",
+      "last_commit": "d808241b6820bf28e202cbc27f888d27ea171e50",
+      "canonical_symbol": "api/routers/trades.py:4853",
+      "handler": "trades.create_trade",
+      "seed_ids": [
+        "API-TRADE-POST-TRADES-CREATE-TRADE-L4853"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_webapp_offer_webapp_tier2_policy_snapshot.py::P100bWebappOfferWebappTier2PolicySnapshotCharacterizationTests::test_webapp_offer_webapp_tier2_customer_snapshots_relation_and_commission"
+      ],
+      "characterized_boundary": "WEBAPP_OFFER_WEBAPP_TIER2_POLICY_SNAPSHOT_RELATION_AND_COMMISSION",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py",
+      "sha256": "ae8728c52cc4f5fdd97491a52d218edd05199421bca8619f1174def02007c0cd",
+      "utf8_bytes": 23983,
+      "mode": "100644",
+      "git_blob_sha1": "3bc5b6b181ac45404d28d36486f70a743ba6fccf",
+      "last_commit": "58fe013c89c81679a60a29feaed86870599ee01f",
+      "canonical_symbol": "api/routers/trades.py:4853",
+      "handler": "trades.create_trade",
+      "seed_ids": [
+        "API-TRADE-POST-TRADES-CREATE-TRADE-L4853"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py::P100bTelegramOfferWebappPolicySnapshotCharacterizationTests::test_telegram_offer_webapp_tier2_customer_snapshots_relation_and_commission",
+        "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py::P100bTelegramOfferWebappPolicySnapshotCharacterizationTests::test_telegram_offer_webapp_accountant_context_rejected_early_with_403",
+        "tests/test_p1_00b_characterization_telegram_offer_webapp_policy_snapshot.py::P100bTelegramOfferWebappPolicySnapshotCharacterizationTests::test_telegram_offer_webapp_super_admin_eligible_without_customer_relation"
+      ],
+      "characterized_boundary": "TELEGRAM_OFFER_WEBAPP_POLICY_SNAPSHOT_TIER2_ACCOUNTANT_DENIAL_AND_SUPER_ADMIN",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_trades_router_execution_wrappers.py",
+      "sha256": "5c3ed8ecf8bd6de564ebaf12dce3b7713e6c5a4efbb7de3a1711d49b6d4bda57",
+      "utf8_bytes": 17539,
+      "mode": "100644",
+      "git_blob_sha1": "0cf44f840c1a01fffee3ef5d4e93855b74038fde",
+      "last_commit": "6648c28e12011c39899f1714a048057a69d4fc2b",
+      "canonical_symbol": "api/routers/trades.py:4853",
+      "handler": "trades.create_trade",
+      "seed_ids": [
+        "API-TRADE-POST-TRADES-CREATE-TRADE-L4853"
+      ],
+      "test_selectors": [
+        "tests/test_trades_router_execution_wrappers.py::TradesRouterExecutionWrapperTests::test_create_trade_returns_forwarded_response_when_remote_home",
+        "tests/test_trades_router_execution_wrappers.py::TradesRouterExecutionWrapperTests::test_create_trade_returns_remote_failure_without_local_partial_execution",
+        "tests/test_trades_router_execution_wrappers.py::TradesRouterExecutionWrapperTests::test_create_trade_delegates_to_authoritative_execution_when_local"
+      ],
+      "characterized_boundary": "CREATE_TRADE_REMOTE_FORWARD_REMOTE_FAILURE_AND_LOCAL_AUTHORITATIVE_DELEGATION",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_trades_router_execution_wrappers.py",
+      "sha256": "5c3ed8ecf8bd6de564ebaf12dce3b7713e6c5a4efbb7de3a1711d49b6d4bda57",
+      "utf8_bytes": 17539,
+      "mode": "100644",
+      "git_blob_sha1": "0cf44f840c1a01fffee3ef5d4e93855b74038fde",
+      "last_commit": "6648c28e12011c39899f1714a048057a69d4fc2b",
+      "canonical_symbol": "api/routers/trades.py:5319",
+      "handler": "trades.execute_trade_internal",
+      "seed_ids": [
+        "API-TRADE-POST-TRADES-EXECUTE-TRADE-INTERNAL-L5319"
+      ],
+      "test_selectors": [
+        "tests/test_trades_router_execution_wrappers.py::TradesRouterExecutionWrapperTests::test_execute_trade_internal_rejects_invalid_signature",
+        "tests/test_trades_router_execution_wrappers.py::TradesRouterExecutionWrapperTests::test_execute_trade_internal_rejects_wrong_offer_server_or_missing_responder",
+        "tests/test_trades_router_execution_wrappers.py::TradesRouterExecutionWrapperTests::test_execute_trade_internal_rejects_missing_mismatched_or_local_source_server",
+        "tests/test_trades_router_execution_wrappers.py::TradesRouterExecutionWrapperTests::test_execute_trade_internal_delegates_to_authoritative_execution"
+      ],
+      "characterized_boundary": "EXECUTE_TRADE_INTERNAL_SIGNATURE_OFFER_RESPONDER_SOURCE_SERVER_AND_DELEGATION_GUARDS",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_trades_router_reads.py",
+      "sha256": "b6ddb6278bd41a485ec01cba620b1e36a4ec4943d84f0460f9d88ece5c717bfe",
+      "utf8_bytes": 23331,
+      "mode": "100644",
+      "git_blob_sha1": "d3627a3878b7b6b22938e9ad973076b9f6a83e96",
+      "last_commit": "7cb04a2d321540ad3a7c7586c98f4dcb0230ab27",
+      "canonical_symbol": "api/routers/trades.py:5673",
+      "handler": "trades.get_trades_with_user",
+      "seed_ids": [
+        "API-TRADE-GET-TRADES-GET-TRADES-WITH-USER-L5673"
+      ],
+      "test_selectors": [
+        "tests/test_trades_router_reads.py::TradesRouterReadTests::test_get_trades_with_user_short_circuits_self_and_serializes_history",
+        "tests/test_trades_router_reads.py::TradesRouterReadTests::test_get_trades_with_user_switches_to_target_customer_history_for_owner_viewer",
+        "tests/test_trades_router_reads.py::TradesRouterReadTests::test_get_trades_with_user_preserves_target_customer_history_after_relation_status_change",
+        "tests/test_trades_router_reads.py::TradesRouterReadTests::test_get_trades_with_user_hides_foreign_customer_history_from_super_admin",
+        "tests/test_trades_router_reads.py::TradesRouterReadTests::test_get_trades_with_user_switches_to_target_history_for_super_admin_non_customer_target",
+        "tests/test_trades_router_reads.py::TradesRouterReadTests::test_get_trades_with_user_applies_filters_on_pair_history",
+        "tests/test_trades_router_reads.py::TradesRouterReadTests::test_get_trades_with_user_hides_even_mutual_history_for_foreign_customer"
+      ],
+      "characterized_boundary": "GET_TRADES_WITH_USER_SELF_SHORT_CIRCUIT_AND_TARGET_HISTORY_SCOPE_FILTERS",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_offer_overtime_webapp_api_contract.py",
+      "sha256": "7779dfaaaae4f383ec4d3ccd7b8f052d0894f656a1a63ef057ed56f154c634ba",
+      "utf8_bytes": 18177,
+      "mode": "100644",
+      "git_blob_sha1": "5e52d3c6c41a36574a8554807242e11ef03eaff0",
+      "last_commit": "46b3ed19c008aa7b45fa003241f75e20524c5d3f",
+      "canonical_symbol": "api/routers/trades.py:4995",
+      "handler": "trades.approve_overtime_request",
+      "seed_ids": [
+        "API-REQUEST-POST-TRADES-APPROVE-OVERTIME-REQUEST-L4995"
+      ],
+      "test_selectors": [
+        "tests/test_offer_overtime_webapp_api_contract.py::OvertimeDecisionAuthTests::test_approve_rejects_non_owner"
+      ],
+      "characterized_boundary": "APPROVE_OVERTIME_REQUEST_OWNER_ONLY_AUTHORIZATION_BEFORE_APPROVAL_CLAIM",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_offer_overtime_request_cancel_forwarding.py",
+      "sha256": "48e7c83e36d01075b1e386f2baa45bf15cafeb1b601820972d9abe3c83966ee1",
+      "utf8_bytes": 14266,
+      "mode": "100644",
+      "git_blob_sha1": "8f92c03afa25ec38d360ce1bbc4a0c82e538f61d",
+      "last_commit": "46b3ed19c008aa7b45fa003241f75e20524c5d3f",
+      "canonical_symbol": "api/routers/trades.py:5205",
+      "handler": "trades.cancel_overtime_request_internal",
+      "seed_ids": [
+        "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-INTERNAL-L5205"
+      ],
+      "test_selectors": [
+        "tests/test_offer_overtime_request_cancel_forwarding.py::OvertimeCancelRouterTests::test_internal_cancel_is_idempotent_on_authoritative_home",
+        "tests/test_offer_overtime_request_cancel_forwarding.py::OvertimeCancelRouterTests::test_internal_cancel_mutates_once_on_authoritative_home",
+        "tests/test_offer_overtime_request_cancel_forwarding.py::OvertimeCancelRouterTests::test_internal_cancel_accepts_iran_web_source_on_foreign_home"
+      ],
+      "characterized_boundary": "INTERNAL_CANCEL_SIGNATURE_SOURCE_SERVER_IDEMPOTENT_REPLAY_AND_SINGLE_MUTATION",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    }
+  ],
+  "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+  "registered_seed_ids": [
+    "API-TRADE-POST-TRADES-CREATE-TRADE-L4853",
+    "API-TRADE-POST-TRADES-EXECUTE-TRADE-INTERNAL-L5319",
+    "API-TRADE-GET-TRADES-GET-TRADES-WITH-USER-L5673",
+    "API-REQUEST-POST-TRADES-APPROVE-OVERTIME-REQUEST-L4995",
+    "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-INTERNAL-L5205"
+  ],
+  "duplicate_new_seed_ids": [],
+  "removed_seed_ids": [],
+  "promotion_assessment": {
+    "registered_seed_ids": [
+      "API-TRADE-POST-TRADES-CREATE-TRADE-L4853",
+      "API-TRADE-POST-TRADES-EXECUTE-TRADE-INTERNAL-L5319",
+      "API-TRADE-GET-TRADES-GET-TRADES-WITH-USER-L5673",
+      "API-REQUEST-POST-TRADES-APPROVE-OVERTIME-REQUEST-L4995",
+      "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-INTERNAL-L5205"
+    ],
+    "delta_distinct_seed_count": 5,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 278,
+      "evidenced": 413,
+      "remaining": 52
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 283,
+      "evidenced": 418,
+      "remaining": 47
+    },
+    "strict_progress_unchanged": false,
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "manifest_registration": {
+    "added_key": "trades_api_seed_evidence_registration_path",
+    "added_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-trades-api-seed-registration.json",
+    "before_utf8_bytes": 6338,
+    "before_sha256": "d25fe4129e0d66ca30b1f8d32e6139e794939e11154d9a635d48ca8b4546cee1",
+    "after_counts_on_exact_acceptance": {
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 283,
+      "evidenced_seed_count": 418,
+      "remaining_seed_count": 47
+    },
+    "evidence_sources_append_only_last_position": true
+  },
+  "reconciliation": {
+    "canonical_base_capture_units_since_reconciliation": 0,
+    "registered_evidence_files_in_this_unit": 1,
+    "units_since_reconciliation_on_exact_acceptance": 5,
+    "threshold": 5,
+    "group_reconciliation_complete": false,
+    "group_reconciliation_due_on_exact_acceptance": true,
+    "canonical_base_edited": false
+  },
+  "accounting": {
+    "added_behavior_units": 0,
+    "added_handler_scenarios": 0,
+    "registered_existing_characterization_records": 10,
+    "newly_evidenced_seed_count": 5,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 5,
+    "manifest_file_edited_by_this_unit": true,
+    "count_values_changed_by_this_unit": true,
+    "documentation_unit_adds_no_product_behavior": true,
+    "ledger_edited_by_this_unit": false,
+    "scenario_records_and_recent_characterization_edited": false
+  },
+  "strict_canonical_progress": {
+    "proven": 310,
+    "partial": 155,
+    "total": 465
+  },
+  "strict_canonical_progress_on_exact_acceptance": {
+    "proven": 315,
+    "partial": 150,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "excluded": [
+    "full success-path characterization beyond the registered tracked tests",
+    "HTTP routing/Depends/authentication/authorization beyond direct handler invocation",
+    "concurrency/retry/reload beyond the registered tracked tests",
+    "origin interaction cells",
+    "full handler or full seed acceptance",
+    "High blocker resolution",
+    "Stage closure"
+  ]
+}

@@ -50,13 +50,14 @@
     "identity_users_boundary_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-identity-users-boundary-registration.json",
     "sync_health_grouped_row_consumption_failure_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-sync-health-grouped-row-registration.json",
     "auth_session_approval_recovery_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-auth-session-approval-recovery-registration.json",
-    "chat_read_evidence_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-chat-read-evidence-registration.json"
+    "chat_read_evidence_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-chat-read-evidence-registration.json",
+    "trades_api_seed_evidence_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-trades-api-seed-registration.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
-    "reconciled_new_seed_count": 278,
-    "evidenced_seed_count": 413,
-    "remaining_seed_count": 52
+    "reconciled_new_seed_count": 283,
+    "evidenced_seed_count": 418,
+    "remaining_seed_count": 47
   },
   "coverage_status": "PARTIAL",
   "canonical_blockers": [
