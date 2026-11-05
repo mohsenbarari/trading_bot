@@ -771,6 +771,19 @@ class Stage10SnapshotTests(unittest.TestCase):
                 primary,
             )
 
+    def test_receiver_accepts_v8_then_v9_for_receiver_first_rollout(self):
+        previous = self._publish(feed_mode="PRIVATE_PRIMARY")
+        previous["model_version"] = "coin-rate-engine-v8"
+        previous["snapshot_id"] = estimator_snapshot_id(previous)
+        status, response = self._apply_web(previous, allow_private_primary=True)
+        self.assertEqual((status, response["status"]), (200, "ACK"))
+        current = self._publish("2026-08-26T05:00:11Z", feed_mode="PRIVATE_PRIMARY")
+        self.assertEqual(current["model_version"], "coin-rate-engine-v9")
+        status, response = self._apply_web(current, allow_private_primary=True)
+        self.assertEqual((status, response["status"]), (200, "ACK"))
+        published = json.loads((self.web_root / "latest-private-primary.json").read_text())
+        self.assertEqual(published["snapshot"]["model_version"], "coin-rate-engine-v9")
+
     def test_receiver_rejects_future_and_incompatible_model_before_effects(self):
         future = self._publish()
         status, response = self._apply_web(

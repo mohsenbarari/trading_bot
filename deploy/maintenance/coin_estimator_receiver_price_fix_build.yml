@@ -1,0 +1,65 @@
+---
+- name: Prepare the compatible Web reader from its exact current secured image
+  hosts: price_fix_web
+  gather_facts: false
+  vars:
+    receiver_fix_root: /srv/trading-bot/incident-recovery/20261105-melted-reference-v9
+    receiver_base_id: sha256:dfb6aa6374cd26cfdafa6fc39e3f277d66f305af8dbc4a7fa4b205773aec4002
+  tasks:
+    - name: Require the user-confirmed Web host and reviewed public source identity
+      ansible.builtin.assert:
+        that:
+          - ansible_host == '65.109.220.59'
+          - receiver_source_commit is match('^[a-f0-9]{40}$')
+
+    - name: Create the isolated three-file public build context
+      ansible.builtin.file:
+        path: '{{ receiver_fix_root }}/image-context'
+        state: directory
+        mode: '0700'
+
+    - name: Copy only the reviewed public source files
+      ansible.builtin.copy:
+        src: '{{ item.src }}'
+        dest: '{{ receiver_fix_root }}/image-context/{{ item.dest }}'
+        mode: '0600'
+      loop:
+        - {src: '{{ playbook_dir }}/coin_estimator_receiver_price_hotfix.Dockerfile', dest: Dockerfile}
+        - {src: '{{ playbook_dir }}/../../core/market_intelligence/coin_rate_engine.py', dest: coin_rate_engine.py}
+        - {src: '{{ playbook_dir }}/../../core/market_intelligence/estimator_snapshot_receiver.py', dest: estimator_snapshot_receiver.py}
+
+    - name: Bind the local base tag to the exact secured Web receiver image
+      ansible.builtin.command:
+        argv: [docker, image, tag, '{{ receiver_base_id }}', 'local/estimator-reader-price-fix-base:dfb6aa63']
+      changed_when: false
+
+    - name: Build the source-only compatibility correction without network
+      ansible.builtin.command:
+        argv:
+          - docker
+          - build
+          - --network=none
+          - --pull=false
+          - --build-arg
+          - ESTIMATOR_BASE=local/estimator-reader-price-fix-base:dfb6aa63
+          - --build-arg
+          - 'SOURCE_COMMIT={{ receiver_source_commit }}'
+          - --iidfile
+          - '{{ receiver_fix_root }}/candidate-image.id'
+          - --tag
+          - 'local/estimator-reader-price-fix:{{ receiver_source_commit }}'
+          - '{{ receiver_fix_root }}/image-context'
+
+    - name: Stage the reviewed normal activation primitives
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/normal_activation/{{ item }}'
+        dest: '{{ receiver_fix_root }}/{{ item }}'
+        mode: '0600'
+      loop: [activate_services.py, datastore_primitives.py]
+
+    - name: Stage the unchanged normal watchdog and public-reference helpers
+      ansible.builtin.copy:
+        src: '/srv/trading-bot/production-data/security-normal-service-activation-20261102-04/{{ item }}'
+        dest: '{{ receiver_fix_root }}/{{ item }}'
+        mode: '0600'
+      loop: [hold_receiver_watchdog.py, publicrefs_market02.py]

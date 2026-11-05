@@ -27,6 +27,11 @@ from .private_pipeline_contracts import (
 
 
 SNAPSHOT_RECEIVER_SCHEMA = "estimator_snapshot_receiver/1.0"
+# The V2 wire contract is unchanged by the v9 source-selection correction.
+# Deploy the reader first and retain v8 support for an exact producer rollback.
+SUPPORTED_COIN_RATE_ENGINE_VERSIONS = frozenset(
+    {"coin-rate-engine-v8", COIN_RATE_ENGINE_VERSION}
+)
 DEFAULT_STALE_AFTER_SECONDS = 30
 MAXIMUM_RECEIVE_AGE_SECONDS = 60
 PREDICTION_LEDGER_RETENTION = timedelta(hours=24)
@@ -587,7 +592,7 @@ def apply_estimator_snapshot(
         return 422, {"status": "REJECTED", "reason_code": "CONTRACT_INVALID"}
     if snapshot.feed_mode == "LEGACY":
         return 422, {"status": "REJECTED", "reason_code": "LEGACY_SNAPSHOT_FORBIDDEN"}
-    if snapshot.model_version != COIN_RATE_ENGINE_VERSION:
+    if snapshot.model_version not in SUPPORTED_COIN_RATE_ENGINE_VERSIONS:
         return 422, {
             "status": "REJECTED",
             "reason_code": "MODEL_VERSION_UNSUPPORTED",
