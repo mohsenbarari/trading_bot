@@ -46,6 +46,22 @@ usage() {
   printf 'Usage: %s {start [--quota-wait-enabled]|status|stop|stop-now|logs}\n' "$0"
 }
 
+tmux_session_state() {
+  local target="$1" status_path="$2" rc
+  if tmux has-session -t "=$target" >/dev/null 2>&1; then
+    printf 'PRESENT\n'
+    return 0
+  else
+    rc=$?
+  fi
+  if [[ "$rc" -eq 1 && -f "$status_path" && ! -L "$status_path" ]] \
+      && jq -e '.state == "STOPPED"' "$status_path" >/dev/null 2>&1; then
+    printf 'ABSENT\n'
+  else
+    printf 'ERROR\n'
+  fi
+}
+
 quota_args=()
 broker_quota_args=()
 if [[ "${1:-}" == "start" && "${2:-}" == "--quota-wait-enabled" && "$#" -eq 2 ]]; then
@@ -172,16 +188,78 @@ case "${1:-}" in
     ;;
   stop)
     /usr/bin/python3 "$root/scripts/two_site_controlled_stop.py" --root "$root"
+    if [[ ! -f "$state_root/STOP" || -L "$state_root/STOP" ]]; then
+      printf 'ERROR: durable STOP publication was not verified\n' >&2
+      exit 2
+    fi
     printf 'AUTOPILOT=STOP_REQUESTED session=%s\n' "$session"
     ;;
   stop-now)
-    mkdir -p -- "$state_root"
-    /usr/bin/touch "$state_root/STOP"
-    if tmux has-session -t "=$session" 2>/dev/null; then
-      tmux kill-session -t "=$session"
+    # Emergency requests must still preserve a completed Coordinator terminal
+    # frame and Supervisor finalization.  Publish the same durable STOP used by
+    # the controlled path and never tear down the live Supervisor session.
+    /usr/bin/python3 "$root/scripts/two_site_controlled_stop.py" --root "$root"
+    if [[ ! -f "$state_root/STOP" || -L "$state_root/STOP" ]]; then
+      printf 'ERROR: durable STOP publication was not verified\n' >&2
+      exit 2
     fi
-    if tmux has-session -t "=$broker_session" 2>/dev/null; then
-      tmux kill-session -t "=$broker_session"
+    stopped=false
+    for _attempt in {1..240}; do
+      session_state="$(tmux_session_state "$session" "$state_root/status.json")"
+      if [[ "$session_state" == "ERROR" ]]; then
+        printf 'ERROR: Supervisor tmux state is unavailable\n' >&2
+        exit 2
+      fi
+      if [[ "$session_state" == "ABSENT" ]]; then
+        stopped=true
+        break
+      fi
+      /usr/bin/sleep 0.5
+    done
+    if [[ "$stopped" != true ]]; then
+      printf 'AUTOPILOT=STOP_REQUESTED session=%s pending=supervisor-safe-boundary\n' "$session"
+      exit 2
+    fi
+    broker_state="$(tmux_session_state "$broker_session" "$root/.local/two-site-refactor/provider-broker/status.json")"
+    if [[ "$broker_state" == "ERROR" ]]; then
+      printf 'ERROR: Broker tmux state is unavailable\n' >&2
+      exit 2
+    fi
+    if [[ "$broker_state" == "PRESENT" ]]; then
+      # The Broker owns its STOPPED transition and exits naturally only after
+      # observing both durable STOP and the Supervisor's STOPPED status.  Never
+      # race that lock/state transition with an external check-then-kill.
+      broker_stopped=false
+      for _attempt in {1..80}; do
+        broker_state="$(tmux_session_state "$broker_session" "$root/.local/two-site-refactor/provider-broker/status.json")"
+        if [[ "$broker_state" == "ERROR" ]]; then
+          printf 'ERROR: Broker tmux state is unavailable\n' >&2
+          exit 2
+        fi
+        if [[ "$broker_state" == "ABSENT" ]]; then
+          broker_stopped=true
+          break
+        fi
+        /usr/bin/sleep 0.25
+      done
+      if [[ "$broker_stopped" != true ]]; then
+        printf 'AUTOPILOT=STOP_REQUESTED session=%s pending=broker-safe-boundary\n' "$session"
+        exit 2
+      fi
+    fi
+    # Re-open and revalidate the complete root/.local/refactor/autopilot chain,
+    # STOP inode, owner, mode and bytes after all waits; this also detects a
+    # concurrently replaced parent rather than checking only the leaf name.
+    /usr/bin/python3 "$root/scripts/two_site_controlled_stop.py" --root "$root"
+    session_state="$(tmux_session_state "$session" "$state_root/status.json")"
+    broker_state="$(tmux_session_state "$broker_session" "$root/.local/two-site-refactor/provider-broker/status.json")"
+    if [[ "$session_state" == "ERROR" || "$broker_state" == "ERROR" ]]; then
+      printf 'ERROR: final tmux state is unavailable\n' >&2
+      exit 2
+    fi
+    if [[ "$session_state" != "ABSENT" || "$broker_state" != "ABSENT" ]]; then
+      printf 'ERROR: automation sessions remain after safe stop\n' >&2
+      exit 2
     fi
     printf 'AUTOPILOT=STOPPED session=%s\n' "$session"
     ;;

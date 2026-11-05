@@ -10,6 +10,8 @@ import sys
 
 from scripts.two_site_codex_autopilot import (
     AutopilotError,
+    ACCEPTED_RECEIPT_KEYS,
+    RESULT_KEYS,
     _accepted_checkpoint_matches_repository,
     _load_accepted_checkpoint,
     _RESCOPE_INTENT_FILENAMES,
@@ -18,6 +20,7 @@ from scripts.two_site_codex_autopilot import (
     load_latest_rescope_receipt,
     rescope_epoch_basename,
     rescope_intent_exists,
+    validate_result,
     validate_repository,
     validate_rescope_epoch_startup,
 )
@@ -29,7 +32,7 @@ STATUS_FILENAME = "status.json"
 STOP_FILENAME = "STOP"
 MAX_STATUS_BYTES = 65536
 MAX_EPOCH_LEAVES = 16
-ELIGIBLE_STATUS_STATES = frozenset({"CONTINUE", "RUNNING", "RETRYABLE_FAILURE"})
+ELIGIBLE_STATUS_STATES = frozenset({"CONTINUE", "RUNNING", "RETRYABLE_FAILURE", "RESCOPE"})
 KNOWN_EPOCH_LEAVES = frozenset(
     set(_RESCOPE_RECEIPT_FILENAMES.keys()) | set(_RESCOPE_INTENT_FILENAMES.values())
 )
@@ -175,8 +178,16 @@ def run_preflight(root: Path, *, quota_wait_enabled: bool = False) -> tuple[bool
 
             try:
                 checkpoint = _load_accepted_checkpoint(state_root)
-                if checkpoint is None or not _accepted_checkpoint_matches_repository(checkpoint, repo):
+                if checkpoint is None:
                     if state_val == "CONTINUE":
+                        return False, "STALE_CHECKPOINT"
+                    if state_val != "RESCOPE":
+                        from scripts.two_site_maintenance_transition_startup import (
+                            require_reviewed_maintenance_transition_locked,
+                        )
+                        require_reviewed_maintenance_transition_locked(root, state_root, repo)
+                elif not _accepted_checkpoint_matches_repository(checkpoint, repo):
+                    if state_val in {"CONTINUE", "RESCOPE"}:
                         return False, "STALE_CHECKPOINT"
                     from scripts.two_site_maintenance_transition_startup import (
                         require_reviewed_maintenance_transition_locked,
@@ -196,6 +207,7 @@ def run_preflight(root: Path, *, quota_wait_enabled: bool = False) -> tuple[bool
                 return False, "CROSS_EPOCH_GATE_FAILED"
 
             epoch_dir = state_root / current_epoch
+            latest_receipt = None
             if os.path.lexists(epoch_dir):
                 try:
                     st_epoch = os.lstat(epoch_dir)
@@ -255,6 +267,33 @@ def run_preflight(root: Path, *, quota_wait_enabled: bool = False) -> tuple[bool
                         if intent_present:
                             return False, "UNRESOLVED_INTENT"
 
+            if state_val == "RESCOPE":
+                if not isinstance(latest_receipt, dict):
+                    return False, "RECEIPT_INVALID"
+                result = latest_receipt.get("result")
+                try:
+                    if not isinstance(result, dict) or set(result) != ACCEPTED_RECEIPT_KEYS:
+                        raise AutopilotError("rescope receipt result has an invalid key set")
+                    validate_result({key: result[key] for key in RESULT_KEYS})
+                except (AutopilotError, KeyError, TypeError):
+                    return False, "RECEIPT_INVALID"
+                if (
+                    result.get("state") != "BLOCKED"
+                    or result.get("disposition") != "RESCOPE"
+                    or result.get("category") != "INTERNAL_REJECTION"
+                    or result.get("commit") is not None
+                    or any(result.get(key) is not None for key in (
+                        "gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256"
+                    ))
+                    or result.get("head_before") != repo.get("head")
+                    or result.get("head_after") != repo.get("head")
+                    or result.get("head_changed") is not False
+                    or status_data.get("summary") != result.get("summary")
+                    or status_data.get("next_action") != result.get("next_action")
+                    or status_data.get("blockers") != result.get("blockers")
+                ):
+                    return False, "RECEIPT_INVALID"
+
             # Recheck STOP, repo, checkpoint before READY
             if os.path.lexists(stop_state) or os.path.lexists(stop_root):
                 return False, "STOP_PRESENT"
@@ -267,8 +306,16 @@ def run_preflight(root: Path, *, quota_wait_enabled: bool = False) -> tuple[bool
 
             try:
                 cp_recheck = _load_accepted_checkpoint(state_root)
-                if cp_recheck is None or not _accepted_checkpoint_matches_repository(cp_recheck, repo_recheck):
+                if cp_recheck is None:
                     if state_val == "CONTINUE":
+                        return False, "STALE_CHECKPOINT"
+                    if state_val != "RESCOPE":
+                        from scripts.two_site_maintenance_transition_startup import (
+                            require_reviewed_maintenance_transition_locked,
+                        )
+                        require_reviewed_maintenance_transition_locked(root, state_root, repo_recheck)
+                elif not _accepted_checkpoint_matches_repository(cp_recheck, repo_recheck):
+                    if state_val in {"CONTINUE", "RESCOPE"}:
                         return False, "STALE_CHECKPOINT"
                     from scripts.two_site_maintenance_transition_startup import (
                         require_reviewed_maintenance_transition_locked,

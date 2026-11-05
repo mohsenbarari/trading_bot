@@ -137,6 +137,76 @@ def _make_result(repo_head: str = "a1b2c3d4e5" * 4) -> dict[str, object]:
 
 
 class TestAutopilotMonitorPreflight(unittest.TestCase):
+    def test_valid_nonterminal_rescope_status_can_restart_without_checkpoint(self) -> None:
+        from scripts import two_site_autopilot_monitor_preflight as preflight
+        with tempfile.TemporaryDirectory() as td:
+            root, state_root, repo, _epoch = self._setup_base_fixture(Path(td))
+            result = _make_result(repo["head"])
+            (state_root / "status.json").write_text(json.dumps({
+                "state": "RESCOPE",
+                "head": repo["head"],
+                "summary": result["summary"],
+                "next_action": result["next_action"],
+                "blockers": result["blockers"],
+            }))
+            with mock.patch.object(preflight, "validate_repository", return_value=repo), \
+                 mock.patch.object(preflight, "_load_accepted_checkpoint", return_value=None), \
+                 mock.patch(
+                     "scripts.two_site_maintenance_transition_startup.require_reviewed_maintenance_transition_locked"
+                 ) as maintenance:
+                self.assertEqual(run_preflight(root), (True, "READY"))
+                maintenance.assert_not_called()
+
+            status = json.loads((state_root / "status.json").read_text())
+            status["next_action"] = "different action"
+            (state_root / "status.json").write_text(json.dumps(status))
+            with mock.patch.object(preflight, "validate_repository", return_value=repo), \
+                 mock.patch.object(preflight, "_load_accepted_checkpoint", return_value=None):
+                self.assertEqual(run_preflight(root), (False, "RECEIPT_INVALID"))
+
+    def test_rescope_rejects_present_mismatched_checkpoint_and_malformed_terminal(self) -> None:
+        from scripts import two_site_autopilot_monitor_preflight as preflight
+        with tempfile.TemporaryDirectory() as td:
+            root, state_root, repo, _epoch = self._setup_base_fixture(Path(td))
+            valid = _make_result(repo["head"])
+            (state_root / "status.json").write_text(json.dumps({
+                "state": "RESCOPE",
+                "head": repo["head"],
+                "summary": valid["summary"],
+                "next_action": valid["next_action"],
+                "blockers": valid["blockers"],
+            }))
+            with mock.patch.object(preflight, "validate_repository", return_value=repo), \
+                 mock.patch.object(preflight, "_load_accepted_checkpoint", return_value={"stale": True}), \
+                 mock.patch.object(preflight, "_accepted_checkpoint_matches_repository", return_value=False):
+                self.assertEqual(run_preflight(root), (False, "STALE_CHECKPOINT"))
+
+            malformed_results = []
+            for changes in (
+                {"commit": "b" * 40},
+                {"gemini_worker_run_id": "worker"},
+                {"blockers": []},
+                {"summary": " "},
+                {"next_action": " "},
+                {"schema_version": "2.0"},
+                {"unexpected": True},
+            ):
+                candidate = dict(valid)
+                candidate.update(changes)
+                malformed_results.append(candidate)
+            missing = dict(valid)
+            missing.pop("category")
+            malformed_results.append(missing)
+
+            for candidate in malformed_results:
+                with self.subTest(candidate=candidate), \
+                     mock.patch.object(preflight, "validate_repository", return_value=repo), \
+                     mock.patch.object(preflight, "_load_accepted_checkpoint", return_value=None), \
+                     mock.patch.object(preflight, "load_latest_rescope_receipt", return_value={
+                         "attempt": 1, "terminal": False, "result": candidate,
+                     }):
+                    self.assertEqual(run_preflight(root), (False, "RECEIPT_INVALID"))
+
     def test_quota_wait_due_opt_in_releases_lock_and_never_submits(self) -> None:
         from scripts import two_site_autopilot_monitor_preflight as preflight
         from contextlib import contextmanager

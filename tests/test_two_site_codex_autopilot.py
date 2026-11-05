@@ -198,6 +198,36 @@ class AutopilotContracts(unittest.TestCase):
                 state="BLOCKED", disposition="HALT", commit="b" * 40, next_action=None, blockers=["Gate."],
             ))
 
+    def test_qoder_null_commit_rescope_normalization_grants_no_credit(self):
+        malformed = self.result(
+            state="CONTINUE",
+            disposition="RESCOPE",
+            category="INTERNAL_REJECTION",
+            commit=None,
+            next_action="Split the oversized unit at an independent boundary.",
+            blockers=[],
+        )
+        normalized = autopilot.normalize_qoder_null_commit_rescope(malformed)
+        self.assertEqual(normalized["state"], "BLOCKED")
+        self.assertEqual(normalized["disposition"], "RESCOPE")
+        self.assertEqual(normalized["category"], "INTERNAL_REJECTION")
+        self.assertEqual(normalized["commit"], None)
+        self.assertEqual(normalized["gemini_worker_run_id"], None)
+        self.assertEqual(normalized["gemini_reviewer_run_id"], None)
+        self.assertEqual(normalized["proposal_sha256"], None)
+        self.assertTrue(normalized["blockers"])
+        self.assertEqual(
+            normalized["next_action"],
+            "Split the oversized unit at an independent boundary.",
+        )
+
+        credited = self.result(disposition="RESCOPE", category="INTERNAL_REJECTION")
+        self.assertIsNone(autopilot.normalize_qoder_null_commit_rescope(credited))
+        unrelated = self.result(
+            state="CONTINUE", commit=None, blockers=["Malformed unrelated terminal."],
+        )
+        self.assertIsNone(autopilot.normalize_qoder_null_commit_rescope(unrelated))
+
     def test_disposition_contracts_and_rescope_safety(self):
         self.assertEqual(self.result()["disposition"], "NONE")
         self.assertEqual(self.result(state="COMPLETE")["disposition"], "NONE")
@@ -661,7 +691,7 @@ class AutopilotContracts(unittest.TestCase):
             Path("/usr/bin/codex"), self.root, self.root / "run", "prompt",
         )
         self.assertIn(autopilot.MODEL, command)
-        self.assertIn('model_reasoning_effort="xhigh"', command)
+        self.assertIn('model_reasoning_effort="max"', command)
         self.assertIn("--approve-for-me", command)
         self.assertNotIn("--sandbox", command)
         self.assertIn("--ephemeral", command)
@@ -841,7 +871,7 @@ class AutopilotContracts(unittest.TestCase):
         self.assertEqual(identity["version"], autopilot.EXPECTED_CODEX_CLI_VERSION)
         self.assertEqual(identity["sha256"], digest)
         self.assertEqual(identity["model"], autopilot.MODEL)
-        self.assertEqual(identity["reasoning"], "xhigh")
+        self.assertEqual(identity["reasoning"], "max")
 
     def test_supervisor_lock_is_exclusive_and_rejects_hardlinks(self):
         lock_path = self.root / "autopilot.lock"
@@ -905,7 +935,7 @@ class AutopilotContracts(unittest.TestCase):
         self.assertEqual(kwargs["heartbeat_at"], kwargs["phase_started_at"])
         self.assertEqual(
             kwargs["summary"],
-            "Executing Gemini Worker -> Gemini Reviewer -> Codex final gate.",
+            "Executing Gemini Worker -> Gemini Reviewer -> Qoder final gate.",
         )
         self.assertEqual(kwargs["blockers"], [])
 
@@ -1390,7 +1420,7 @@ class AutopilotContracts(unittest.TestCase):
 
         codex = self.root / "codex"
         codex.write_text("")
-        state_root = self.root / "state"
+        state_root = self.root / ".local/two-site-refactor/autopilot"
         (state_root / "runs").mkdir(parents=True)
 
         before = {
@@ -1462,7 +1492,7 @@ class AutopilotContracts(unittest.TestCase):
 
         executable = self.root / "qoder-fixture"
         executable.write_text("")
-        state = self.root / "state"
+        state = self.root / ".local/two-site-refactor/autopilot"
         (state / "runs").mkdir(parents=True)
         before = self.clean_repository_facts()
         raw = self.result()
@@ -1540,7 +1570,7 @@ class AutopilotContracts(unittest.TestCase):
 
         codex = self.root / "codex"
         codex.write_text("")
-        state_root = self.root / "state"
+        state_root = self.root / ".local/two-site-refactor/autopilot"
         (state_root / "runs").mkdir(parents=True)
 
         before = {
@@ -1612,7 +1642,10 @@ class AutopilotContracts(unittest.TestCase):
                 stop_set_before_join = bool(self.stop_event and self.stop_event.is_set())
                 events.append(("join_start", stop_set_before_join))
                 test_case.assertTrue(stop_set_before_join)
-                test_case.assertIsNotNone(autopilot._ACTIVE_PROCESS)
+                # The configured Qoder process has already exited normally;
+                # cleanup must not retain a stale child-process handle while
+                # joining the heartbeat thread.
+                test_case.assertIsNone(autopilot._ACTIVE_PROCESS)
                 raise join_error
 
         class FakeProcess:
@@ -1627,7 +1660,7 @@ class AutopilotContracts(unittest.TestCase):
 
         codex = self.root / "codex"
         codex.write_text("")
-        state_root = self.root / "state"
+        state_root = self.root / ".local/two-site-refactor/autopilot"
         (state_root / "runs").mkdir(parents=True)
 
         before = {

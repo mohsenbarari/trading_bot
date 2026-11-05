@@ -154,6 +154,51 @@ exit 0
         )
         self.assertIn("AUTOPILOT=STOP_REQUESTED", stop_block)
 
+    def test_stop_now_never_kills_live_supervisor_or_fakes_immediate_stop(self) -> None:
+        stop_match = re.search(r"\n\s*stop-now\)(.*?);;", self.script_content, re.DOTALL)
+        self.assertIsNotNone(stop_match, "Could not find stop-now) branch in script")
+        stop_block = stop_match.group(1)
+
+        self.assertNotRegex(stop_block, r"\btouch\b", "stop-now must use durable controlled STOP")
+        self.assertIn('two_site_controlled_stop.py" --root "$root"', stop_block)
+        self.assertNotIn('kill-session -t "=$session"', stop_block)
+        self.assertNotIn('kill-session -t "=$broker_session"', stop_block)
+        self.assertIn("pending=supervisor-safe-boundary", stop_block)
+        self.assertIn("pending=broker-safe-boundary", stop_block)
+        self.assertRegex(stop_block, r"(?s)pending=supervisor-safe-boundary.*?exit 2")
+        self.assertIn('! -f "$state_root/STOP"', stop_block)
+        self.assertIn('broker_stopped=false', stop_block)
+        self.assertGreaterEqual(stop_block.count('two_site_controlled_stop.py" --root "$root"'), 2)
+        self.assertIn("automation sessions remain after safe stop", stop_block)
+
+    def test_tmux_session_state_distinguishes_absence_from_client_error(self) -> None:
+        start = self.script_content.index("tmux_session_state() {")
+        end = self.script_content.index("\n}\n\nquota_args=", start) + 3
+        function = self.script_content[start:end]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bindir = Path(tmpdir)
+            fake = bindir / "tmux"
+            env = os.environ.copy()
+            env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+            status = bindir / "status.json"
+            status.write_text('{"state":"STOPPED"}\n', encoding="utf-8")
+            for returncode, expected in ((0, "PRESENT"), (1, "ABSENT"), (2, "ERROR"), (127, "ERROR")):
+                fake.write_text(f"#!/usr/bin/env bash\nexit {returncode}\n", encoding="utf-8")
+                fake.chmod(0o755)
+                result = subprocess.run(
+                    ["bash", "-c", function + f"\ntmux_session_state fixture {status}"],
+                    env=env, capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout.strip(), expected)
+            status.write_text('{"state":"RUNNING"}\n', encoding="utf-8")
+            fake.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+            result = subprocess.run(
+                ["bash", "-c", function + f"\ntmux_session_state fixture {status}"],
+                env=env, capture_output=True, text=True,
+            )
+            self.assertEqual(result.stdout.strip(), "ERROR")
+
     def test_copied_temp_git_root_launcher_success(self) -> None:
         """Hermetic execution of stop in a copied temporary Git root succeeds and creates STOP."""
         with tempfile.TemporaryDirectory() as tmpdir:

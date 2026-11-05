@@ -558,6 +558,46 @@ def validate_result(result: object) -> dict:
     return result
 
 
+def normalize_qoder_null_commit_rescope(result: object) -> dict | None:
+    """Repair only a schema-valid, credit-free internal rescope envelope.
+
+    The transport schema intentionally avoids provider-incompatible conditional
+    keywords.  A Qoder terminal can therefore be structurally valid while using
+    CONTINUE/RESCOPE for an explicitly internal, null-commit rescope.  This bounded
+    normalization grants no business credit, never changes evidence or commit
+    fields, and still passes the complete semantic validator afterward.
+    """
+    if not isinstance(result, dict) or set(result) != RESULT_KEYS:
+        return None
+    if (
+        result.get("schema_version") != "1.0"
+        or result.get("commit") is not None
+        or any(result.get(key) is not None for key in (
+            "gemini_worker_run_id", "gemini_reviewer_run_id", "proposal_sha256"
+        ))
+        or result.get("state") not in {"CONTINUE", "BLOCKED"}
+        or result.get("disposition") != "RESCOPE"
+        or result.get("category") != "INTERNAL_REJECTION"
+        or not isinstance(result.get("summary"), str)
+        or not result["summary"].strip()
+        or not isinstance(result.get("next_action"), str)
+        or not result["next_action"].strip()
+        or not isinstance(result.get("blockers"), list)
+        or any(not isinstance(item, str) or not item.strip() for item in result["blockers"])
+    ):
+        return None
+    normalized = dict(result)
+    normalized.update(
+        state="BLOCKED",
+        disposition="RESCOPE",
+        category="INTERNAL_REJECTION",
+        blockers=(result["blockers"] or [
+            "Qoder reported a credit-free internal rescope with an inconsistent terminal envelope."
+        ]),
+    )
+    return validate_result(normalized)
+
+
 def validate_accepted_repository(repository: object) -> dict[str, object]:
     """Validate and normalize repository facts for an accepted checkpoint."""
     if isinstance(repository, Path):
@@ -3191,11 +3231,22 @@ def run_cycle(
                     validated_receipt = validate_result(raw_result)
                     advisories: list[str] = []
                 except (AutopilotError, TypeError) as exc:
-                    if coordinator_settings["provider"] == "qoder" and repaired_output is None:
+                    normalized_rescope = (
+                        normalize_qoder_null_commit_rescope(raw_result)
+                        if coordinator_settings["provider"] == "qoder" else None
+                    )
+                    if normalized_rescope is not None:
+                        validated_receipt = normalized_rescope
+                        advisories = [
+                            "Normalized a credit-free Qoder internal-rescope terminal envelope."
+                        ]
+                    elif coordinator_settings["provider"] == "qoder" and repaired_output is None:
                         from scripts.two_site_qoder_output_repair import shape_only_failure
                         if shape_only_failure(root, raw_result):
                             repaired_output = repair_output_contract()
-                    if repaired_output is not None:
+                    if normalized_rescope is not None:
+                        pass
+                    elif repaired_output is not None:
                         validated_receipt = validate_result(repaired_output)
                         advisories = []
                     elif str(exc) == "non-blocked state cannot report blockers":

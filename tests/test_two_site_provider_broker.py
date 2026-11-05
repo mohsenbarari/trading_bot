@@ -18,6 +18,8 @@ from scripts import two_site_provider_broker as broker
 from scripts import two_site_proposal_runner as runner
 from scripts.two_site_assignment_scope import AssignmentScope
 from scripts.two_site_preparation_contract import PreparationStartup
+from scripts.two_site_semantic_attempts import MARKER as SEMANTIC_MARKER
+from scripts.two_site_semantic_task import build_identity
 
 
 def git(root: Path, *args: str) -> str:
@@ -132,6 +134,100 @@ def test_submit_rejects_idle_broker_from_different_control_identity(
     request = make_valid_request(root, task, environment)
     with pytest.raises(broker.BrokerError, match="not ready"):
         broker._submit_request(root, request, request["timeout"], maintenance=False)
+
+
+def test_known_semantic_duplicate_is_rejected_before_cycle_reservation(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, task, _scope, _environment = broker_repo
+    task_data = json.loads(task.read_text(encoding="utf-8"))
+    identity = build_identity(
+        stage_id="P1-00b",
+        gap_reference="docs/refactor/two-server/PROPOSAL_AUTOMATION.md#semantic-task-dedup",
+        scenario_key="broker-pre-reservation-duplicate",
+        symbol_groups=[],
+        source_manifest={
+            "source.py": hashlib.sha256((root / "source.py").read_bytes()).hexdigest(),
+        },
+    )
+    task_data["goal"] += SEMANTIC_MARKER + json.dumps({"semantic_identity": identity})
+    fingerprint = identity["fingerprint"]
+    target = (
+        root / ".local/two-site-refactor/pipeline/semantic-attempts"
+        / f"{fingerprint}.json"
+    )
+    target.parent.mkdir(parents=True)
+    target.write_text("retained immutable attempt\n", encoding="utf-8")
+
+    with mock.patch.object(broker, "load_task", return_value=(task_data, {})), \
+         pytest.raises(broker.BrokerError, match="before cycle reservation"):
+        broker._reject_known_semantic_duplicate_before_cycle_reservation(
+            root, task, "broker-test-run"
+        )
+
+
+def test_marked_malformed_semantic_task_and_attempt_io_fail_before_reservation(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, task, _scope, environment = broker_repo
+    task_data = json.loads(task.read_text(encoding="utf-8"))
+    task_data["goal"] += SEMANTIC_MARKER + "{}"
+    task.write_text(json.dumps(task_data), encoding="utf-8")
+    with mock.patch.object(broker, "make_request") as make_request, \
+         pytest.raises((broker.BrokerError, runner.ProposalError)):
+        broker.submit(root, task, "broker-test-run", 30, environment)
+    make_request.assert_not_called()
+
+    # A valid identity with an unreadable attempt leaf must fail closed rather
+    # than treating the OSError like a missing record.
+    identity = build_identity(
+        stage_id="P1-00b", gap_reference="docs/refactor/two-server/PROPOSAL_AUTOMATION.md#semantic-task-dedup",
+        scenario_key="broker-attempt-io", symbol_groups=[],
+        source_manifest={"source.py": hashlib.sha256((root / "source.py").read_bytes()).hexdigest()},
+    )
+    task_data["goal"] = "bounded" + SEMANTIC_MARKER + json.dumps({"semantic_identity": identity})
+    target = root / ".local/two-site-refactor/pipeline/semantic-attempts" / (identity["fingerprint"] + ".json")
+    target.parent.mkdir(parents=True)
+    real_lstat = os.lstat
+
+    def injected_lstat(path, *args, **kwargs):
+        if Path(path) == target:
+            raise PermissionError("injected attempt custody failure")
+        return real_lstat(path, *args, **kwargs)
+
+    with mock.patch.object(broker, "load_task", return_value=(task_data, {})), \
+         mock.patch.object(broker.os, "lstat", side_effect=injected_lstat), \
+         pytest.raises(broker.BrokerError, match="cannot be inspected safely"):
+        broker._reject_known_semantic_duplicate_before_cycle_reservation(
+            root, task, "broker-test-run"
+        )
+
+    pipeline_dir = root / ".local/two-site-refactor/pipeline"
+    target.parent.rmdir()
+    pipeline_dir.rmdir()
+    outside = root / "outside-attempts"
+    outside.mkdir()
+    pipeline_dir.symlink_to(outside, target_is_directory=True)
+    with mock.patch.object(broker, "load_task", return_value=(task_data, {})), \
+         pytest.raises(broker.BrokerError, match="directory is not trusted"):
+        broker._reject_known_semantic_duplicate_before_cycle_reservation(
+            root, task, "broker-test-run"
+        )
+
+
+def test_submit_checks_semantic_duplicate_before_request_publication(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, task, _scope, environment = broker_repo
+    with mock.patch.object(
+        broker,
+        "_reject_known_semantic_duplicate_before_cycle_reservation",
+        side_effect=broker.BrokerError("known duplicate"),
+    ) as duplicate, mock.patch.object(broker, "make_request") as make_request:
+        with pytest.raises(broker.BrokerError, match="known duplicate"):
+            broker.submit(root, task, "broker-test-run", 30, environment)
+    duplicate.assert_called_once_with(root, task, "broker-test-run")
+    make_request.assert_not_called()
 
 
 @pytest.mark.parametrize(

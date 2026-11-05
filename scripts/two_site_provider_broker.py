@@ -90,6 +90,11 @@ try:
         unique_json,
         write_json,
     )
+    from scripts.two_site_semantic_attempts import (
+        MARKER as SEMANTIC_MARKER,
+        SemanticAttemptError,
+        extract_semantic_identity,
+    )
 except ModuleNotFoundError:  # Direct ``python scripts/...`` execution.
     from two_site_assignment_scope import (  # type: ignore[no-redef]
         AssignmentScope,
@@ -117,6 +122,11 @@ except ModuleNotFoundError:  # Direct ``python scripts/...`` execution.
         load_task,
         unique_json,
         write_json,
+    )
+    from two_site_semantic_attempts import (  # type: ignore[no-redef]
+        MARKER as SEMANTIC_MARKER,
+        SemanticAttemptError,
+        extract_semantic_identity,
     )
 
 
@@ -3360,6 +3370,62 @@ def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: boo
     return validated["exit_code"]
 
 
+def _reject_known_semantic_duplicate_before_cycle_reservation(
+    root: Path, task_path: Path, run_prefix: str
+) -> None:
+    """Reject an already-reserved ordinary semantic unit before consuming a cycle.
+
+    The pipeline remains the authoritative atomic reservation owner.  This
+    read-only early gate only handles a record that already exists, preventing
+    a known duplicate from publishing the cycle's one immutable Broker
+    reservation and forcing an otherwise avoidable rescope cycle.
+    """
+    root = canonical_root(root)
+    task, _sources = load_task(root, Path(task_path))
+    try:
+        identity = extract_semantic_identity(task)
+    except SemanticAttemptError as exc:
+        # Legacy tasks without a semantic marker retain their existing pipeline
+        # validation path.  A malformed marked task must fail before it can
+        # consume the cycle's immutable Broker reservation.
+        if isinstance(task.get("goal"), str) and SEMANTIC_MARKER not in task["goal"]:
+            return
+        raise BrokerError("marked task has an invalid semantic identity") from exc
+    fingerprint = identity.get("fingerprint")
+    if not isinstance(fingerprint, str) or re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None:
+        raise BrokerError("semantic identity has an invalid fingerprint")
+    attempts = root / ".local/two-site-refactor/pipeline/semantic-attempts"
+    for directory in (
+        root / ".local",
+        root / ".local/two-site-refactor",
+        root / ".local/two-site-refactor/pipeline",
+        attempts,
+    ):
+        try:
+            info = os.lstat(directory)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise BrokerError("semantic attempt directory cannot be inspected safely") from exc
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or stat.S_ISLNK(info.st_mode)
+            or info.st_uid != os.geteuid()
+        ):
+            raise BrokerError("semantic attempt directory is not trusted")
+    target = attempts / (fingerprint + ".json")
+    try:
+        os.lstat(target)
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise BrokerError("semantic attempt path cannot be inspected safely") from exc
+    raise BrokerError(
+        "duplicate semantic task exists before cycle reservation; "
+        "materially split the unit instead of changing only its budget or ID"
+    )
+
+
 def submit(
     root: Path,
     task_path: Path,
@@ -3367,6 +3433,9 @@ def submit(
     timeout: int,
     environment: Mapping[str, str] = os.environ,
 ) -> int:
+    _reject_known_semantic_duplicate_before_cycle_reservation(
+        root, task_path, run_prefix
+    )
     request = make_request(root, task_path, run_prefix, timeout, environment)
     return _submit_request(root, request, timeout, maintenance=False)
 

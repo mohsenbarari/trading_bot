@@ -36,6 +36,9 @@ Preparation/result-format safeguards from observed local failures:
   result read that cycle's immutable `broker-terminal-response.json` request/response and validate
   against its existing reservation, or the exact referenced pipeline JSON result with existing
   helpers. Missing terminal evidence grants no replay or acceptance; retain the original log.
+  Never use a fixed sleep longer than 15 seconds while waiting for Broker/Worker/Reviewer/Qoder;
+  recheck the already-owned request at bounded intervals and stop polling immediately when its
+  durable terminal response exists. A long blind sleep after Broker completion is avoidable dead time.
 
 <!-- NORMAL_ONLY_BEGIN -->
 2. A current-HEAD-matched `validated_previous_cycle_hint` identifies the prior gap, never authority.
@@ -115,6 +118,11 @@ Preparation/result-format safeguards from observed local failures:
    The builder marker binds HEAD, gap, excerpts, Stage, symbols, scenario and source SHAs.
    The pipeline validates it and reserves one immutable local attempt per fingerprint before
    provider contact; retry requires material identity change or audited maintenance.
+   A proposal-budget rejection MUST NOT be retried by changing only task ID, run prefix, token cap,
+   file cap or total cap: those changes intentionally retain the same semantic fingerprint and are
+   rejected before Provider contact. Before spending the next cycle's single Broker reservation,
+   materially split the unit at a complete independently acceptable behavior boundary and confirm
+   the new TASK_READY fingerprint differs from the rejected reservation.
    After creating/resizing a task require the actual command
    python3 scripts/two_site_proposal_runner.py check --task <path>
    and actual TASK_READY before any provider call. Fix preflight failures locally; do not spend

@@ -212,7 +212,11 @@ def _coordinator_output_contract(root: Path) -> str:
         "Markdown, fences or a summary outside the JSON. Populate values only from actual observed "
         "work and verified evidence; never invent acceptance, commit or role IDs. A successful bounded "
         "unit with remaining plan work requires CONTINUE. COMPLETE means the entire canonical approved "
-        "two-site plan is genuinely closed, never merely this unit or one Stage. Use the schema's "
+        "two-site plan is genuinely closed, never merely this unit or one Stage. Cross-field rules are "
+        "mandatory even though the transport schema cannot express them: CONTINUE/COMPLETE require "
+        "disposition=NONE, category=NONE and blockers=[]; BLOCKED requires nonempty blockers and either "
+        "RESCOPE+INTERNAL_REJECTION or HALT+EXTERNAL_GATE; RESCOPE/HALT require null commit and null "
+        "Worker/Reviewer/proposal evidence; RESCOPE and CONTINUE require a concrete next_action. Use the "
         "truthful BLOCKED result when work cannot be accepted. Tool calls during the cycle remain "
         "subject to the existing permissions and repository gates. REQUIRED_KEYS_JSON="
         + json.dumps(schema["required"], separators=(",", ":"))
