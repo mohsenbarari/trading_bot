@@ -678,6 +678,13 @@ def preparation_notes(task, sources):
     profile = parse_proposal_utf8_budget_profile(reqs, allowed_files, allowed_files)
     if profile is not None:
         out_contract["proposal_utf8_budget_profile"] = profile
+        if test_only_task:
+            # Wire JSON includes escapes, metadata and prose beyond file bytes.
+            # Keep the legacy floor and the existing whole-context hard ceiling.
+            out_contract["max_test_only_transport_bytes"] = min(
+                160000, max(64000, 2 * profile["total_limit"]
+                            + 4096 * (len(profile["file_limits"]) + 1)),
+            )
         out_contract["proposal_existing_file_budgets"] = _proposal_existing_file_budgets(profile, sources)
         # The machine byte profile is still a numbered physical requirement.
         # Expose every success coverage ID; do not infer coverage from R-labels.

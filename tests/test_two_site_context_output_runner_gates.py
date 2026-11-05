@@ -19,6 +19,9 @@ from scripts.two_site_proposal_runner import (
 def _make_mock_root(tmp_path: Path) -> Path:
     root = tmp_path / "repo"
     root.mkdir(parents=True, exist_ok=True)
+    relative = Path("docs/refactor/two-server/templates/automation-models.json")
+    (root / relative).parent.mkdir(parents=True, exist_ok=True)
+    (root / relative).write_bytes((Path(__file__).resolve().parents[1] / relative).read_bytes())
     return root
 
 

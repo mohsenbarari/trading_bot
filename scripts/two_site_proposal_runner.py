@@ -2593,7 +2593,14 @@ def normalize_result(
 
 # Private provenance for one already-validated terminal rejection; never serialized.
 _TERMINAL_NEW_TEST_BUDGET = object()
+_TERMINAL_TRANSPORT_BUDGET = object()
 _PREPARED_MAINTENANCE_RESULT = object()
+
+
+def _transport_budget_error(limit: int, actual: int) -> ProposalError:
+    error = ProposalError("test-only raw transport exceeds budget")
+    error._terminal_transport_budget = (_TERMINAL_TRANSPORT_BUDGET, limit, actual)
+    return error
 
 
 def validate_result(
@@ -2647,7 +2654,7 @@ def validate_result(
     if role == "worker" and test_only and enforce_raw_transport:
         raw_transport_bytes = len(json.dumps(result, ensure_ascii=False).encode("utf-8"))
         if raw_transport_bytes > max_transport:
-            raise ProposalError("test-only raw transport exceeds budget")
+            raise _transport_budget_error(max_transport, raw_transport_bytes)
 
     seen = set()
     for change in result["changes"]:
@@ -3084,7 +3091,7 @@ def _parse_stream(
                     json.dumps(result, ensure_ascii=False).encode("utf-8")
                 )
                 if raw_transport_bytes > max_transport:
-                    raise ProposalError("test-only raw transport exceeds budget")
+                    raise _transport_budget_error(max_transport, raw_transport_bytes)
             enforce_raw_transport = False
     else:
         if not isinstance(envelope.get("response"), str):
@@ -3096,8 +3103,9 @@ def _parse_stream(
                 out_contract = notes.get("output_contract", {}) if isinstance(notes, dict) else {}
                 if out_contract.get("test_only_task"):
                     max_transport = out_contract.get("max_test_only_transport_bytes", 64000)
-                    if len(envelope["response"].encode("utf-8")) > max_transport:
-                        raise ProposalError("test-only raw transport exceeds budget")
+                    raw_transport_bytes = len(envelope["response"].encode("utf-8"))
+                    if raw_transport_bytes > max_transport:
+                        raise _transport_budget_error(max_transport, raw_transport_bytes)
                 enforce_raw_transport = False
         except json.JSONDecodeError as exc:
             if not exc.msg.startswith("Extra data"):
@@ -3113,7 +3121,7 @@ def _parse_stream(
                 if out_contract.get("test_only_task"):
                     max_transport = out_contract.get("max_test_only_transport_bytes", 64000)
                     if len(first_span) > max_transport:
-                        raise ProposalError("test-only raw transport exceeds budget")
+                        raise _transport_budget_error(max_transport, len(first_span))
                 enforce_raw_transport = False
             else:
                 result = _deduplicate_response(envelope["response"])
@@ -3260,6 +3268,17 @@ def _generation_final_frame_check(
         )
     except ProposalError as error:
         if type(error) is ProposalError and role == "worker":
+            transport = error.__dict__.get("_terminal_transport_budget")
+            if (type(transport) is tuple and len(transport) == 3
+                    and transport[0] is _TERMINAL_TRANSPORT_BUDGET
+                    and type(transport[1]) is int and type(transport[2]) is int
+                    and 0 < transport[1] < transport[2]
+                    and str(error) == "test-only raw transport exceeds budget"):
+                notes = task_preparation_notes(task, sources)
+                output = notes.get("output_contract", {})
+                if (output.get("test_only_task") is True
+                        and transport[1] == output.get("max_test_only_transport_bytes", 64000)):
+                    raise
             evidence = error.__dict__.get("_terminal_new_test_budget")
             if (type(evidence) is tuple and len(evidence) == 4
                     and evidence[0] is _TERMINAL_NEW_TEST_BUDGET
