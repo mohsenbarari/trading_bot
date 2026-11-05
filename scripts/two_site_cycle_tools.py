@@ -64,6 +64,7 @@ except ImportError:
     )
 
 MARKER = "\nCANONICAL_SOURCE_EXCERPTS_JSON:\n"
+MAX_END_TO_END_REVIEW_BYTES = 144_000
 P1_00B_ASSIGNMENT = "WA-P1-00B-FREEZE-20260904-001"
 P1_00B_BATCH_PREFIX = "P1-00B-BATCH-V1."
 P1_00B_HANDLER_REQUIREMENT = re.compile(
@@ -212,6 +213,24 @@ def validate_direct_script_tests(root: Path, task: dict) -> None:
                     raise runner.ProposalError(f"missing direct test selector: {direct}")
 
 
+def validate_end_to_end_review_budget(task_bytes: int, proposal_limit: int) -> None:
+    """Reject work that cannot fit Worker output plus independent review input.
+
+    The remaining 16 KiB below the provider's 160 KiB target is reserved for
+    prompt framing, receipts and review instructions.  This is a pre-provider
+    rescope signal, not permission to reduce proposal or review quality.
+    """
+    if (type(task_bytes) is not int or type(proposal_limit) is not int
+            or task_bytes < 1 or proposal_limit < 1):
+        raise runner.ProposalError("invalid end-to-end review byte budget")
+    if task_bytes + proposal_limit > MAX_END_TO_END_REVIEW_BYTES:
+        raise runner.ProposalError(
+            "END_TO_END_REVIEW_BUDGET: rescope before provider contact; "
+            f"task={task_bytes}, proposal_limit={proposal_limit}, "
+            f"maximum={MAX_END_TO_END_REVIEW_BYTES}"
+        )
+
+
 def build(root: Path, spec_path: Path, output: Path) -> dict:
     t_start = None
     try:
@@ -253,9 +272,10 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
                 if len(context) >= 32:
                     raise runner.ProposalError("author-policy source requires one context slot; maximum context_files is 32")
                 task = {**task, "context_files": [*context, AUTHOR_POLICY_REL.as_posix()]}
+        proposal_profile = None
         if startup is not None and startup.route == "one_shot":
             try:
-                require_proposal_utf8_budget_profile(
+                proposal_profile = require_proposal_utf8_budget_profile(
                     task.get("requirements"), task.get("allowed_files"),
                 )
             except ProposalByteProfileError:
@@ -285,6 +305,8 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
         task = {**task, "goal": task["goal"] + MARKER + json.dumps(package, ensure_ascii=False)}
         payload = (json.dumps(task, ensure_ascii=False, indent=2) + "\n").encode()
         payload_len = len(payload)
+        if proposal_profile is not None:
+            validate_end_to_end_review_budget(payload_len, proposal_profile["total_limit"])
         expected_parent = root / ".local/two-site-refactor/tasks"
         if (output.parent != expected_parent or output.resolve() != output
                 or output.suffix != ".json" or len(payload) > runner.MAX_CONTEXT):
@@ -308,7 +330,7 @@ def build(root: Path, spec_path: Path, output: Path) -> dict:
             result.update(task_path=str(output), gap_reference=package["gap_reference"],
                           excerpt_count=len(snippets),
                           semantic_task_fingerprint=identity["fingerprint"],
-                          sizing_note="Budget the reviewer too: template + task/sources + full canonical proposal; target <160000 bytes, not only Worker input.",
+                          sizing_note="Preflight proved task bytes + maximum canonical proposal <=144000 bytes, reserving provider framing without weakening review.",
                           context_budget=report)
             build_raised = False
             return result

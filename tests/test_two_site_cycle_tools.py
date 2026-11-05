@@ -98,6 +98,19 @@ def test_non_batch_p1_00b_task_remains_compatible():
     ct.validate_p1_00b_batch_spec(value, "P1-00B-SINGLE-V1.user-flags")
 
 
+def test_end_to_end_review_budget_rescopes_before_provider_contact():
+    ct.validate_end_to_end_review_budget(17_024, 24_000)
+    ct.validate_end_to_end_review_budget(24_000, 120_000)
+    with pytest.raises(runner.ProposalError, match="END_TO_END_REVIEW_BUDGET"):
+        ct.validate_end_to_end_review_budget(21_823, 158_000)
+
+
+@pytest.mark.parametrize("task_bytes,proposal_limit", [(0, 1), (1, 0), (True, 1), (1, False)])
+def test_end_to_end_review_budget_rejects_invalid_inputs(task_bytes, proposal_limit):
+    with pytest.raises(runner.ProposalError, match="invalid end-to-end"):
+        ct.validate_end_to_end_review_budget(task_bytes, proposal_limit)
+
+
 def test_p1_00b_batch_builder_and_runtime_recheck_contract(repo):
     root, _ = repo
     spec = root / "batch-spec.json"
