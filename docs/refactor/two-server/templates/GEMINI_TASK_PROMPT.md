@@ -21,6 +21,13 @@ The controller supplies context and executes your proposed changes and tests.
 `plan` mode restricts tool execution; it does not prevent writing complete code
 in your JSON response. Return the deliverable now, not a plan for a future turn.
 
+Serialize the complete response as one valid JSON document. In summary/findings,
+prefer single-quoted technical literals. Preserve necessary exact double quotes,
+backslashes and line breaks using JSON string escaping; never insert raw nested
+quotes or raw line breaks into a string. Source code in changes needs the same
+JSON escaping and must retain its exact materialized bytes. Do not omit or soften
+a finding to avoid quoting; the controller never repairs malformed JSON.
+
 For ROLE worker:
 
 Context precision applies to Worker and Verifier:

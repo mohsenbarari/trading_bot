@@ -52,8 +52,9 @@ else
 fi
 /usr/bin/unlink -- "$tmux_probe" 2>/dev/null || true
 
-supervisor_count="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_(codex_)?autopilot.py --root $integration_root" 2>/dev/null || true)"
-broker_count="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_provider_broker.py --root $integration_root serve" 2>/dev/null || true)"
+# Anchor argv so the tmux server's retained launch command is not a second daemon.
+supervisor_count="$(/usr/bin/pgrep -fc "^/usr/bin/python3 $integration_root/scripts/two_site_(codex_)?autopilot.py --root $integration_root( |$)" 2>/dev/null || true)"
+broker_count="$(/usr/bin/pgrep -fc "^/usr/bin/python3 $integration_root/scripts/two_site_provider_broker.py --root $integration_root serve( |$)" 2>/dev/null || true)"
 
 state="UNKNOWN"
 cycle="-"
@@ -602,7 +603,7 @@ if [[ "$restart_eligible" == true ]]; then
   fi
 fi
 
-report="$timestamp health=$health state=$state cycle=$cycle phase=$phase status_phase=$status_phase phase_age_seconds=$phase_age_seconds heartbeat_age_seconds=$heartbeat_age_seconds liveness=$liveness session=$session_running tmux_observation=$tmux_observation supervisor=$supervisor_count broker=$broker_count git_branch=$git_branch git_head=$git_head status_head=$short_status_head git_clean=$git_clean protected_refs=$protected_refs_ok action=$action recovery_attempts=$recovery_attempts status_age_seconds=$status_age_seconds"
+report="$timestamp health=$health state=$state cycle=$cycle phase=$phase status_phase=$status_phase phase_age_seconds=$phase_age_seconds heartbeat_age_seconds=$heartbeat_age_seconds liveness=$liveness session=$session_running tmux_observation=$tmux_observation supervisor=$supervisor_count broker=$broker_count git_branch=$git_branch git_head=$git_head status_head=$short_status_head git_clean=$git_clean restart_preflight_verified=$protected_refs_ok action=$action recovery_attempts=$recovery_attempts status_age_seconds=$status_age_seconds"
 
 latest_tmp="$(/usr/bin/mktemp "$report_root/.latest.XXXXXX")"
 /usr/bin/printf '%s\n' "$report" >"$latest_tmp"

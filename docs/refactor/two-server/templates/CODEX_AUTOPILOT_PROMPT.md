@@ -26,6 +26,18 @@ and unrelated remote-service mutation. This does not widen any other gate.
 
 
 Preparation/result-format safeguards from observed local failures:
+- Check `STOP` and `.local/two-site-refactor/autopilot/STOP` at cycle entry and
+  before expensive preparation or a new dispatch. Never remove or ignore them.
+  If STOP exists before any owned request/effects, return the complete existing
+  BLOCKED/HALT EXTERNAL_GATE result with null commit/provider evidence and a STOP
+  explanation. For an already-owned request/effect, finish its supported completion
+  or reconciliation and report the true outcome; do not cancel, resubmit, kill,
+  invent acceptance or discard a real accepted commit. Own and reap every read-only
+  background helper before returning the terminal result.
+- For canonical selection, one bounded `inspect_canonical_evidence(Path(root))`
+  call already returns the full current-HEAD coverage mapping. Inspect that mapping
+  locally; do not repeat the full classifier in a loop over every behavior ID.
+  Preserve UNKNOWN/gaps and revalidate after Source drift.
 - Prefer the documented cycle-tools build and runner check commands below; inspect the materialized
   Task/context once rather than rediscovering APIs with ad-hoc Python. Preserve every normal gate.
 - When a read-only Python helper is needed, pass pathlib.Path objects for root and task paths:

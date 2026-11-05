@@ -2452,6 +2452,13 @@ def schema(
                            }},
         }},
     }
+    if role == "verifier":
+        guidance = (
+            "Serialize as a valid JSON string. Prefer single-quoted technical literals in prose; "
+            "preserve necessary exact double quotes, backslashes and newlines with JSON escaping."
+        )
+        fields["summary"]["description"] = guidance
+        fields["findings"]["items"]["description"] = guidance
     if task is not None and sources is not None:
         fields["changes"] = build_changes_schema(
             role, task["allowed_files"], sources, MAX_REPLACEMENTS,
@@ -4148,7 +4155,7 @@ def run(root: Path, task_path: Path, role: str, run_id: str, timeout: int,
         prompt += (
             "\nCompact review notice: one original source is only a whole-file-SHA-bound AST excerpt, "
             "not full-source review; if context is insufficient return CHANGES_REQUIRED with exact missing definition, "
-            "never VERIFIED on guesswork; Codex performs full-source review.\n"
+            "never VERIFIED on guesswork; the independent Qoder final reviewer performs full-source review.\n"
         )
     prompt += "\nROLE: " + role + "\nCONTEXT_JSON:\n" + json.dumps(prompt_material, ensure_ascii=False)
     if is_compact_review:

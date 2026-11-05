@@ -49,7 +49,7 @@ def test_completed_continue_uses_existing_absence_source_and_stop_guards(tmp_pat
 
 def test_monitor_requires_and_recovers_the_provider_broker():
     src = MONITOR.read_text()
-    assert 'broker_count="$(/usr/bin/pgrep -fc "/usr/bin/python3 $integration_root/scripts/two_site_provider_broker.py' in src
+    assert 'broker_count="$(/usr/bin/pgrep -fc "^/usr/bin/python3 $integration_root/scripts/two_site_provider_broker.py' in src
     assert '&& "$broker_count" -eq 1 && "$state" == "RUNNING"' in src
     assert 'recovery_reason="provider_broker_missing"' in src
     assert 'broker=$broker_count' in src
