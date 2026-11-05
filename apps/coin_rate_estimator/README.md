@@ -159,6 +159,11 @@ The finite source-only builds and isolated dashboard restart are versioned under
 `deploy/maintenance/coin_estimator_*price_fix*.yml`. Preserve previous images,
 containers and data, update existing public image/revision references with the
 normal CAS helper, and release each operation's watchdog hold after acceptance.
+Receiving a new model does not change the parser's prediction authority. After
+the complete fresh grid is staged, explicitly select its epoch with
+`coin_estimator_prediction_epoch_fix.yml` and verify actual unnamed cash offers
+against fresh anchors. Merely receiving v9 while the active epoch remains v8
+leaves the parser using old prices and can keep valid offers pending review.
 
 Coin-group collector liveness, stored activity and model eligibility are also
 separate. The dashboard lists the selected five-minute live anchor and the

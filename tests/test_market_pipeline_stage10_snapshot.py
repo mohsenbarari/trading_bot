@@ -777,12 +777,28 @@ class Stage10SnapshotTests(unittest.TestCase):
         previous["snapshot_id"] = estimator_snapshot_id(previous)
         status, response = self._apply_web(previous, allow_private_primary=True)
         self.assertEqual((status, response["status"]), (200, "ACK"))
+        activate_private_prediction_authority(
+            self.prediction_ledger, EstimatorSnapshotV2.model_validate(previous)
+        )
         current = self._publish("2026-08-26T05:00:11Z", feed_mode="PRIVATE_PRIMARY")
         self.assertEqual(current["model_version"], "coin-rate-engine-v9")
         status, response = self._apply_web(current, allow_private_primary=True)
         self.assertEqual((status, response["status"]), (200, "ACK"))
         published = json.loads((self.web_root / "latest-private-primary.json").read_text())
         self.assertEqual(published["snapshot"]["model_version"], "coin-rate-engine-v9")
+        with sqlite3.connect(self.prediction_ledger) as ledger:
+            self.assertEqual(ledger.execute(
+                "SELECT active_epoch FROM coin_estimate_prediction_authority"
+            ).fetchone()[0], "PRIVATE_PRIMARY:coin-rate-engine-v8")
+        # Receiving a new model does not authorize it as a parser price oracle.
+        # The release must explicitly select its fully staged prediction epoch.
+        activate_private_prediction_authority(
+            self.prediction_ledger, EstimatorSnapshotV2.model_validate(current)
+        )
+        with sqlite3.connect(self.prediction_ledger) as ledger:
+            self.assertEqual(ledger.execute(
+                "SELECT active_epoch FROM coin_estimate_prediction_authority"
+            ).fetchone()[0], "PRIVATE_PRIMARY:coin-rate-engine-v9")
 
     def test_receiver_rejects_future_and_incompatible_model_before_effects(self):
         future = self._publish()

@@ -1,0 +1,57 @@
+---
+- name: Align parser authority with the qualified received v9 estimator
+  hosts: price_fix_web
+  gather_facts: false
+  tasks:
+    - name: Require the user-confirmed Web host and exact receiver identity
+      ansible.builtin.assert:
+        that:
+          - ansible_host == '65.109.220.59'
+          - receiver_cid is match('^[a-f0-9]{64}$')
+
+    - name: Verify the selected receiver is the running production role
+      ansible.builtin.command:
+        argv:
+          - docker
+          - ps
+          - --quiet
+          - --no-trunc
+          - --filter
+          - 'id={{ receiver_cid }}'
+          - --filter
+          - label=com.docker.compose.project=market-private-pipeline-primary
+          - --filter
+          - label=com.docker.compose.service=estimator-snapshot-receiver
+      changed_when: false
+      register: selected_receiver
+
+    - name: Require exact runtime ownership
+      ansible.builtin.assert:
+        that:
+          - selected_receiver.stdout == receiver_cid
+
+    - name: Explicitly activate only the complete already-staged v9 prediction epoch
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - -i
+          - '{{ receiver_cid }}'
+          - python
+          - -B
+          - '-'
+          - --snapshot
+          - /var/lib/market-data/snapshots/latest-private-primary.json
+          - --ledger
+          - /var/lib/market-data/calibration/coin-groups/prediction-ledger.sqlite3
+          - --expected-old-epoch
+          - PRIVATE_PRIMARY:coin-rate-engine-v8
+          - --expected-model-version
+          - coin-rate-engine-v9
+        stdin: '{{ lookup("ansible.builtin.file", playbook_dir + "/activate_estimator_prediction_epoch.py") }}'
+      register: epoch_activation
+      changed_when: (epoch_activation.stdout | from_json).status == 'ACTIVATED'
+
+    - name: Report only public epoch activation facts
+      ansible.builtin.debug:
+        var: epoch_activation.stdout

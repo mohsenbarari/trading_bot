@@ -3,6 +3,9 @@
 - Snapshot receiver imports the engine version and rejects unsupported models.
   Deploy the compatible reader first; v9 explicitly also accepts unchanged-wire
   v8 for producer rollback. Accept activation only after actual Web ACK/freshness.
+  Then explicitly select the fully staged prediction epoch for the parser;
+  receiving snapshots alone never changes its authority. Verify that selected
+  epoch's fresh anchors and an actual unnamed cash offer through the pipeline.
 
 - Engine v9: a fresh private normal-paper minute outranks unconfirmed physical
   offers; preserve fresh verified physical trades. Never use unsettled public
