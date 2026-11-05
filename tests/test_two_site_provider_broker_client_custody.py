@@ -65,12 +65,16 @@ def _prepare_client_context(
 ) -> tuple[Path, dict, Path, Path]:
     root, task, _scope, environment = broker_repo
     _state_root, status_path, requests_dir, _claimed_dir, responses_dir = broker.broker_paths(root)
-    broker._write_status(status_path, "IDLE")
+    with mock.patch.object(
+        broker, "_BROKER_CODE_SHA256", broker.broker_code_identity(root)
+    ):
+        broker._write_status(status_path, "IDLE", started_at=time.time() - 1)
     request = broker.make_request(root, task, run_prefix, 30, environment)
     response_path = broker._response_path(responses_dir, request["request_id"])
     cycle_id = environment["TWO_SITE_AUTOPILOT_RUN_ID"]
     run_dir = root / ".local/two-site-refactor/autopilot/runs" / cycle_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(run_dir.parent, 0o700)
     os.chmod(run_dir, 0o700)
     startup_payload = PreparationStartup(
         schema_version=1,

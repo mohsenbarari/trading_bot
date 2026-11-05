@@ -31,6 +31,17 @@ def _valid_response(req: dict[str, Any]) -> dict[str, Any]:
 
 
 class TwoSiteQuotaBrokerServeGateTest(unittest.TestCase):
+    CODE_IDENTITY = "a" * 64
+
+    def setUp(self) -> None:
+        self._identity_patch = mock.patch.object(
+            broker, "broker_code_identity", return_value=self.CODE_IDENTITY
+        )
+        self._identity_patch.start()
+
+    def tearDown(self) -> None:
+        self._identity_patch.stop()
+
     def test_wait_only_requires_same_idle_broker_and_claim_cleanup_without_replay(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -41,8 +52,10 @@ class TwoSiteQuotaBrokerServeGateTest(unittest.TestCase):
             claim = claimed / (req["request_id"] + ".json")
             broker._atomic_new_json(response_path, response, broker.MAX_RESPONSE_BYTES)
             broker._atomic_new_json(claim, req, broker.MAX_REQUEST_BYTES)
-            states = [dict(state="RUNNING", pid=123, started_at=10.0, updated_at=time.time(), request_id=req["request_id"]),
-                      dict(state="IDLE", pid=123, started_at=10.0, updated_at=time.time())]
+            states = [dict(state="RUNNING", pid=123, started_at=10.0, updated_at=time.time(),
+                           broker_code_sha256=self.CODE_IDENTITY, request_id=req["request_id"]),
+                      dict(state="IDLE", pid=123, started_at=10.0, updated_at=time.time(),
+                           broker_code_sha256=self.CODE_IDENTITY)]
 
             def sleep(_seconds):
                 self.assertTrue(response_path.is_file())
@@ -67,7 +80,9 @@ class TwoSiteQuotaBrokerServeGateTest(unittest.TestCase):
             path = responses / (req["request_id"] + ".json")
             broker._atomic_new_json(path, _valid_response(req), broker.MAX_RESPONSE_BYTES)
             raw = path.read_bytes()
-            with mock.patch.object(broker, "_read_broker_status", return_value=dict(state="IDLE", pid=123, started_at=11.0, updated_at=time.time())), \
+            with mock.patch.object(broker, "_read_broker_status", return_value=dict(
+                    state="IDLE", pid=123, started_at=11.0, updated_at=time.time(),
+                    broker_code_sha256=self.CODE_IDENTITY)), \
                  mock.patch("scripts.two_site_quota_broker_route._check_pre_dispatch_stop"):
                 with self.assertRaisesRegex(broker.BrokerError, "heartbeat.*mismatched"):
                     broker._wait_existing_response(root, req, (123, 10.0), req["timeout"])
@@ -265,6 +280,7 @@ class TwoSiteBrokerCliModuleIdentityTest(unittest.TestCase):
                  mock.patch("sys.stderr", new=io.StringIO()), \
                  mock.patch.object(cli.os, "umask", return_value=0o077), \
                  mock.patch.object(cli, "canonical_root", return_value=root), \
+                 mock.patch.object(cli, "broker_code_identity", return_value="a" * 64), \
                  mock.patch.object(cli, "serve", side_effect=one_request) as serving, \
                  mock.patch.object(cli.signal, "signal", side_effect=install), \
                  mock.patch.object(cli, "_execute_with_heartbeat", side_effect=direct_heartbeat), \

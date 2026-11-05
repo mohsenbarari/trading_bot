@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Bounded local bridge from sandboxed Codex to the pinned Gemini pipeline.
+"""Bounded local bridge from the sandboxed Qoder controller to Gemini.
 
-The long-lived server is started outside the Codex sandbox.  Its atomic,
+The long-lived server is started outside the Qoder sandbox.  Its atomic,
 single-consumer filesystem queue accepts only one exact proposal-pipeline
 operation; it never accepts shell text, arbitrary executables, CLI overrides,
 Git operations, or paths outside the integration task directory.
@@ -191,6 +191,44 @@ RECORD_FILENAME_RE = re.compile(r"^[0-9a-f]{32}\.json$")
 STATUS_READ_RETRY_COUNT = 4
 STATUS_READ_RETRY_SECONDS = 0.05
 _STOP = False
+_BROKER_CODE_SHA256: str | None = None
+
+
+def broker_code_identity(root: Path) -> str:
+    """Hash committed automation code relevant to the long-lived Broker.
+
+    Business-source commits do not require a reload. Changes to a two-site
+    control script, public automation template, or agent rule do. The identity
+    comes from committed Git objects rather than mutable working-tree bytes.
+    """
+    root = canonical_root(root)
+    raw = git(root, "ls-tree", "-r", "--full-tree", "HEAD", "--",
+              "scripts", "docs/refactor/two-server/templates", ".agents")
+    if len(raw.encode("utf-8")) > 4_000_000:
+        raise BrokerError("broker code identity input exceeds byte limit")
+    selected: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for line in raw.splitlines():
+        try:
+            metadata, path = line.split("\t", 1)
+            mode, kind, object_id = metadata.split(" ")
+        except ValueError as exc:
+            raise BrokerError("broker code identity Git record is invalid") from exc
+        relevant = (path.startswith("scripts/two_site_")
+                    or path.startswith("docs/refactor/two-server/templates/")
+                    or path.startswith(".agents/"))
+        if not relevant:
+            continue
+        if (path in seen or kind != "blob" or mode not in {"100644", "100755"}
+                or re.fullmatch(r"[0-9a-f]{40,64}", object_id) is None):
+            raise BrokerError("broker code identity member is invalid")
+        seen.add(path)
+        selected.append((mode, path, object_id))
+    if not selected:
+        raise BrokerError("broker code identity has no tracked members")
+    selected.sort()
+    encoded = json.dumps(selected, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class BrokerError(ProposalError):
@@ -815,9 +853,11 @@ def _write_status(path: Path, state: str, **fields: object) -> None:
     # broker heartbeat runs concurrently with a bounded client read, so use a
     # private replacement name here.  Publication is still an atomic
     # rename and readers reject any snapshot that changes underneath them.
+    identity = ({"broker_code_sha256": _BROKER_CODE_SHA256}
+                if _BROKER_CODE_SHA256 is not None else {})
     value = {
         "schema_version": "1.0", "state": state, "pid": os.getpid(),
-        "updated_at": time.time(), **fields,
+        "updated_at": time.time(), **identity, **fields,
         "qoder_final_review_required": os.environ.get("TWO_SITE_QODER_FINAL_REVIEW_REQUIRED") == "1",
     }
     encoded = json.dumps(
@@ -1305,9 +1345,11 @@ def serve(
 ) -> int:
     if type(quota_continuation_enabled) is not bool:
         raise BrokerError("quota_continuation_enabled must be an exact bool")
-    global _STOP
+    global _STOP, _BROKER_CODE_SHA256
     _STOP = False
     root = canonical_root(root)
+    code_identity = broker_code_identity(root)
+    _BROKER_CODE_SHA256 = None
     state_root, status_path, requests, claimed, responses = broker_paths(root)
     stop_path = root / ".local/two-site-refactor/autopilot/STOP"
     if install_signal_handlers:
@@ -1319,11 +1361,12 @@ def serve(
         started_at = time.time()
         last_heartbeat = 0.0
         last_prune = time.time()
-        _write_status(
-            status_path, "IDLE", started_at=started_at,
-            quota_continuation_ready=quota_continuation_enabled,
-        )
+        _BROKER_CODE_SHA256 = code_identity
         try:
+            _write_status(
+                status_path, "IDLE", started_at=started_at,
+                quota_continuation_ready=quota_continuation_enabled,
+            )
             # A normal STOP is a supervisor boundary request, not a cancellation
             # of its active broker call.  Exit only after that supervisor has
             # acknowledged STOPPED; ``once`` remains an explicit test/CLI mode.
@@ -1454,7 +1497,10 @@ def serve(
                 if once:
                     break
         finally:
-            _write_status(status_path, "STOPPED")
+            try:
+                _write_status(status_path, "STOPPED")
+            finally:
+                _BROKER_CODE_SHA256 = None
     return 0
 
 
@@ -3195,6 +3241,7 @@ def _wait_existing_response(
             or type(expected_broker_identity) is not tuple or len(expected_broker_identity) != 2
             or type(expected_broker_identity[0]) is not int or expected_broker_identity[0] <= 0):
         raise BrokerError("invalid existing-response wait binding")
+    expected_code_sha256 = broker_code_identity(root)
     quota = request.get("request_type") == "QUOTA_CONTINUATION"
     start = expected_broker_identity[1]
     if quota and (type(start) not in (int, float) or not math.isfinite(start)):
@@ -3248,6 +3295,7 @@ def _wait_existing_response(
             if (status_value.get("state") not in {"IDLE", "RUNNING"}
                     or type(status_value.get("pid")) is not int
                     or status_value.get("pid") != expected_broker_identity[0]
+                    or status_value.get("broker_code_sha256") != expected_code_sha256
                     or (quota and type(status_value.get("started_at")) not in (int, float))
                     or status_value.get("started_at") != start
                     or type(status_value.get("updated_at")) not in (int, float)
@@ -3273,7 +3321,8 @@ def _submit_request(root: Path, request: dict, timeout: int, *, maintenance: boo
         status_value = _read_broker_status(root, status_path)
         if (status_value.get("state") != "IDLE"
                 or type(status_value.get("pid")) is not int
-                or not isinstance(status_value.get("updated_at"), (int, float))):
+                or not isinstance(status_value.get("updated_at"), (int, float))
+                or status_value.get("broker_code_sha256") != broker_code_identity(root)):
             raise BrokerError("provider broker is not ready")
         if time.time() - status_value["updated_at"] > STATUS_MAX_AGE_SECONDS:
             raise BrokerError("provider broker status is stale")
@@ -3359,6 +3408,13 @@ def status(root: Path) -> int:
     return 0
 
 
+def code_identity(root: Path) -> int:
+    print(json.dumps({"schema_version": "1.0",
+                      "broker_code_sha256": broker_code_identity(root)},
+                     ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def main() -> int:
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
@@ -3375,6 +3431,7 @@ def main() -> int:
     maintenance_parser.add_argument("--run-prefix", required=True)
     maintenance_parser.add_argument("--timeout", type=int, default=300)
     subparsers.add_parser("status")
+    subparsers.add_parser("code-identity")
     args = parser.parse_args()
     root = canonical_root(args.root)
     try:
@@ -3384,6 +3441,8 @@ def main() -> int:
             return submit(root, args.task, args.run_prefix, args.timeout)
         if args.command == "submit-maintenance":
             return submit_maintenance(root, args.task, args.run_prefix, args.timeout)
+        if args.command == "code-identity":
+            return code_identity(root)
         return status(root)
     except (BrokerError, ProposalError, AssignmentScopeError, OSError, subprocess.SubprocessError) as exc:
         print(json.dumps({"state": "BROKER_ERROR", "reason": str(exc)}), file=sys.stderr)

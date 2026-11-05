@@ -94,6 +94,46 @@ def test_request_is_bound_to_task_head_assignment_and_controller(
     assert request["controller_run_id"] == environment["TWO_SITE_AUTOPILOT_RUN_ID"]
 
 
+def test_broker_code_identity_ignores_business_commit_and_changes_for_control_code(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, _task, _scope, _environment = broker_repo
+    original = broker.broker_code_identity(root)
+    assert len(original) == 64
+
+    (root / "source.py").write_text("VALUE = 2\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", "source.py"], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "business-only"], check=True)
+    assert broker.broker_code_identity(root) == original
+
+    pipeline = root / broker.PIPELINE_REL
+    pipeline.write_text("raise SystemExit(98)\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(root), "add", str(broker.PIPELINE_REL)], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "control-change"], check=True)
+    content_identity = broker.broker_code_identity(root)
+    assert content_identity != original
+
+    pipeline.chmod(0o755)
+    subprocess.run(["git", "-C", str(root), "add", str(broker.PIPELINE_REL)], check=True)
+    subprocess.run(["git", "-C", str(root), "commit", "-qm", "control-mode-change"], check=True)
+    assert broker.broker_code_identity(root) != content_identity
+
+
+def test_submit_rejects_idle_broker_from_different_control_identity(
+    broker_repo: tuple[Path, Path, AssignmentScope, dict[str, str]],
+) -> None:
+    root, task, _scope, environment = broker_repo
+    _state, status, _requests, _claimed, _responses = broker.broker_paths(root)
+    broker._atomic_new_json(status, {
+        "schema_version": "1.0", "state": "IDLE", "pid": 123,
+        "updated_at": time.time(), "started_at": 1.0,
+        "broker_code_sha256": "0" * 64,
+    }, broker.MAX_REQUEST_BYTES)
+    request = make_valid_request(root, task, environment)
+    with pytest.raises(broker.BrokerError, match="not ready"):
+        broker._submit_request(root, request, request["timeout"], maintenance=False)
+
+
 @pytest.mark.parametrize(
     "mutation,error",
     [
@@ -226,6 +266,11 @@ def test_filesystem_queue_round_trip_preserves_exact_pipeline_result(
     captured = capsys.readouterr()
     assert captured.out == '{"state":"READY_FOR_CODEX"}\n'
     assert captured.err == "bounded warning\n"
+    final_status = broker._read_json_file(
+        root, status_path, broker.MAX_REQUEST_BYTES, "broker status"
+    )
+    assert final_status["state"] == "STOPPED"
+    assert final_status["broker_code_sha256"] == broker.broker_code_identity(root)
 
 
 def test_restart_fails_ambiguous_claim_without_reexecuting(
@@ -785,6 +830,13 @@ def _make_quota_payload(
     create_patch_file: bool = False,
     historical: bool = False,
 ) -> dict:
+    # Quota/receipt fixtures create isolated roots outside ``broker_repo``.
+    # Keep them bound to the same public model-policy snapshot as production
+    # instead of relying on test order or the process working directory.
+    config = root / runner.AI_CONFIG_REL
+    if not config.exists():
+        config.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(runner.ROOT / runner.AI_CONFIG_REL, config)
     if role == "worker":
         attempt_role = "worker"
         model = (runner.RUNTIME_CONTRACT["worker_model"] if historical

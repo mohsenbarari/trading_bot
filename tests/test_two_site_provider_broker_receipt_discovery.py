@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import scripts.two_site_provider_broker as broker_mod
+from scripts import two_site_proposal_runner as runner
 from scripts.two_site_provider_broker import (
     BrokerError,
     broker_paths,
@@ -166,7 +167,9 @@ class TestReceiptDiscovery(unittest.TestCase):
         orig_status = json.loads(status_path1.read_text("utf-8"))
         status2 = copy.deepcopy(orig_status)
         status2["run_id"] = run_id2
-        status2_bytes = json.dumps(status2, sort_keys=True).encode("utf-8")
+        # Preserve the model-policy snapshot's bound key order. Sorting nested
+        # keys would create a different byte-level policy digest.
+        status2_bytes = runner.serialize_json(status2)
         status2_path = proposal_dir2 / "status.json"
         status2_path.write_bytes(status2_bytes)
         os.chmod(status2_path, 0o600)

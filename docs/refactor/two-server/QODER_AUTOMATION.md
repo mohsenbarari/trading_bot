@@ -121,6 +121,15 @@ Broker باید تازه با `TWO_SITE_QODER_FINAL_REVIEW_REQUIRED=1` راه‌
 Launcher از Broker فاقد این سیاست استفاده نمی‌کند. main، origin/main، candidate،
 production، DNS و Web Writer با این تغییر مجوز تغییر دریافت نمی‌کنند.
 
+هر Broker شناسهٔ SHA-256 کد کنترل‌پلین خود را از objectها و file-modeهای commit‌شدهٔ همهٔ
+`scripts/two_site_*`، templateهای اتوماسیون و ruleهای agent در status منتشر
+می‌کند. client پیش از dispatch و در طول انتظار همان شناسه را کنترل می‌کند.
+Launcher نیز شناسهٔ مورد انتظار Source جاری را مستقل محاسبه می‌کند؛ اگر Broker
+قدیمی فقط در حالت `IDLE` باشد و Supervisor فعال نباشد، آن را خودکار reload می‌کند.
+Broker `RUNNING` یا Broker هم‌زمان با Supervisor هرگز برای رفع mismatch کشته
+نمی‌شود. commitهای صرفاً business این شناسه را تغییر نمی‌دهند و موجب reload
+بی‌مورد در هر واحد نمی‌شوند.
+
 آزمون‌های عضویت تاریخی ابتدا حسابداری واقعیِ manifest جاری را کنترل می‌کنند و سپس
 با دادهٔ مرجعِ پذیرفته‌شده و هش‌های اصلی، وضعیت همان مقطع قدیمی را بازسازی می‌کنند.
 `make_canonical_membership_snapshot` نمای تاریخی ۳۹۸تایی را حفظ می‌کند؛

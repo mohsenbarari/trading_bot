@@ -65,6 +65,37 @@ case "${1:-}" in
       printf 'ERROR: STOP file present\n' >&2
       exit 2
     fi
+    expected_broker_code_sha256="$(
+      /usr/bin/python3 scripts/two_site_provider_broker.py --root "$root" code-identity \
+        | /usr/bin/python3 -c 'import json,sys; v=json.load(sys.stdin); print(v.get("broker_code_sha256", ""))'
+    )"
+    if ! [[ "$expected_broker_code_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+      printf 'ERROR: current Broker code identity is invalid\n' >&2
+      exit 2
+    fi
+    if tmux has-session -t "=$broker_session" 2>/dev/null; then
+      existing_broker_status="$(/usr/bin/python3 scripts/two_site_provider_broker.py --root "$root" status)" || {
+        printf 'ERROR: existing Broker status is unavailable\n' >&2
+        exit 2
+      }
+      existing_broker_code_sha256="$(
+        /usr/bin/python3 -c 'import json,sys; v=json.load(sys.stdin); print(v.get("broker_code_sha256", ""))' \
+          <<<"$existing_broker_status"
+      )"
+      if [[ "$existing_broker_code_sha256" != "$expected_broker_code_sha256" ]]; then
+        existing_broker_state="$(
+          /usr/bin/python3 -c 'import json,sys; v=json.load(sys.stdin); print(v.get("state", ""))' \
+            <<<"$existing_broker_status"
+        )"
+        if [[ "$existing_broker_state" == "IDLE" ]] \
+            && ! tmux has-session -t "=$session" 2>/dev/null; then
+          tmux kill-session -t "=$broker_session"
+        else
+          printf 'ERROR: stale Broker code cannot be reloaded outside an idle Supervisor boundary\n' >&2
+          exit 2
+        fi
+      fi
+    fi
     if ! tmux has-session -t "=$broker_session" 2>/dev/null; then
       printf -v broker_command '%q ' \
         /usr/bin/env APP_ENV_FILE=config/unit-test.env.example PYTHONDONTWRITEBYTECODE=1 \
@@ -85,14 +116,24 @@ case "${1:-}" in
       printf 'ERROR: provider broker did not become healthy\n' >&2
       exit 2
     fi
-    if ! /usr/bin/python3 scripts/two_site_provider_broker.py --root "$root" status \
-        | /usr/bin/python3 -c 'import json,sys; v=json.load(sys.stdin); sys.exit(0 if v.get("qoder_final_review_required") is True else 2)'; then
-      printf 'ERROR: existing Broker lacks required Qoder final review; quiescent reload required\n' >&2
+    quota_required=0
+    if [[ "${#quota_args[@]}" -eq 1 ]]; then quota_required=1; fi
+    broker_status_json="$(/usr/bin/python3 scripts/two_site_provider_broker.py --root "$root" status)" || {
+      printf 'ERROR: Broker status is unavailable after startup\n' >&2
+      exit 2
+    }
+    if ! /usr/bin/python3 -c 'import json,sys; v=json.load(sys.stdin); sys.exit(0 if v.get("state")=="IDLE" and v.get("qoder_final_review_required") is True else 2)' \
+        <<<"$broker_status_json"; then
+      printf 'ERROR: Broker policy, code identity, or idle-state validation failed\n' >&2
       exit 2
     fi
-    if [[ "${#quota_args[@]}" -eq 1 ]] && ! \
-        /usr/bin/python3 scripts/two_site_provider_broker.py --root "$root" status \
-        | /usr/bin/python3 -c 'import json,sys; v=json.load(sys.stdin); sys.exit(0 if v.get("quota_continuation_ready") is True else 2)'; then
+    if ! /usr/bin/python3 -c 'import json,sys; v=json.load(sys.stdin); sys.exit(0 if v.get("broker_code_sha256")==sys.argv[1] else 2)' \
+        "$expected_broker_code_sha256" <<<"$broker_status_json"; then
+      printf 'ERROR: Broker policy, code identity, or idle-state validation failed\n' >&2
+      exit 2
+    fi
+    if [[ "$quota_required" == 1 ]] && ! /usr/bin/python3 -c 'import json,sys; v=json.load(sys.stdin); sys.exit(0 if v.get("quota_continuation_ready") is True else 2)' \
+        <<<"$broker_status_json"; then
       printf 'ERROR: existing Broker is not quota-enabled; no live Broker will be replaced\n' >&2
       exit 2
     fi

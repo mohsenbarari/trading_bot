@@ -100,6 +100,102 @@ def _setup_isolated_git_repo(repo_dir: Path) -> None:
 
 
 class TestLauncherDirectAndGeneratedEnv(unittest.TestCase):
+    def test_idle_stale_broker_is_reloaded_before_supervisor(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir).resolve()
+            repo_dir = tmp_path / "repo"
+            repo_dir.mkdir(); _setup_isolated_git_repo(repo_dir)
+            bin_dir = tmp_path / "bin"; bin_dir.mkdir()
+            broker_state = tmp_path / "broker-state"
+            broker_state.write_text("stale", encoding="utf-8")
+            supervisor_state = tmp_path / "supervisor-state"
+            tmux_log = tmp_path / "tmux.jsonl"
+
+            python_stub = bin_dir / "python3"
+            python_stub.write_text(f'''#!{sys.executable}
+import json,sys
+from pathlib import Path
+state=Path({str(broker_state)!r})
+if "--check" in sys.argv: raise SystemExit(0)
+if "code-identity" in sys.argv:
+ print(json.dumps({{"schema_version":"1.0","broker_code_sha256":"a"*64}})); raise SystemExit(0)
+if "status" in sys.argv:
+ current=state.read_text() if state.exists() else ""
+ code="b"*64 if current.startswith("stale") else "a"*64
+ broker_runtime_state="RUNNING" if current=="stale-running" else "IDLE"
+ print(json.dumps({{"state":broker_runtime_state,"qoder_final_review_required":True,
+                   "quota_continuation_ready":True,"broker_code_sha256":code}})); raise SystemExit(0)
+if "-c" in sys.argv:
+ i=sys.argv.index("-c"); code=sys.argv[i+1]; sys.argv=["-c",*sys.argv[i+2:]]; exec(code)
+''', encoding="utf-8")
+            python_stub.chmod(0o755)
+
+            tmux_stub = bin_dir / "tmux"
+            tmux_stub.write_text(f'''#!{sys.executable}
+import json,sys
+from pathlib import Path
+broker=Path({str(broker_state)!r}); supervisor=Path({str(supervisor_state)!r}); log=Path({str(tmux_log)!r})
+with log.open("a") as f: f.write(json.dumps(sys.argv[1:])+"\\n")
+args=sys.argv[1:]
+if "has-session" in args:
+ target=args[args.index("-t")+1]
+ raise SystemExit(0 if (("provider-broker" in target and broker.exists()) or
+                        ("autopilot" in target and "provider-broker" not in target and supervisor.exists())) else 1)
+if "kill-session" in args:
+ target=args[args.index("-t")+1]
+ (broker if "provider-broker" in target else supervisor).unlink(missing_ok=True); raise SystemExit(0)
+if "new-session" in args:
+ name=args[args.index("-s")+1]
+ target=broker if name=="two-site-provider-broker" else supervisor
+ target.write_text("fresh"); raise SystemExit(0)
+raise SystemExit(0)
+''', encoding="utf-8")
+            tmux_stub.chmod(0o755)
+
+            launcher = repo_dir / "scripts/two_site_autopilot_tmux.sh"
+            launcher.write_text(LAUNCHER_PATH.read_text().replace("/usr/bin/python3", str(python_stub)),
+                                encoding="utf-8")
+            launcher.chmod(0o755)
+            env = {"PATH": f"{bin_dir}:{os.environ.get('PATH', '/usr/bin:/bin')}"}
+            result = subprocess.run(["bash", str(launcher), "start", "--quota-wait-enabled"],
+                                    cwd=repo_dir, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = [json.loads(line) for line in tmux_log.read_text().splitlines()]
+            broker_kills = [row for row in calls if "kill-session" in row and
+                            any("provider-broker" in item for item in row)]
+            broker_starts = [row for row in calls if "new-session" in row and
+                             "two-site-provider-broker" in row]
+            self.assertEqual(len(broker_kills), 1)
+            self.assertEqual(len(broker_starts), 1)
+            self.assertTrue(supervisor_state.exists())
+            self.assertEqual(broker_state.read_text(), "fresh")
+
+            # A busy stale Broker is never killed, even when the Supervisor is
+            # absent. This preserves the in-flight call for explicit recovery.
+            supervisor_state.unlink()
+            broker_state.write_text("stale-running", encoding="utf-8")
+            before_busy = len(calls)
+            busy = subprocess.run(["bash", str(launcher), "start", "--quota-wait-enabled"],
+                                  cwd=repo_dir, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(busy.returncode, 2)
+            self.assertIn("outside an idle Supervisor boundary", busy.stderr)
+            busy_calls = [json.loads(line) for line in tmux_log.read_text().splitlines()][before_busy:]
+            self.assertFalse(any("kill-session" in row for row in busy_calls))
+            self.assertEqual(broker_state.read_text(), "stale-running")
+
+            # An idle stale Broker is also preserved while a Supervisor owns
+            # the cycle; reload is deferred to the next quiescent boundary.
+            broker_state.write_text("stale", encoding="utf-8")
+            supervisor_state.write_text("active", encoding="utf-8")
+            before_owned = len([*tmux_log.read_text().splitlines()])
+            owned = subprocess.run(["bash", str(launcher), "start", "--quota-wait-enabled"],
+                                   cwd=repo_dir, env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(owned.returncode, 2)
+            self.assertIn("outside an idle Supervisor boundary", owned.stderr)
+            owned_calls = [json.loads(line) for line in tmux_log.read_text().splitlines()][before_owned:]
+            self.assertFalse(any("kill-session" in row for row in owned_calls))
+            self.assertEqual(broker_state.read_text(), "stale")
+
     def test_launcher_canonical_env_and_guards(self) -> None:
         """Launcher propagates canonical PYTHONPATH to direct children and tmux commands."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -136,12 +232,19 @@ if "--check" in sys.argv:
     if flag == "1":
         sys.exit(1)
     sys.exit(0)
+if "code-identity" in sys.argv:
+    print(json.dumps({{"schema_version": "1.0", "broker_code_sha256": "a" * 64}}))
+    sys.exit(0)
 if "status" in sys.argv:
     print(json.dumps({{"qoder_final_review_required": os.environ.get("STUB_QODER_REVIEW_READY", "1") == "1",
-                      "quota_continuation_ready": True}}))
+                      "quota_continuation_ready": True, "state": "IDLE",
+                      "broker_code_sha256": "a" * 64}}))
     sys.exit(0)
 if "-c" in sys.argv:
-    exec(sys.argv[sys.argv.index("-c") + 1])
+    index = sys.argv.index("-c")
+    code = sys.argv[index + 1]
+    sys.argv = ["-c", *sys.argv[index + 2:]]
+    exec(code)
 sys.exit(0)
 """
             python_stub.write_text(py_code, encoding="utf-8")
@@ -261,7 +364,7 @@ sys.exit(0)
                 capture_output=True, text=True, timeout=30,
             )
             self.assertEqual(obsolete.returncode, 2)
-            self.assertIn("existing Broker lacks required Qoder final review", obsolete.stderr)
+            self.assertIn("Broker policy, code identity, or idle-state validation failed", obsolete.stderr)
             after_records = [json.loads(line) for line in tmux_log.read_text().splitlines()]
             self.assertEqual(sum("new-session" in row["argv"] for row in after_records), before_count)
 

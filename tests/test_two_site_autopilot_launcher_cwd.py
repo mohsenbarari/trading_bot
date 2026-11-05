@@ -10,7 +10,7 @@ LAUNCHER_SRC = Path(__file__).resolve().parent.parent / "scripts" / "two_site_au
 def test_launcher_starts_broker_before_supervisor_and_stops_both():
     source = LAUNCHER_SRC.read_text(encoding="utf-8")
     broker_start = source.index('tmux new-session -d -s "$broker_session"')
-    broker_health = source.index('two_site_provider_broker.py --root "$root" status')
+    broker_health = source.index('two_site_provider_broker.py --root "$root" status', broker_start)
     supervisor_start = source.index('tmux new-session -d -s "$session"')
     assert broker_start < broker_health < supervisor_start
     assert 'tmux kill-session -t "=$broker_session"' in source
