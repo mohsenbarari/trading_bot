@@ -1,0 +1,217 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-QODER-HANDOFF-20261105-002",
+  "assignment_sha256": "e3150c15246bbb1f8fefc07c9594b3b098bc0b3e8934f85eccef706aa13a24f2",
+  "inspected_head": "2977e9437a0a2ba3a8a01131e8c651b8de8a3bd3",
+  "status": "PARTIAL_RECONCILIATION",
+  "receipt_type": "PARTIAL_RECONCILIATION",
+  "reconciliation_kind": "P1_00B_PENDING_FIVE_GROUP_CANONICAL_RECONCILIATION",
+  "group": {
+    "group_id": "p1-00b-pending-five-20261105",
+    "threshold": 5,
+    "accepted_unit_count": 5,
+    "pending_five": 5,
+    "units_since_reconciliation": 5,
+    "total_behavior_units": 5,
+    "reconciled_behavior_units": 5,
+    "remaining_behavior_units": 0,
+    "group_reconciliation_accounting_complete_on_exact_acceptance": true,
+    "canonical_ledger_integration_complete_on_exact_acceptance": false,
+    "no_sixth_behavior_accepted_before_complete_reconciliation": true,
+    "raw_evidenced_before": 401,
+    "raw_evidenced_after": 418,
+    "newly_evidenced_seed_count": 17,
+    "registered_evidence_records": 35
+  },
+  "units": [
+    {
+      "order": 1,
+      "unit_id": "p1-00b-identity-users-boundary-registration-20261105-c001",
+      "scenario_key": "identity-users-delete-terminate-update-boundaries-canonical-registration",
+      "registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-identity-users-boundary-registration.json",
+      "registration_sha256": "7b2675437d538db570423edab61ead4579a047e3d920c34a1853d321a8055277",
+      "registration_last_commit": "d2659d49499e4b64acfccd3ce35d1f28925c5edb",
+      "acceptance_commit": "d2659d49499e4b64acfccd3ce35d1f28925c5edb",
+      "units_since_reconciliation_on_acceptance": 1,
+      "registered_evidence_records": 3,
+      "delta_distinct_seed_count": 3,
+      "raw_evidenced_before": 401,
+      "raw_evidenced_after": 404,
+      "registered_seed_ids": [
+        "API-IDENTITY-DELETE-USERS-DELETE-USER-L655",
+        "API-IDENTITY-POST-USERS-TERMINATE-USER-SESSIONS-L691",
+        "API-IDENTITY-PUT-USERS-UPDATE-USER-L453"
+      ],
+      "manifest_key": "identity_users_boundary_registration_path",
+      "evidence_authority": "PREEXISTING_TRACKED_CHARACTERIZATION_TESTS_UNCHANGED_BY_THIS_UNIT"
+    },
+    {
+      "order": 2,
+      "unit_id": "p1-00b-sync-health-grouped-row-consumption-registration-20261105-c001",
+      "scenario_key": "sync-health-grouped-row-consumption-boundary-canonical-registration",
+      "registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-sync-health-grouped-row-registration.json",
+      "registration_sha256": "a0564fa3d9106d788308fa8dc1989dc4793b227ab0db2ff28fca6feea802338c",
+      "registration_last_commit": "ee7781a61ba998d9418cb57a768fa4cb1a62b142",
+      "acceptance_commit": "b6bb104baef95fb3eca7fa1bbd8f68a61df64ae0",
+      "units_since_reconciliation_on_acceptance": 2,
+      "registered_evidence_records": 1,
+      "delta_distinct_seed_count": 0,
+      "raw_evidenced_before": 404,
+      "raw_evidenced_after": 404,
+      "registered_seed_ids": [],
+      "manifest_key": "sync_health_grouped_row_consumption_failure_registration_path",
+      "evidence_authority": "PREEXISTING_TRACKED_CHARACTERIZATION_TESTS_UNCHANGED_BY_THIS_UNIT",
+      "registered_accepted_behavior_units": 1,
+      "registered_accepted_handler_scenarios": 1,
+      "already_evidenced_seed_ids": [
+        "API-SYNC-GET-SYNC-GET-SYNC-HEALTH-L4890"
+      ],
+      "note": "receipt conformance was repaired in ee7781a61 without changing substantive evidence"
+    },
+    {
+      "order": 3,
+      "unit_id": "p1-00b-auth-session-approval-recovery-registration-20261105-c001",
+      "scenario_key": "auth-session-approval-recovery-canonical-registration",
+      "registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-auth-session-approval-recovery-registration.json",
+      "registration_sha256": "ab429dee635a89d3bafad8ef0d57d3b2c17bc871be72b0f3c7e87447f2d45245",
+      "registration_last_commit": "ee7781a61ba998d9418cb57a768fa4cb1a62b142",
+      "acceptance_commit": "ee7781a61ba998d9418cb57a768fa4cb1a62b142",
+      "units_since_reconciliation_on_acceptance": 3,
+      "registered_evidence_records": 10,
+      "delta_distinct_seed_count": 6,
+      "raw_evidenced_before": 404,
+      "raw_evidenced_after": 410,
+      "registered_seed_ids": [
+        "API-AUTH-POST-SESSIONS-START-SINGLE-SESSION-RECOVERY-L673",
+        "API-AUTH-POST-SESSIONS-APPROVE-SINGLE-SESSION-RECOVERY-L845",
+        "API-AUTH-POST-SESSIONS-REJECT-SINGLE-SESSION-RECOVERY-L907",
+        "API-AUTH-POST-SESSIONS-SUBMIT-SINGLE-SESSION-RECOVERY-IDENTITY-L955",
+        "API-AUTH-POST-SESSIONS-APPROVE-REQUEST-L1210",
+        "API-AUTH-POST-SESSIONS-REJECT-REQUEST-L1270"
+      ],
+      "manifest_key": "auth_session_approval_recovery_registration_path",
+      "evidence_authority": "PREEXISTING_TRACKED_CHARACTERIZATION_TESTS_UNCHANGED_BY_THIS_UNIT"
+    },
+    {
+      "order": 4,
+      "unit_id": "p1-00b-chat-read-evidence-registration-20261105-c001",
+      "scenario_key": "chat-read-evidence-canonical-registration",
+      "registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-chat-read-evidence-registration.json",
+      "registration_sha256": "dea942f264b4e096c39415637d8347882120036b68967368fc53d89b7d191a32",
+      "registration_last_commit": "8beb15d91b016e958c468d1bb819e90e9a4efe59",
+      "acceptance_commit": "8beb15d91b016e958c468d1bb819e90e9a4efe59",
+      "units_since_reconciliation_on_acceptance": 4,
+      "registered_evidence_records": 11,
+      "delta_distinct_seed_count": 3,
+      "raw_evidenced_before": 410,
+      "raw_evidenced_after": 413,
+      "registered_seed_ids": [
+        "API-MSG-GET-CHAT-GET-CONVERSATIONS-L582",
+        "API-MSG-GET-CHAT-GET-MESSAGES-L856",
+        "API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874"
+      ],
+      "manifest_key": "chat_read_evidence_registration_path",
+      "evidence_authority": "PREEXISTING_TRACKED_CHARACTERIZATION_TESTS_UNCHANGED_BY_THIS_UNIT"
+    },
+    {
+      "order": 5,
+      "unit_id": "p1-00b-trades-api-seed-registration-20261105-c001",
+      "scenario_key": "trades-api-seed-evidence-canonical-registration",
+      "registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-trades-api-seed-registration.json",
+      "registration_sha256": "947cd11a20c21c6516aba5ac4e41409411e93d2626f624f8a476382d2dbd32b2",
+      "registration_last_commit": "2977e9437a0a2ba3a8a01131e8c651b8de8a3bd3",
+      "acceptance_commit": "2977e9437a0a2ba3a8a01131e8c651b8de8a3bd3",
+      "units_since_reconciliation_on_acceptance": 5,
+      "registered_evidence_records": 10,
+      "delta_distinct_seed_count": 5,
+      "raw_evidenced_before": 413,
+      "raw_evidenced_after": 418,
+      "registered_seed_ids": [
+        "API-TRADE-POST-TRADES-CREATE-TRADE-L4853",
+        "API-TRADE-POST-TRADES-EXECUTE-TRADE-INTERNAL-L5319",
+        "API-TRADE-GET-TRADES-GET-TRADES-WITH-USER-L5673",
+        "API-REQUEST-POST-TRADES-APPROVE-OVERTIME-REQUEST-L4995",
+        "API-REQUEST-POST-TRADES-CANCEL-OVERTIME-REQUEST-INTERNAL-L5205"
+      ],
+      "manifest_key": "trades_api_seed_evidence_registration_path",
+      "evidence_authority": "PREEXISTING_TRACKED_CHARACTERIZATION_TESTS_UNCHANGED_BY_THIS_UNIT"
+    }
+  ],
+  "totals": {
+    "registered_evidence_records": 35,
+    "newly_evidenced_seed_count": 17,
+    "registered_accepted_behavior_units": 1,
+    "registered_accepted_handler_scenarios": 1,
+    "reconciliation_added_behavior_units": 0,
+    "reconciliation_added_distinct_seeds": 0,
+    "accepted_full_seeds": 0
+  },
+  "canonical_inventory": {
+    "expected_seed_count": 465,
+    "baseline_evidenced_seed_count": 135,
+    "reconciled_new_seed_count": 283,
+    "evidenced_seed_count": 418,
+    "remaining_seed_count": 47,
+    "coverage_status": "PARTIAL",
+    "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED"
+  },
+  "strict_classification_at_inspection": {
+    "proven": 315,
+    "partial_or_seed_only": 150,
+    "unknown": 0,
+    "total": 465,
+    "note": "manifest evidenced membership is not requested-scenario proof"
+  },
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "unresolved_origin_cells": 24,
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "records": [],
+  "preserved_history": {
+    "prior_ledger_prefix_bytes": 119459,
+    "prior_ledger_prefix_sha256": "d9c33986c1559b00eded81378bd79d321902f9fd3626bfa54ad463f213c103e0",
+    "prior_ledger_prefix_preserved_unchanged": true,
+    "historical_receipts_counters_and_deferrals_preserved": true,
+    "counter_reset": false,
+    "completed_groups_reopened": false
+  },
+  "accounting": {
+    "manifest_edited_by_this_unit": false,
+    "tests_or_source_edited_by_this_unit": false,
+    "ledger_edited_by_this_unit": false,
+    "ledger_integration_status": "PENDING_SEPARATE_DOCUMENTATION_UNIT",
+    "added_behavior_units": 0,
+    "added_distinct_seed_count": 0,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0
+  },
+  "next_safe_internal_action": {
+    "gap_id": "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "candidate": "Append the pending-five group reconciliation checkpoint to docs/refactor/two-server/section-1/00-stage-ledger.md in a separate documentation-only unit binding this receipt by exact path and receipts sha256; no sixth behavior or new seed family is authorized before that ledger integration is accepted.",
+    "remaining_canonical_seed_count": 150,
+    "origin_matrix_unresolved_cells": 24,
+    "requires_fresh_revalidation": true
+  },
+  "exclusions": [
+    "new_or_sixth_behavior",
+    "seed_promotion_or_added_seed",
+    "canonical_manifest_edit",
+    "test_or_source_edit",
+    "authentication_policy_acceptance",
+    "origin_cell_resolution",
+    "High_blocker_or_Stage_closure",
+    "production_deploy_DNS_Web_Writer_network_secrets_remote_mutation",
+    "rejected_or_deferred_artifact_reuse",
+    "assignment_or_control_edit"
+  ],
+  "acceptance_condition": "This reconciliation receipt is canonical only after exact independent Gemini Reviewer, native test on the registered evidence selectors, fresh Qoder approval, exact-byte application and clean single-parent commit acceptance; stage-ledger integration remains pending in a separate documentation-only unit; this receipt claims no own commit, seed promotion, blocker/origin resolution or Stage closure."
+}
