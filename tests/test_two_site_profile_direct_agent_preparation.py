@@ -379,7 +379,8 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
     @contextmanager
     def lab(self, *, first=None, second=None, pin=True, drift_pin=False,
             after_first=None, after_second_spawn=None, cleanup_error=None,
-            leave_alive=False, wal_first=False, timeout=20):
+            leave_alive=False, wal_first=False, timeout=20,
+            first_hint_invalid_once=False):
         fixture = fixtures.RuntimeProfileContracts("runTest")
         fixture.setUp()
         clock = owned.Clock()
@@ -391,6 +392,8 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
         saved_bytes = saved.read_bytes()
         fixture.source.unlink(); fixture.source.parent.rmdir()
         real_openpty, real_write = profile.pty.openpty, profile.os.write
+        real_hint = profile._initialization_readiness_hint
+        hint_invalid_injected = []
         identity = ((1, 2, 0o100700, os.geteuid(), os.getegid(), 1,
                      profile.REVIEWED_CLI_BYTES, 3, 4), profile.REVIEWED_CLI_SHA256)
         fingerprint = (identity, 240.0)
@@ -475,6 +478,17 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
             if cleanup_error is not None:
                 raise cleanup_error
 
+        def readiness_hint(*args, **kwargs):
+            ready, hint = real_hint(*args, **kwargs)
+            if (first_hint_invalid_once and not hint_invalid_injected
+                    and len(processes) == 1 and hint["new_sessions"] == 1
+                    and hint["valid_profiles"] == 0):
+                hint = dict(hint)
+                hint["reason"] = "INVALID_PROFILE"
+                hint["invalid_profiles"] = 1
+                hint_invalid_injected.append(True)
+            return ready, hint
+
         trace = SimpleNamespace(result=None, error=None, fixture=fixture, clock=clock,
                                 processes=processes, commands=commands, writes=writes,
                                 setups=setups, pin_calls=pin_calls)
@@ -486,6 +500,8 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
                 mock.patch.object(profile.pty, "openpty", side_effect=openpty),
                 mock.patch.object(profile.os, "write", side_effect=write),
                 mock.patch.object(profile.time, "monotonic", side_effect=clock),
+                mock.patch.object(profile, "_initialization_readiness_hint",
+                                  side_effect=readiness_hint),
             ):
                 try:
                     trace.result = profile.prepare_profile(
@@ -563,6 +579,31 @@ class EmptyStartupRecoveryContracts(unittest.TestCase):
             self.assertEqual(profile.validate_profile(
                 trace.result, fresh=True, cli_home=trace.fixture.home)["conversation_id"],
                 self.SECOND)
+
+    def test_owned_init_with_one_transient_invalid_hint_uses_strict_recovery(self):
+        with self.lab(
+                first={"mode": "empty", "startup_ui": "owned_init"},
+                first_hint_invalid_once=True) as trace:
+            self.assertIsNone(trace.error)
+            self.assertEqual(trace.result, profile.PreparedProfile(
+                self.SECOND, trace.fixture.work, fixtures.MODEL, "high"))
+            self.assertEqual(len(trace.commands), 2)
+            self.assertEqual(trace.pin_calls, [None, 240.0])
+            self.assertEqual(trace.writes, [])
+            self.assertEqual(trace.processes[0].received, b"")
+            with sqlite3.connect(trace.fixture.db_path) as db:
+                self.assertEqual(db.execute("SELECT * FROM trajectory_meta").fetchall(),
+                                 [(fixtures.CID, 0, 0)])
+                self.assertEqual(db.execute("SELECT * FROM steps").fetchall(), [])
+                self.assertEqual(db.execute("SELECT * FROM executor_metadata").fetchall(), [])
+
+    def test_transient_invalid_hint_never_authorizes_non_owned_ui(self):
+        with self.lab(
+                first={"mode": "empty", "startup_ui": "ordinary_banner"},
+                first_hint_invalid_once=True) as trace:
+            self.rejected(trace, 1)
+            self.assertIn("reason=UI_NONEMPTY", str(trace.error))
+            self.assertIn("invalid=1", str(trace.error))
 
     def test_first_ready_returns_once_and_unproved_pin_never_retries(self):
         with self.lab(first={"synchronous_ready": True}) as trace:

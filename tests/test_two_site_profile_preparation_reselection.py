@@ -6,6 +6,7 @@ not a claim that the vendor cause is known or a live recovery was observed.
 from __future__ import annotations
 
 from contextlib import contextmanager
+import json
 import os
 from pathlib import Path
 import select
@@ -88,6 +89,20 @@ class OwnedReselectionCLI:
                        b" Yes, I trust")
         elif startup_ui == "ordinary_banner":
             self._send(b"ordinary startupD")
+        elif startup_ui == "owned_init":
+            cid = fixture.db_path.stem
+            event = {
+                "event": "init",
+                "conversation_id": cid,
+                "init": {
+                    "agent": profile.NAME,
+                    "model": fixtures.MODEL,
+                    "cwd": str(fixture.work),
+                    "tools": [],
+                    "permission_mode": "request-review",
+                },
+            }
+            self._send(json.dumps(event, separators=(",", ":")).encode() + b"\n")
         self.thread = threading.Thread(target=self.run, daemon=True)
         self.thread.start()
 

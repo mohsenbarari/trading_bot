@@ -764,6 +764,28 @@ def _empty_recovery_eligible(error: ProposalProfileError, report: dict) -> bool:
     # Only a current owned init frame can reclassify a transient SQLite hint.
     # This is eligibility for the unchanged authoritative pristine DB/WAL proof,
     # never acceptance of a profile or permission to retry a model request.
+    # The readiness observer is deliberately sticky across the bounded first
+    # initializer.  A single early INVALID_PROFILE hint can race the CLI's
+    # creation of its otherwise pristine zero-action database and remain true
+    # after later observations report the same single session as empty.  Admit
+    # only that exact hint shape to the existing post-cleanup DB/WAL proof.  It
+    # is not readiness and never bypasses the pristine snapshot, roster, CLI,
+    # workspace, budget or final strict-validation gates below.
+    owned_init_history = (
+        report.get("multiple_seen") is False
+        and (
+            (
+                report.get("invalid_seen") is False
+                and type(report.get("sqlite_seen")) is bool
+                and report.get("bad_seen") is report["sqlite_seen"]
+            )
+            or (
+                report.get("invalid_seen") is True
+                and report.get("sqlite_seen") is False
+                and report.get("bad_seen") is True
+            )
+        )
+    )
     owned_init = (
         0 < facts["ui_bytes"] <= MAX_UI
         and report.get("headless_init_state") == "OWNED_INIT_ONLY"
@@ -774,9 +796,7 @@ def _empty_recovery_eligible(error: ProposalProfileError, report: dict) -> bool:
         and type(facts["fixed_agent_name_present"]) is bool
         and all(facts[key] is False for key in required - fixed - {
             "owned_workspace_present", "fixed_agent_name_present"})
-        and report.get("invalid_seen") is False and report.get("multiple_seen") is False
-        and type(report.get("sqlite_seen")) is bool
-        and report.get("bad_seen") is report["sqlite_seen"]
+        and owned_init_history
     )
     return bool(legacy_empty or owned_init)
 
