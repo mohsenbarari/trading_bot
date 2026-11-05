@@ -49,13 +49,14 @@
     "sync_health_first_summary_execute_failure_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-sync-health-first-only-registration.json",
     "identity_users_boundary_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-identity-users-boundary-registration.json",
     "sync_health_grouped_row_consumption_failure_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-sync-health-grouped-row-registration.json",
-    "auth_session_approval_recovery_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-auth-session-approval-recovery-registration.json"
+    "auth_session_approval_recovery_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-auth-session-approval-recovery-registration.json",
+    "chat_read_evidence_registration_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-chat-read-evidence-registration.json"
   },
   "counts": {
     "baseline_evidenced_seed_count": 135,
-    "reconciled_new_seed_count": 275,
-    "evidenced_seed_count": 410,
-    "remaining_seed_count": 55
+    "reconciled_new_seed_count": 278,
+    "evidenced_seed_count": 413,
+    "remaining_seed_count": 52
   },
   "coverage_status": "PARTIAL",
   "canonical_blockers": [

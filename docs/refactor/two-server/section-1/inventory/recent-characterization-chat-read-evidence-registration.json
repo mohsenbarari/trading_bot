@@ -1,0 +1,328 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-QODER-HANDOFF-20261105-002",
+  "assignment_scope_sha256": "e3150c15246bbb1f8fefc07c9594b3b098bc0b3e8934f85eccef706aa13a24f2",
+  "parent_assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "original_parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "task_id": "p1-00b-chat-read-evidence-registration-20261105-c001",
+  "scenario_key": "chat-read-evidence-canonical-registration",
+  "status": "PARTIAL_CANONICAL_INTEGRATION",
+  "receipt_type": "PARTIAL_CANONICAL_INTEGRATION",
+  "source": {
+    "accepted_source_commit": "ee7781a61ba998d9418cb57a768fa4cb1a62b142",
+    "accepted_parent": "b6bb104baef95fb3eca7fa1bbd8f68a61df64ae0",
+    "source_head": "ee7781a61ba998d9418cb57a768fa4cb1a62b142",
+    "provenance": "PREEXISTING_TRACKED_CHARACTERIZATION_TESTS_UNCHANGED_BY_THIS_UNIT"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_chat_get_conversations_nonempty.py",
+      "sha256": "eb6d9c54b68efedc40b5a1206000b464c71ee88bf6dc29535102085da295826a",
+      "utf8_bytes": 18794,
+      "mode": "100644",
+      "git_blob_sha1": "1abd0dc54ccae1150fa82797456e13bad8770ba9",
+      "last_commit": "263f88014138d836f403cbb2316f32dd34b7101b",
+      "canonical_symbol": "api/routers/chat.py:583",
+      "handler": "chat.get_conversations",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-CONVERSATIONS-L582"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_get_conversations_nonempty.py::TestChatGetConversationsNonempty::test_mixed_direct_room_order_filter_and_ties",
+        "tests/test_p1_00b_characterization_chat_get_conversations_nonempty.py::TestChatGetConversationsNonempty::test_customer_target_scope_and_room_only_order"
+      ],
+      "characterized_boundary": "MIXED_DIRECT_ROOM_ORDER_FILTER_AND_CUSTOMER_TARGET_SCOPE_ORDER",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_get_conversations_ordering.py",
+      "sha256": "695b6d1b66652ae47412ead41d666abda5f1bee9214fcd5dc50bd37122258ed5",
+      "utf8_bytes": 13497,
+      "mode": "100644",
+      "git_blob_sha1": "bae4565e3a7c0af87bdeadf9a9b1eb9fb18bf561",
+      "last_commit": "74d7c0a060be6f448c8e4077087e81e1ececbefc",
+      "canonical_symbol": "api/routers/chat.py:583",
+      "handler": "chat.get_conversations",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-CONVERSATIONS-L582"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_get_conversations_ordering.py::CharacterizeChatGetConversationsOrderingTests::test_get_conversations_empty_direct_and_room_aggregation",
+        "tests/test_p1_00b_characterization_chat_get_conversations_ordering.py::CharacterizeChatGetConversationsOrderingTests::test_get_conversations_malformed_direct_row_validation_earlier_failure_boundary",
+        "tests/test_p1_00b_characterization_chat_get_conversations_ordering.py::CharacterizeChatGetConversationsOrderingTests::test_get_conversations_room_list_failure_later_failure_boundary"
+      ],
+      "characterized_boundary": "EMPTY_AGGREGATION_MALFORMED_DIRECT_ROW_AND_ROOM_LIST_FAILURE_BOUNDARIES",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_conversations_execution_failure.py",
+      "sha256": "2cf7c7618cf5fc43606a01041b2c883e9bfa4469e586d0800e2f2afa6a5f304b",
+      "utf8_bytes": 6773,
+      "mode": "100644",
+      "git_blob_sha1": "149229d82f1541453bf37f33c193511b45a61eed",
+      "last_commit": "3a0f5db6d948c3aa17797e1cf5d771b76145e4e1",
+      "canonical_symbol": "api/routers/chat.py:583",
+      "handler": "chat.get_conversations",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-CONVERSATIONS-L582"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_conversations_execution_failure.py::ChatConversationsExecutionFailureCharacterizationTests::test_execute_exception_propagates_before_downstream_work"
+      ],
+      "characterized_boundary": "DIRECT_EXECUTE_EXCEPTION_PROPAGATES_BEFORE_DOWNSTREAM_CONVERSATION_WORK",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_conversations_target_scope_failure.py",
+      "sha256": "ade0847c95d615297f4ac2e821d90a8cc9feef31af018b488b515a9f122a7685",
+      "utf8_bytes": 3429,
+      "mode": "100644",
+      "git_blob_sha1": "4b009b443627521d4777630e64f768cd29fce765",
+      "last_commit": "1e8e2aafea4ff87cbeebf0493406cceebd8953bf",
+      "canonical_symbol": "api/routers/chat.py:583",
+      "handler": "chat.get_conversations",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-CONVERSATIONS-L582"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_conversations_target_scope_failure.py::ChatConversationsTargetScopeFailureCharacterizationTests::test_target_scope_exception_propagates_before_downstream_work"
+      ],
+      "characterized_boundary": "TARGET_SCOPE_EXCEPTION_PROPAGATES_BEFORE_DIRECT_AND_ROOM_AGGREGATION",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_empty_aggregation_batch.py",
+      "sha256": "3002473bafcf6c0cbbfa671732eacf56cf8aa6917de9f573e7d5c0c616850d8d",
+      "utf8_bytes": 6980,
+      "mode": "100644",
+      "git_blob_sha1": "4ea7195a67029cfdfebc6b0553d0ea88827f831f",
+      "last_commit": "fe3b1a4f9c73bb985e92270524843755b9f7856e",
+      "canonical_symbol": "api/routers/chat.py:583",
+      "handler": "chat.get_conversations",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-CONVERSATIONS-L582"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_empty_aggregation_batch.py::ChatEmptyAggregationBatchCharacterizationTests::test_get_conversations_empty_direct_and_room_aggregation_seed"
+      ],
+      "characterized_boundary": "EMPTY_DIRECT_AND_ROOM_AGGREGATION_RETURNS_EMPTY_LIST",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_get_messages_around_success.py",
+      "sha256": "c91f6af38e4d85edba0f406df62c791a79549411c8010911396fb20141931119",
+      "utf8_bytes": 11994,
+      "mode": "100644",
+      "git_blob_sha1": "dc07f63deff50574592385a5c525ebf63ef3b408",
+      "last_commit": "c7ca0c7916cb2e099e5993115480aa66a08f064e",
+      "canonical_symbol": "api/routers/chat.py:857",
+      "handler": "chat.get_messages",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-MESSAGES-L856"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_get_messages_around_success.py::CharacterizeChatGetMessagesAroundSuccessTests::test_around_id_merges_older_and_newer_rows_in_ascending_order",
+        "tests/test_p1_00b_characterization_chat_get_messages_around_success.py::CharacterizeChatGetMessagesAroundSuccessTests::test_around_id_with_empty_older_half_returns_newer_rows"
+      ],
+      "characterized_boundary": "AROUND_ID_MERGES_REVERSED_OLDER_AND_ASCENDING_NEWER_ROWS",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_get_messages_default_before_success.py",
+      "sha256": "0b79d5da25b786711b0169acd63386fab53e532ad37cc25d2a1d74e045acc4b5",
+      "utf8_bytes": 10548,
+      "mode": "100644",
+      "git_blob_sha1": "73e6d84953ff7206d8c922b8343cf656aced7255",
+      "last_commit": "a3773308bec800f58d6f07f9ce62412d84807866",
+      "canonical_symbol": "api/routers/chat.py:857",
+      "handler": "chat.get_messages",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-MESSAGES-L856"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_get_messages_default_before_success.py::CharacterizeChatGetMessagesDefaultBeforeSuccessTests::test_default_history_reverses_rows_and_returns_serializer_result",
+        "tests/test_p1_00b_characterization_chat_get_messages_default_before_success.py::CharacterizeChatGetMessagesDefaultBeforeSuccessTests::test_before_id_empty_history_executes_once_and_returns_serializer_result"
+      ],
+      "characterized_boundary": "DEFAULT_AND_BEFORE_ID_HISTORY_REVERSES_ROWS_AND_EXECUTES_ONCE",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_get_messages_failure_boundaries.py",
+      "sha256": "9e5c7b1c36b063f768d7b370ed4b7cfc3768ad370b3177be038f676a75d70928",
+      "utf8_bytes": 10315,
+      "mode": "100644",
+      "git_blob_sha1": "dd1e95ff29bc27d6399d9b306b638eb891b083d1",
+      "last_commit": "df4ec38c472f690e61693154ddf032636e4762fc",
+      "canonical_symbol": "api/routers/chat.py:857",
+      "handler": "chat.get_messages",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-MESSAGES-L856"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_get_messages_failure_boundaries.py::CharacterizationChatGetMessagesFailureBoundariesTests::test_builder_sentinel_exception_propagates_after_access_checks",
+        "tests/test_p1_00b_characterization_chat_get_messages_failure_boundaries.py::CharacterizationChatGetMessagesFailureBoundariesTests::test_around_id_newer_execute_sentinel_exception_propagates_without_row_extraction",
+        "tests/test_p1_00b_characterization_chat_get_messages_failure_boundaries.py::CharacterizationChatGetMessagesFailureBoundariesTests::test_default_path_serializer_sentinel_exception_propagates_with_reversed_message_identities"
+      ],
+      "characterized_boundary": "BUILDER_AROUND_EXECUTE_AND_SERIALIZER_EXCEPTION_BOUNDARIES",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py",
+      "sha256": "0ee56b1b9eb2f6b8c9d597ea42a78b11737f4ad0e1c34843c4a575df42b244d0",
+      "utf8_bytes": 7649,
+      "mode": "100644",
+      "git_blob_sha1": "63fb8411f586651434d0a7ca7eb978fb0e80f3fa",
+      "last_commit": "868147b529c1f5571672b0a28aa32bef5365d20a",
+      "canonical_symbol": "api/routers/chat.py:1875",
+      "handler": "chat.get_group_message_seen_members",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py::CharacterizeChatGetGroupMessageSeenMembersTests::test_get_group_message_seen_members_two_row_success",
+        "tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py::CharacterizeChatGetGroupMessageSeenMembersTests::test_get_group_message_seen_members_empty",
+        "tests/test_p1_00b_characterization_chat_get_group_message_seen_members.py::CharacterizeChatGetGroupMessageSeenMembersTests::test_get_group_message_seen_members_invalid_service_item_propagates_validation_error"
+      ],
+      "characterized_boundary": "GROUP_TWO_ROW_EMPTY_AND_INVALID_ITEM_SERVICE_RESULTS",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_seen_members_non_group.py",
+      "sha256": "27290e269d83047d0698d6ffc43196c93faf0dfc7127130649ae11d91d8ce640",
+      "utf8_bytes": 4691,
+      "mode": "100644",
+      "git_blob_sha1": "715a5ff8f092d836f0e6ee5d607daec51e4e40aa",
+      "last_commit": "ce55ebc5f3f36cc6a6034224adc59bf844a45f68",
+      "canonical_symbol": "api/routers/chat.py:1875",
+      "handler": "chat.get_group_message_seen_members",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_seen_members_non_group.py::ChatSeenMembersNonGroupCharacterizationTests::test_channel_room_rejected_before_seen_service",
+        "tests/test_p1_00b_characterization_chat_seen_members_non_group.py::ChatSeenMembersNonGroupCharacterizationTests::test_direct_boundary_input_rejected_before_seen_service"
+      ],
+      "characterized_boundary": "CHANNEL_AND_DIRECT_BOUNDARY_ROOMS_REJECTED_WITH_404_BEFORE_SEEN_SERVICE",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_chat_seen_members_service_failure.py",
+      "sha256": "fffe385c5d136272f9e50e7bf6b36c95d6dbce378028efc01efbd73049744b6a",
+      "utf8_bytes": 3489,
+      "mode": "100644",
+      "git_blob_sha1": "c4cd1ca1180e3c54d5575bcc04bd6432a5ea4d7c",
+      "last_commit": "7a91bba47224380a1b6beebddd693e6394c96d94",
+      "canonical_symbol": "api/routers/chat.py:1875",
+      "handler": "chat.get_group_message_seen_members",
+      "seed_ids": [
+        "API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874"
+      ],
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_chat_seen_members_service_failure.py::ChatSeenMembersServiceFailureCharacterizationTests::test_group_seen_service_exception_propagates_unchanged"
+      ],
+      "characterized_boundary": "GROUP_SEEN_SERVICE_EXCEPTION_PROPAGATES_UNCHANGED",
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY"
+    }
+  ],
+  "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+  "registered_seed_ids": [
+    "API-MSG-GET-CHAT-GET-CONVERSATIONS-L582",
+    "API-MSG-GET-CHAT-GET-MESSAGES-L856",
+    "API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874"
+  ],
+  "duplicate_new_seed_ids": [],
+  "removed_seed_ids": [],
+  "promotion_assessment": {
+    "registered_seed_ids": [
+      "API-MSG-GET-CHAT-GET-CONVERSATIONS-L582",
+      "API-MSG-GET-CHAT-GET-MESSAGES-L856",
+      "API-MSG-GET-CHAT-GET-GROUP-MESSAGE-SEEN-MEMBERS-L1874"
+    ],
+    "delta_distinct_seed_count": 3,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 275,
+      "evidenced": 410,
+      "remaining": 55
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 278,
+      "evidenced": 413,
+      "remaining": 52
+    },
+    "strict_progress_unchanged": false,
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "manifest_registration": {
+    "added_key": "chat_read_evidence_registration_path",
+    "added_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-chat-read-evidence-registration.json",
+    "before_utf8_bytes": 6185,
+    "before_sha256": "e3fadee1527d347574eefa80f3947bb073ffad920d612b3d240a88f7cf8c3d63",
+    "after_counts_on_exact_acceptance": {
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 278,
+      "evidenced_seed_count": 413,
+      "remaining_seed_count": 52
+    },
+    "evidence_sources_append_only_last_position": true
+  },
+  "reconciliation": {
+    "canonical_base_capture_units_since_reconciliation": 0,
+    "registered_evidence_files_in_this_unit": 1,
+    "units_since_reconciliation_on_exact_acceptance": 4,
+    "threshold": 5,
+    "group_reconciliation_complete": false,
+    "canonical_base_edited": false
+  },
+  "accounting": {
+    "added_behavior_units": 0,
+    "added_handler_scenarios": 0,
+    "registered_existing_characterization_records": 11,
+    "newly_evidenced_seed_count": 3,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 3,
+    "manifest_file_edited_by_this_unit": true,
+    "count_values_changed_by_this_unit": true,
+    "documentation_unit_adds_no_product_behavior": true,
+    "ledger_edited_by_this_unit": false,
+    "scenario_records_and_recent_characterization_edited": false
+  },
+  "strict_canonical_progress": {
+    "proven": 307,
+    "partial": 158,
+    "total": 465
+  },
+  "strict_canonical_progress_on_exact_acceptance": {
+    "proven": 310,
+    "partial": 155,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "excluded": [
+    "full success-path characterization beyond the registered tracked tests",
+    "real SQL or database persistence/transactions",
+    "HTTP routing/Depends/authentication/authorization",
+    "concurrency/retry/reload",
+    "origin interaction cells",
+    "full handler or full seed acceptance",
+    "High blocker resolution",
+    "Stage closure"
+  ]
+}
