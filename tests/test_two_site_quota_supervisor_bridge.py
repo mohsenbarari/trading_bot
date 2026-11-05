@@ -85,6 +85,33 @@ class TestTwoSiteQuotaSupervisorBridge(unittest.TestCase):
                 self.assertEqual(rec2, rec1)
                 self.assertEqual(wait_path.read_bytes(), raw1)
 
+    def test_valid_accepted_continue_never_probes_quota_state(self) -> None:
+        result = {
+            "state": "CONTINUE",
+            "head_changed": True,
+            "head_before": "1" * 40,
+            "head_after": "2" * 40,
+            "commit": "2" * 40,
+        }
+        with mock.patch(
+            "scripts.two_site_quota_supervisor_bridge.canonical_root"
+        ) as p_root, mock.patch(
+            "scripts.two_site_quota_supervisor_bridge.probe_cycle_quota_receipt"
+        ) as p_probe:
+            self.assertIsNone(accept_cycle_quota_disposition_locked(
+                None, None, result, enabled=True
+            ))
+            p_root.assert_not_called()
+            p_probe.assert_not_called()
+
+        for invalid in (
+            dict(result, head_changed=False),
+            dict(result, head_after=result["head_before"]),
+            dict(result, commit="3" * 40),
+        ):
+            with self.assertRaises(QuotaSupervisorBridgeError):
+                accept_cycle_quota_disposition_locked(None, None, invalid, enabled=True)
+
     def test_exact_single_target_deletions_no_reservation_and_no_terminal_quota(self) -> None:
         # Scenario 1: NO_RESERVATION deletes only broker-reservation.json
         with tempfile.TemporaryDirectory() as tmp_dir:

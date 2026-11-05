@@ -17,6 +17,7 @@ from scripts.two_site_preparation_contract import PreparationStartup
 CYCLE = "cycle-0001-20990101T000000Z-123"
 HEAD = "1" * 40
 MODEL = "synthetic-qoder-model"
+BROKER_CODE_SHA = "9" * 64
 
 def put(path, value):
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -49,7 +50,9 @@ def owned(tmp_path, monkeypatch):
     put(directory/"preparation-startup.json",PreparationStartup(1,"one_shot",CYCLE,HEAD,scope.sha256).to_mapping())
     broker.publish_cycle_reservation(root,request)
     _,status_path,_,_,_=broker.broker_paths(root)
-    status=dict(state="RUNNING",pid=1234,started_at=time.time()-10,updated_at=time.time(),request_id=request["request_id"])
+    monkeypatch.setattr(broker,"broker_code_identity",lambda _root:BROKER_CODE_SHA)
+    status=dict(state="RUNNING",pid=1234,started_at=time.time()-10,updated_at=time.time(),
+                request_id=request["request_id"],broker_code_sha256=BROKER_CODE_SHA)
     put(status_path,status);broker._publish_cycle_dispatch(root,request,status)
     sdk(directory/"stream.jsonl","Waiting for the exact background request.")
     config={"roles":{"coordinator":{"provider":"qoder","model":MODEL,"reasoning_effort":"xhigh"}}}
@@ -86,7 +89,11 @@ def completion(s,*,session="new-session",result=None):
         return value,qoder.validate_qoder_terminal(directory,expected_model=MODEL)
     return Mock(side_effect=perform)
 
-def terminal(s):broker._publish_cycle_terminal(s["root"],s["request"],s["response"])
+def terminal(s):
+    broker._publish_cycle_terminal(s["root"],s["request"],s["response"])
+    idle=dict(s["status"]);idle.update(state="IDLE",updated_at=time.time())
+    idle.pop("request_id",None)
+    put(s["status_path"],idle)
 
 def test_pending_ready_waits_same_request_then_only_one_completion(owned):
     phases=[];complete=completion(owned)
@@ -168,6 +175,28 @@ def test_consumed_response_still_has_immutable_cycle_terminal(owned):
     terminal(owned);complete=completion(owned)
     assert invoke(owned,complete=complete)["request_id"]==owned["request"]["request_id"]
     assert complete.call_count==1
+
+
+def test_owned_completion_consumes_only_exact_ordinary_queue_response(owned):
+    _state, _status, _requests, _claimed, responses = broker.broker_paths(owned["root"])
+    response_path = broker._response_path(responses, owned["request"]["request_id"])
+    broker._atomic_new_json(response_path, owned["response"], broker.MAX_RESPONSE_BYTES)
+    terminal(owned); complete=completion(owned)
+    result=invoke(owned,complete=complete)
+    assert result["kind"]=="OWNED_BROKER_COORDINATOR_COMPLETION"
+    assert not response_path.exists()
+    assert (owned["directory"]/broker._CYCLE_TERMINAL).is_file()
+
+
+def test_owned_completion_preserves_mismatched_queue_response(owned):
+    _state, _status, _requests, _claimed, responses = broker.broker_paths(owned["root"])
+    response_path = broker._response_path(responses, owned["request"]["request_id"])
+    drift=dict(owned["response"],stdout='{"state":"DRIFT"}')
+    broker._atomic_new_json(response_path, drift, broker.MAX_RESPONSE_BYTES)
+    terminal(owned)
+    with pytest.raises(sut.OwnedBrokerWaitError,match="QUEUE_RESPONSE_DRIFT"):
+        invoke(owned,complete=completion(owned))
+    assert response_path.exists()
 
 @pytest.mark.parametrize("fault", ["foreign-session", "wrong-model", "error-terminal"])
 def test_unqualified_original_sdk_never_starts_completion(owned, fault):

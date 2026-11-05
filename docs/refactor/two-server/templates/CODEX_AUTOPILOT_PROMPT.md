@@ -217,7 +217,8 @@ Preparation/result-format safeguards from observed local failures:
    the second must validate that approval and apply only the exact proposal bytes and native bindings.
    Phase order: apply_reviewed already performs ct.review(applied=True). After APPLIED_BYTES_VERIFIED,
    stage only its returned changed_paths, then make the one commit. If an explicit applied review is
-   needed, run cycle_tools review --applied BEFORE git add. Never run pre-apply review after applying
+   needed, run python3 scripts/two_site_cycle_tools.py review --task <path> --worker <id>
+   --reviewer <id> --sha <sha> --applied BEFORE staging and before git add. Never run pre-apply review after applying
    or after staging; do not infer flags or weaken any validation to accommodate the wrong phase.
    A rejected, missing, stale or ambiguous approval is not permission to apply. Propagate helper
    failures and report only status and evidence paths. Never print, manually rewrite or regenerate

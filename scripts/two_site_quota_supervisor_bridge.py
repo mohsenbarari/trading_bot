@@ -57,12 +57,37 @@ def accept_cycle_quota_disposition_locked(
     if not enabled:
         return None
 
+    if not isinstance(result, dict):
+        raise QuotaSupervisorBridgeError("result must be a dict")
+
+    # Quota disposition belongs only to a no-commit BLOCKED cycle.  A fully
+    # validated CONTINUE receipt has already advanced HEAD and can retain an
+    # ordinary Broker reservation/terminal record for audit.  Probing that
+    # ordinary request as though it were a quota terminal misclassifies its
+    # response queue entry as ambiguous and stops the next cycle after genuine
+    # accepted work.
+    if result.get("state") == "CONTINUE":
+        head_before = result.get("head_before")
+        head_after = result.get("head_after")
+        commit = result.get("commit")
+        if (
+            result.get("head_changed") is not True
+            or not isinstance(head_before, str)
+            or not _HEX_SHA_RE.fullmatch(head_before)
+            or not isinstance(head_after, str)
+            or not _HEX_SHA_RE.fullmatch(head_after)
+            or head_before == head_after
+            or commit != head_after
+        ):
+            raise QuotaSupervisorBridgeError(
+                "CONTINUE quota bypass requires one exact accepted commit transition"
+            )
+        return None
+
     if not isinstance(root, Path):
         raise QuotaSupervisorBridgeError("root must be a Path")
     if not isinstance(run_dir, Path):
         raise QuotaSupervisorBridgeError("run_dir must be a Path")
-    if not isinstance(result, dict):
-        raise QuotaSupervisorBridgeError("result must be a dict")
 
     try:
         c_root = canonical_root(root)

@@ -48,6 +48,45 @@ def _no_stop(root):
         "OWNED_BROKER_STOP_BEFORE_COMPLETION")
 
 
+def _canonical(value):
+    return json.dumps(value, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def _consume_exact_owned_response(root, request, response, owner):
+    """Remove only the ordinary queue copy already frozen in the cycle terminal.
+
+    The immutable cycle terminal remains the recovery/audit source.  This
+    mirrors the normal synchronous Broker client, which removes its queue copy
+    after a successful exact read, and prevents a later quota probe from
+    mistaking an already-consumed ordinary request for quota ambiguity.
+    """
+    state_root, status_path, _requests, claimed, responses = broker.broker_paths(root)
+    terminal_path = (root / ".local/two-site-refactor/autopilot/runs"
+                     / request["controller_run_id"] / broker._CYCLE_TERMINAL)
+    terminal = _private(root, terminal_path, broker._MAX_CYCLE_RECORD)
+    _need(set(terminal) == {"schema_version", "request", "response"}
+          and terminal["schema_version"] == "1.0"
+          and _canonical(terminal["request"]) == _canonical(request)
+          and _canonical(terminal["response"]) == _canonical(response),
+          "OWNED_BROKER_TERMINAL_RESPONSE_DRIFT")
+    response_path = broker._response_path(responses, request["request_id"])
+    with broker.exclusive_broker_lock(state_root / "client.lock"):
+        status = broker._read_broker_status(root, status_path)
+        _need(status.get("state") == "IDLE"
+              and (status.get("pid"), status.get("started_at")) == owner,
+              "OWNED_BROKER_NOT_QUIESCENT")
+        if not os.path.lexists(response_path):
+            return
+        queued = broker._safe_read_existing_response(root, response_path)
+        _need(_canonical(queued) == _canonical(response),
+              "OWNED_BROKER_QUEUE_RESPONSE_DRIFT")
+        _need(not os.path.lexists(claimed / f"{request['request_id']}.json"),
+              "OWNED_BROKER_CLAIM_STILL_PRESENT")
+        response_path.unlink()
+        broker.fsync_private_record_directory(responses)
+
+
 def _ready(root, record, response):
     """Recheck the actual native/Gemini/Qoder chain, not stdout claims alone."""
     from scripts import two_site_cycle_packet as packet
@@ -141,6 +180,7 @@ def finish_owned_request(root, original_dir, before, model_config, *,
     response = broker._wait_existing_response(root, request, owner, request["timeout"],
                                               deadline_monotonic=deadline, poll_check=check)
     broker._publish_cycle_terminal(root, request, response)
+    _consume_exact_owned_response(root, request, response, owner)
     check()
     if response["state"] != "COMPLETED" or response["exit_code"] != 0:
         result = {"schema_version": "1.0", "state": "BLOCKED", "disposition": "HALT",

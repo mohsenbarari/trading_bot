@@ -2891,6 +2891,19 @@ def run_cycle(
     before_model: Callable[[dict[str, object]], None] | None = None,
     quota_original_controller_run_id: str | None = None,
 ) -> tuple[Path, dict]:
+    # Reject caller-controlled continuation inputs before reading policy files,
+    # creating telemetry, or touching the repository.  Besides keeping the
+    # failure non-observing, this preserves the original fail-closed contract
+    # for malformed quota resumes when configuration itself is unavailable.
+    if not isinstance(preparation_route, str) or preparation_route not in {"one_shot", "legacy"}:
+        raise AutopilotError(f"invalid preparation route: {preparation_route!r}")
+    if quota_original_controller_run_id is not None and not (
+        type(quota_original_controller_run_id) is str
+        and RUN_ID.fullmatch(quota_original_controller_run_id)
+    ):
+        raise QuotaFinalizationHardStopError("invalid quota_original_controller_run_id")
+    if quota_original_controller_run_id is not None and before_model is not None:
+        raise QuotaFinalizationHardStopError("quota continuation forbids ordinary rescope callback")
     cycle_ai_config = load_ai_config(root)
     coordinator_settings = cycle_ai_config["roles"]["coordinator"]
     try:
@@ -2903,15 +2916,6 @@ def run_cycle(
     except Exception:
         telemetry = nullcontext({})
     with telemetry as _observation:
-        if not isinstance(preparation_route, str) or preparation_route not in {"one_shot", "legacy"}:
-            raise AutopilotError(f"invalid preparation route: {preparation_route!r}")
-        if quota_original_controller_run_id is not None and not (
-            type(quota_original_controller_run_id) is str
-            and RUN_ID.fullmatch(quota_original_controller_run_id)
-        ):
-            raise QuotaFinalizationHardStopError("invalid quota_original_controller_run_id")
-        if quota_original_controller_run_id is not None and before_model is not None:
-            raise QuotaFinalizationHardStopError("quota continuation forbids ordinary rescope callback")
         global _ACTIVE_PROCESS
         heartbeat_stop: threading.Event | None = None
         heartbeat_thread: threading.Thread | None = None

@@ -17,7 +17,7 @@
     },
     "final_reviewer": {
       "provider": "qoder",
-      "model": "DeepSeek-Flash",
+      "model": "Qwen3.8-Max",
       "reasoning_effort": "max"
     },
     "worker": {

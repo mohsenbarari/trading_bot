@@ -80,7 +80,50 @@ def _mock_cycle_environment(
     validate_repo_side_effect: Any = None,
     capture_side_effect: Any = None,
 ):
+    policy = {"schema_version": 1, "roles": {
+        "coordinator": {"provider": "qoder", "model": "fixture-qoder-controller", "reasoning_effort": "max"},
+        "final_reviewer": {"provider": "qoder", "model": "fixture-qoder-reviewer", "reasoning_effort": "max"},
+        "worker": {"provider": "antigravity", "model": "fixture-gemini", "reasoning_effort": "high"},
+        "reviewer": {"provider": "antigravity", "model": "fixture-gemini", "reasoning_effort": "high"},
+    }}
+    identity = {"provider": "qoder", "path": str(codex), "version": "fixture",
+                "sha256": "4" * 64, "logged_in": True, "auto_update_enabled": False,
+                "model": "fixture-qoder-controller", "reasoning": "max", "runtime": {}}
     with patch(
+        "scripts.two_site_codex_autopilot.load_ai_config",
+        return_value=policy,
+    ), patch(
+        "scripts.two_site_codex_autopilot.coordinator_identity",
+        return_value=identity,
+    ), patch(
+        "scripts.two_site_codex_autopilot.coordinator_command",
+        return_value=[str(codex), "fixture-qoder"],
+    ), patch(
+        "scripts.two_site_codex_autopilot.buildwrap_coordinator_command",
+        side_effect=lambda _root, _run_dir, command, **_kwargs: command,
+    ), patch(
+        "scripts.two_site_codex_autopilot.git",
+        side_effect=lambda _root, *args: (
+            "Fixture Qoder" if args == ("config", "--get", "user.name")
+            else "fixture-qoder@example.invalid"
+            if args == ("config", "--get", "user.email")
+            else ""
+        ),
+    ), patch(
+        "scripts.two_site_coordinator_broker_wait.finish_owned_request",
+        return_value=None,
+    ), patch(
+        "scripts.two_site_codex_autopilot.finalize_qoder_output",
+        side_effect=lambda run_dir, **_kwargs: json.loads(
+            (Path(run_dir) / "result.json").read_text(encoding="utf-8")
+        ),
+    ), patch(
+        "scripts.two_site_qoder_review.validate_result_review",
+        return_value=None,
+    ), patch(
+        "scripts.two_site_qoder_output_repair.shape_only_failure",
+        return_value=False,
+    ), patch(
         "scripts.two_site_codex_autopilot.validate_repository",
         side_effect=validate_repo_side_effect,
     ), patch(
