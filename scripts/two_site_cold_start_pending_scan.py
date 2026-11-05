@@ -43,6 +43,7 @@ MAX_RUNS_ENTRIES: int = 512
 MAX_RUN_CHILD_ENTRIES: int = 128
 OPAQUE_RUN_DIRECTORIES: frozenset[str] = frozenset({
     "coordinator-qoder-state",
+    "owned-broker-completion",
     "output-contract-repair",
     "root-packet-cap-correction",
 })

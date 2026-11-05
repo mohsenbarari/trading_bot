@@ -239,6 +239,21 @@ class TestTwoSiteColdStartPendingScan(unittest.TestCase):
             self.assertIsNone(assert_no_pending_cold_adoption_artifacts_locked(self.state_root))
             nested.rmdir()
 
+    def test_owned_broker_completion_is_opaque_but_strictly_custodied(self) -> None:
+        run_dir = self._create_historical_run(
+            "cycle-0008-20260917T010205Z-123456", 0o700
+        )
+        completion = run_dir / "owned-broker-completion"
+        completion.mkdir(mode=0o700)
+        private_state = completion / "coordinator-qoder-state"
+        private_state.mkdir(mode=0o700)
+        (private_state / "provider-internal").mkdir(mode=0o700)
+        self.assertIsNone(assert_no_pending_cold_adoption_artifacts_locked(self.state_root))
+
+        os.chmod(completion, 0o755)
+        with self.assertRaises(PendingColdAdoptionError):
+            assert_no_pending_cold_adoption_artifacts_locked(self.state_root)
+
     def test_bounded_scandir_caps_and_early_abort(self) -> None:
         self._create_historical_run(VALID_RUN_1, 0o700)
 
