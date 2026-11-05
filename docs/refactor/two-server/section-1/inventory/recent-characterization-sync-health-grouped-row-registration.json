@@ -7,7 +7,7 @@
   "scenario_key": "sync-health-grouped-row-consumption-boundary-canonical-registration",
   "source_head": "a5e43cf04e441cf3f4e52b6a02cc387e2b6fa050",
   "status": "PARTIAL_CANONICAL_INTEGRATION",
-  "receipt_type": "SINGLE_ACCEPTED_BEHAVIOR_UNIT_REGISTRATION",
+  "receipt_type": "PARTIAL_CANONICAL_INTEGRATION",
   "source": {
     "accepted_source_commit": "0b159bc5addeb6430e31ec3e5a279ae01b4a4a58",
     "accepted_parent": "b3dcc429d139fa36e301a239c9535a7ec58ff7be"

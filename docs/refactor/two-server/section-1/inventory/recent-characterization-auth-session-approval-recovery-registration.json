@@ -1,0 +1,318 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-QODER-HANDOFF-20261105-002",
+  "assignment_scope_sha256": "e3150c15246bbb1f8fefc07c9594b3b098bc0b3e8934f85eccef706aa13a24f2",
+  "parent_assignment_id": "WA-P1-00B-COMPLETION-20261102-001",
+  "original_parent_assignment_id": "WA-P1-00B-FREEZE-20260904-001",
+  "task_id": "p1-00b-auth-session-approval-recovery-registration-20261105-c001",
+  "scenario_key": "auth-session-approval-recovery-canonical-registration",
+  "status": "PARTIAL_CANONICAL_INTEGRATION",
+  "receipt_type": "PARTIAL_CANONICAL_INTEGRATION",
+  "source": {
+    "accepted_source_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+    "accepted_parent": "3beab068b4e641fcf2eb243e029d7cc330cf1540",
+    "source_head": "b6bb104baef95fb3eca7fa1bbd8f68a61df64ae0",
+    "provenance": "PREEXISTING_TRACKED_CHARACTERIZATION_TESTS_UNCHANGED_BY_THIS_UNIT"
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_start_single_session_recovery.py",
+      "sha256": "6db1a537cf473dd66761e47ee28400d71713ac6e1be76037d72e386d8dc61fa7",
+      "utf8_bytes": 13087,
+      "mode": "100644",
+      "git_blob_sha1": "a42b6fcefdd46614f7111256b041a8f8c6035e28",
+      "last_commit": "5d9d95aba98a11bfac3f2c0df8f2171f7c26d4a5",
+      "canonical_symbol": "api/routers/sessions.py:674",
+      "handler": "api.routers.sessions.start_single_session_recovery",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-START-SINGLE-SESSION-RECOVERY-L673"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_start_single_session_recovery.py::P100bCharacterizationStartSingleSessionRecoveryTests::test_active_latest_recovery_is_reused_without_side_effects",
+        "tests/test_p1_00b_characterization_start_single_session_recovery.py::P100bCharacterizationStartSingleSessionRecoveryTests::test_inactive_latest_recovery_creates_new_and_commits_before_delivery"
+      ],
+      "characterized_boundary": "ACTIVE_LATEST_RECOVERY_REUSED_WITHOUT_SIDE_EFFECTS_AND_INACTIVE_LATEST_CREATES_COMMITS_BEFORE_DELIVERY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_approve_single_session_recovery_pending_success.py",
+      "sha256": "6c4d8b682520520934990bd92b0d108c0d961456b6b640a1c16f1b045b9d01ba",
+      "utf8_bytes": 15311,
+      "mode": "100644",
+      "git_blob_sha1": "6c49b3048baccda4e9bc46d13c5122493c38fbb1",
+      "last_commit": "5c5380c5b527818b6890f18a52959f1dec87d861",
+      "canonical_symbol": "api/routers/sessions.py:846",
+      "handler": "api.routers.sessions.approve_single_session_recovery",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-APPROVE-SINGLE-SESSION-RECOVERY-L845"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_approve_single_session_recovery_pending_success.py::TestP100bCharacterizationApproveSingleSessionRecoveryPendingSuccess::test_approve_single_session_recovery_pending_admin_review_success"
+      ],
+      "characterized_boundary": "PENDING_ADMIN_REVIEW_SUCCESS_PROVISIONS_SESSION_AND_RETURNS_RECOVERY"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_approve_single_session_recovery_failures.py",
+      "sha256": "d405112040a4b7e7ca1efd13cab00158d91d5f27345dcadc9e112d323ec24b29",
+      "utf8_bytes": 19112,
+      "mode": "100644",
+      "git_blob_sha1": "29bbdf084a958c02beb0e297a89dc86a5b36097a",
+      "last_commit": "b05d9acc4974787cf5e80657e6c20b1365fcc7af",
+      "canonical_symbol": "api/routers/sessions.py:846",
+      "handler": "api.routers.sessions.approve_single_session_recovery",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-APPROVE-SINGLE-SESSION-RECOVERY-L845"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_approve_single_session_recovery_failures.py::TestP100bCharacterizationApproveSingleSessionRecoveryFailures::test_approve_single_session_recovery_fails_for_accountant_actor",
+        "tests/test_p1_00b_characterization_approve_single_session_recovery_failures.py::TestP100bCharacterizationApproveSingleSessionRecoveryFailures::test_approve_single_session_recovery_fails_for_malformed_recovery_uuid",
+        "tests/test_p1_00b_characterization_approve_single_session_recovery_failures.py::TestP100bCharacterizationApproveSingleSessionRecoveryFailures::test_approve_single_session_recovery_fails_for_disallowed_recovery_status",
+        "tests/test_p1_00b_characterization_approve_single_session_recovery_failures.py::TestP100bCharacterizationApproveSingleSessionRecoveryFailures::test_approve_single_session_recovery_fails_when_session_login_request_lookup_returns_none"
+      ],
+      "characterized_boundary": "ACCOUNTANT_MALFORMED_UUID_DISALLOWED_STATUS_AND_MISSING_LOGIN_REQUEST_FAILURES"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_reject_single_session_recovery_success.py",
+      "sha256": "cc3e1536b149237ab467c476f44c0cba39ead3250efae98fb543acb4970ccc1f",
+      "utf8_bytes": 28144,
+      "mode": "100644",
+      "git_blob_sha1": "1427a46dad464706c7ca8bb444be53b17d6ea29e",
+      "last_commit": "b7fb075c1d44d310709e8a1c1820d262037a565f",
+      "canonical_symbol": "api/routers/sessions.py:908",
+      "handler": "api.routers.sessions.reject_single_session_recovery",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-REJECT-SINGLE-SESSION-RECOVERY-L907"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_reject_single_session_recovery_success.py::TestP100bCharacterizationRejectSingleSessionRecoverySuccess::test_reject_single_session_recovery_pending_admin_review_success",
+        "tests/test_p1_00b_characterization_reject_single_session_recovery_success.py::TestP100bCharacterizationRejectSingleSessionRecoverySuccess::test_reject_single_session_recovery_identity_submitted_success"
+      ],
+      "characterized_boundary": "PENDING_ADMIN_REVIEW_AND_IDENTITY_SUBMITTED_REJECTION_SUCCESS"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py",
+      "sha256": "1faff9de99ee2e63ce7e7b5de4313b391238e424ea4f1aa289c2e722ff689027",
+      "utf8_bytes": 8197,
+      "mode": "100644",
+      "git_blob_sha1": "d29b6d47cfe311aab4ededdb8fa27c01261b6c75",
+      "last_commit": "d5e485295de2802d5186a4a44cc6471a7ecc8c62",
+      "canonical_symbol": "api/routers/sessions.py:846",
+      "handler": "api.routers.sessions.approve_single_session_recovery",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-APPROVE-SINGLE-SESSION-RECOVERY-L845",
+        "API-AUTH-POST-SESSIONS-REJECT-SINGLE-SESSION-RECOVERY-L907"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py::RecoveryAccountantLookupFailureCharacterizationTests::test_approve_recovery_propagates_accountant_lookup_exception_before_uuid",
+        "tests/test_p1_00b_characterization_recovery_accountant_lookup_failure.py::RecoveryAccountantLookupFailureCharacterizationTests::test_reject_recovery_propagates_accountant_lookup_exception_before_uuid"
+      ],
+      "characterized_boundary": "ACCOUNTANT_LOOKUP_EXCEPTION_PROPAGATES_BEFORE_UUID_FOR_APPROVE_AND_REJECT"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_submit_single_session_recovery_identity.py",
+      "sha256": "c21b26f8b49fec1cf3a85272f424899f3bcdf7d439869646a3e6089d357f9bcb",
+      "utf8_bytes": 29799,
+      "mode": "100644",
+      "git_blob_sha1": "4c56dc901b951835e3c97520900ba389555c9893",
+      "last_commit": "39407a2322e4b6b8c6f0153932522222f5e9ae16",
+      "canonical_symbol": "api/routers/sessions.py:956",
+      "handler": "api.routers.sessions.submit_single_session_recovery_identity",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-SUBMIT-SINGLE-SESSION-RECOVERY-IDENTITY-L955"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_submit_single_session_recovery_identity.py::TestSubmitSingleSessionRecoveryIdentityCharacterization::test_submit_identity_image_success",
+        "tests/test_p1_00b_characterization_submit_single_session_recovery_identity.py::TestSubmitSingleSessionRecoveryIdentityCharacterization::test_submit_identity_document_success",
+        "tests/test_p1_00b_characterization_submit_single_session_recovery_identity.py::TestSubmitSingleSessionRecoveryIdentityCharacterization::test_submit_identity_payload_builder_failure"
+      ],
+      "characterized_boundary": "IDENTITY_IMAGE_AND_DOCUMENT_SUCCESS_AND_PAYLOAD_BUILDER_FAILURE"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_submit_identity_active_lookup_failure.py",
+      "sha256": "582b0004be3d2cef236b25fb72b7aed498313a0ef9ab03b456c805584ebe5bb6",
+      "utf8_bytes": 6346,
+      "mode": "100644",
+      "git_blob_sha1": "67cff4f9ee5c53276908966131eb71ff55fb7f80",
+      "last_commit": "1c367d0edb1b4ef06fdf8208b4b16c86d5174fb8",
+      "canonical_symbol": "api/routers/sessions.py:956",
+      "handler": "api.routers.sessions.submit_single_session_recovery_identity",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-SUBMIT-SINGLE-SESSION-RECOVERY-IDENTITY-L955"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_submit_identity_active_lookup_failure.py::SubmitIdentityActiveLookupFailureCharacterizationTests::test_active_lookup_exception_precedes_sql_and_upload_access"
+      ],
+      "characterized_boundary": "ACTIVE_LOOKUP_EXCEPTION_PRECEDES_SQL_AND_UPLOAD_ACCESS"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_approve_request_rejections.py",
+      "sha256": "8edd0b46fca78f79e71c853869ee7cc97bac4059dce8961bbdadaceb3030768c",
+      "utf8_bytes": 25735,
+      "mode": "100644",
+      "git_blob_sha1": "48fe3c53ec97971b6ce75024543d3251bd4ff964",
+      "last_commit": "00cead97bccde6db4ff97a4e1225ac4e716cd4ee",
+      "canonical_symbol": "api/routers/sessions.py:1211",
+      "handler": "api.routers.sessions.approve_request",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-APPROVE-REQUEST-L1210"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_approve_request_rejections.py::ApproveRequestRejectionsCharacterizationTests::test_approve_request_rejects_missing_primary_session",
+        "tests/test_p1_00b_characterization_approve_request_rejections.py::ApproveRequestRejectionsCharacterizationTests::test_approve_request_rejects_missing_login_request",
+        "tests/test_p1_00b_characterization_approve_request_rejections.py::ApproveRequestRejectionsCharacterizationTests::test_approve_request_rejects_foreign_account_login_request"
+      ],
+      "characterized_boundary": "MISSING_PRIMARY_MISSING_LOGIN_REQUEST_AND_FOREIGN_ACCOUNT_REJECTIONS"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py",
+      "sha256": "094e09bd12b1ead2496a4d73287d194fd5c114a5296d06398d3ddf90f5b804d4",
+      "utf8_bytes": 10377,
+      "mode": "100644",
+      "git_blob_sha1": "64ac0644029ff6fa83ac50596795ed3e96200de2",
+      "last_commit": "54a334cd4a0916ed6e8d8c3bece06340e671eca6",
+      "canonical_symbol": "api/routers/sessions.py:1211",
+      "handler": "api.routers.sessions.approve_request",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-APPROVE-REQUEST-L1210",
+        "API-AUTH-POST-SESSIONS-REJECT-REQUEST-L1270"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py::LoginActionsAccountantLookupFailureCharacterizationTests::test_approve_request_propagates_accountant_lookup_exception_before_uuid",
+        "tests/test_p1_00b_characterization_login_actions_accountant_lookup_failure.py::LoginActionsAccountantLookupFailureCharacterizationTests::test_reject_request_propagates_accountant_lookup_exception_before_uuid"
+      ],
+      "characterized_boundary": "ACCOUNTANT_LOOKUP_EXCEPTION_PROPAGATES_BEFORE_UUID_FOR_APPROVE_AND_REJECT_REQUEST"
+    },
+    {
+      "path": "tests/test_p1_00b_characterization_reject_request_contract.py",
+      "sha256": "8a3d6e8bb4c76d885606b164028c7e0498214f66a9e8176dca550a06ffd38793",
+      "utf8_bytes": 22622,
+      "mode": "100644",
+      "git_blob_sha1": "e9e64b12ae9c7b1131a962a3d832acf245405ed0",
+      "last_commit": "fead9be0dcb5cdef5dee144780bff16d294b10ad",
+      "canonical_symbol": "api/routers/sessions.py:1271",
+      "handler": "api.routers.sessions.reject_request",
+      "seed_ids": [
+        "API-AUTH-POST-SESSIONS-REJECT-REQUEST-L1270"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_reject_request_contract.py::RejectRequestContractCharacterizationTests::test_reject_request_missing_primary_session",
+        "tests/test_p1_00b_characterization_reject_request_contract.py::RejectRequestContractCharacterizationTests::test_reject_request_service_error",
+        "tests/test_p1_00b_characterization_reject_request_contract.py::RejectRequestContractCharacterizationTests::test_reject_request_success"
+      ],
+      "characterized_boundary": "MISSING_PRIMARY_SERVICE_ERROR_AND_SUCCESS"
+    }
+  ],
+  "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+  "registered_seed_ids": [
+    "API-AUTH-POST-SESSIONS-START-SINGLE-SESSION-RECOVERY-L673",
+    "API-AUTH-POST-SESSIONS-APPROVE-SINGLE-SESSION-RECOVERY-L845",
+    "API-AUTH-POST-SESSIONS-REJECT-SINGLE-SESSION-RECOVERY-L907",
+    "API-AUTH-POST-SESSIONS-SUBMIT-SINGLE-SESSION-RECOVERY-IDENTITY-L955",
+    "API-AUTH-POST-SESSIONS-APPROVE-REQUEST-L1210",
+    "API-AUTH-POST-SESSIONS-REJECT-REQUEST-L1270"
+  ],
+  "duplicate_new_seed_ids": [],
+  "removed_seed_ids": [],
+  "promotion_assessment": {
+    "registered_seed_ids": [
+      "API-AUTH-POST-SESSIONS-START-SINGLE-SESSION-RECOVERY-L673",
+      "API-AUTH-POST-SESSIONS-APPROVE-SINGLE-SESSION-RECOVERY-L845",
+      "API-AUTH-POST-SESSIONS-REJECT-SINGLE-SESSION-RECOVERY-L907",
+      "API-AUTH-POST-SESSIONS-SUBMIT-SINGLE-SESSION-RECOVERY-IDENTITY-L955",
+      "API-AUTH-POST-SESSIONS-APPROVE-REQUEST-L1210",
+      "API-AUTH-POST-SESSIONS-REJECT-REQUEST-L1270"
+    ],
+    "delta_distinct_seed_count": 6,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [],
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 269,
+      "evidenced": 404,
+      "remaining": 61
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 275,
+      "evidenced": 410,
+      "remaining": 55
+    },
+    "strict_progress_unchanged": true,
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "manifest_registration": {
+    "added_key": "auth_session_approval_recovery_registration_path",
+    "added_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-auth-session-approval-recovery-registration.json",
+    "before_utf8_bytes": 6008,
+    "before_sha256": "82a10447418f7348eddd87cd24b9d0f43b05abfe3bff7e2b52108e33cacdce40",
+    "after_counts_on_exact_acceptance": {
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 275,
+      "evidenced_seed_count": 410,
+      "remaining_seed_count": 55
+    },
+    "evidence_sources_append_only_last_position": true
+  },
+  "reconciliation": {
+    "canonical_base_capture_units_since_reconciliation": 0,
+    "registered_evidence_files_in_this_unit": 1,
+    "units_since_reconciliation_on_exact_acceptance": 3,
+    "threshold": 5,
+    "group_reconciliation_complete": false,
+    "canonical_base_edited": false
+  },
+  "accounting": {
+    "added_behavior_units": 0,
+    "added_handler_scenarios": 0,
+    "registered_existing_characterization_records": 10,
+    "newly_evidenced_seed_count": 6,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 6,
+    "manifest_file_edited_by_this_unit": true,
+    "count_values_changed_by_this_unit": true,
+    "documentation_unit_adds_no_product_behavior": true,
+    "ledger_edited_by_this_unit": false,
+    "scenario_records_and_recent_characterization_edited": false,
+    "prior_receipt_conformance_repaired_by_this_unit": true,
+    "prior_receipt_substantive_evidence_unchanged": true
+  },
+  "strict_canonical_progress": {
+    "proven": 288,
+    "partial": 177,
+    "total": 465
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  },
+  "excluded": [
+    "full success-path characterization for approve_request",
+    "real SQL or database persistence/transactions",
+    "HTTP routing/Depends/authentication/authorization",
+    "concurrency/retry/reload",
+    "origin interaction cells",
+    "full handler or full seed acceptance",
+    "High blocker resolution",
+    "Stage closure"
+  ]
+}
