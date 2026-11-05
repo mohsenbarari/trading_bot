@@ -1,0 +1,67 @@
+---
+- name: Build the finite source-only estimator correction from its current secured image
+  hosts: boot_mount_bot
+  gather_facts: false
+  vars:
+    estimator_base_id: sha256:ec2e019f3702add802d0eda84bbdbb005bba77511894f4913831162e46cab30c
+    estimator_base_tag: local/coin-estimator-price-fix-base:ec2e019f
+    estimator_build_root: /root/trading-bot/trading_bot/.local/estimator-melted-price-fix-20261105/image-context
+  tasks:
+    - name: Require explicit public source identity
+      ansible.builtin.assert:
+        that:
+          - ansible_host == '65.109.216.187'
+          - estimator_source_commit is match('^[a-f0-9]{40}$')
+          - estimator_source_sha256 is match('^[a-f0-9]{64}$')
+
+    - name: Measure the selected public engine file
+      ansible.builtin.stat:
+        path: '{{ playbook_dir }}/../../core/market_intelligence/coin_rate_engine.py'
+        checksum_algorithm: sha256
+      register: estimator_engine
+
+    - name: Bind the build to the reviewed engine
+      ansible.builtin.assert:
+        that:
+          - estimator_engine.stat.checksum == estimator_source_sha256
+          - estimator_engine.stat.isreg
+
+    - name: Bind the local base tag to the exact secured runtime image
+      ansible.builtin.command:
+        argv: [docker, image, tag, '{{ estimator_base_id }}', '{{ estimator_base_tag }}']
+      changed_when: false
+
+    - name: Create the two-file public build context
+      ansible.builtin.file:
+        path: '{{ estimator_build_root }}'
+        state: directory
+        mode: '0700'
+
+    - name: Stage only the public Dockerfile
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/coin_estimator_price_hotfix.Dockerfile'
+        dest: '{{ estimator_build_root }}/Dockerfile'
+        mode: '0600'
+
+    - name: Stage only the reviewed public engine
+      ansible.builtin.copy:
+        src: '{{ playbook_dir }}/../../core/market_intelligence/coin_rate_engine.py'
+        dest: '{{ estimator_build_root }}/coin_rate_engine.py'
+        mode: '0600'
+
+    - name: Build one code layer without network or dependency installation
+      ansible.builtin.command:
+        argv:
+          - docker
+          - build
+          - --network=none
+          - --pull=false
+          - --build-arg
+          - 'ESTIMATOR_BASE={{ estimator_base_tag }}'
+          - --build-arg
+          - 'SOURCE_COMMIT={{ estimator_source_commit }}'
+          - --iidfile
+          - '{{ estimator_build_root | dirname }}/candidate-image.id'
+          - --tag
+          - 'local/coin-estimator-price-fix:{{ estimator_source_commit }}'
+          - '{{ estimator_build_root }}'

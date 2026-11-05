@@ -115,6 +115,111 @@ def snapshot(generated_at: datetime) -> SimpleNamespace:
 
 
 class PrimarySnapshotDashboardTests(unittest.TestCase):
+    def test_public_cash_price_is_not_attributed_to_the_private_channel(self) -> None:
+        now = datetime(2026, 11, 5, 6, 0, tzinfo=timezone.utc)
+        primary = snapshot(now)
+        public = SimpleNamespace(
+            component="MELTED_PHYSICAL_UNSPECIFIED",
+            source_codes=("MELTED_AGGREGATE",),
+            occurred_at_utc=now - timedelta(seconds=20),
+            available_at_utc=now - timedelta(seconds=19),
+            point_value="117300000",
+            mean_value="117250000",
+            unit="TOMAN_PER_MESGHAL_750",
+            sample_count=2,
+            selection_method="PHYSICAL_EVENTS_PRESERVED_WEIGHTED_SUMMARY_V1",
+            fallback=False,
+            freshness="FRESH",
+            age_seconds=20,
+        )
+        primary.inputs += (public,)
+        for rate in primary.rates:
+            if rate.settlement == "CASH":
+                rate.underlying_source = "PUBLIC_PHYSICAL_UNSPECIFIED"
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.json"
+            path.write_text("{}", encoding="utf-8")
+            with patch("live_server.EstimatorSnapshotV2.model_validate", return_value=primary):
+                projected = overlay_primary_snapshot_rates(
+                    {"settlements": {}}, snapshot_path=path, now_utc=now
+                )
+
+        cash = projected["settlements"]["CASH"]["inputs"]["melted_gold"]
+        tomorrow = projected["settlements"]["TOMORROW"]["inputs"]["melted_gold"]
+        self.assertEqual(cash["point_price"], 117_300_000)
+        self.assertEqual(cash["average_price"], 117_250_000)
+        self.assertEqual(cash["source_codes"], ["MELTED_AGGREGATE"])
+        self.assertEqual(tomorrow["point_price"], 96_150_000)
+        self.assertEqual(cash["display_label"], "آب‌شدهٔ انتخاب‌شده")
+        card = render_input_cards(projected["settlements"]).split(
+            "data-source='melted_gold'", 1
+        )[1].split("</article>", 1)[0]
+        self.assertIn("آب‌شدهٔ انتخاب‌شده", card)
+        self.assertIn("نقدی: آب‌شدهٔ تجمیعی · فیزیکی بدون تسویه", card)
+        self.assertIn("فردایی: کانال خصوصی آب‌شده · فیزیکی فردایی", card)
+        private_cash = projected["settlements"]["CASH"]["inputs"]["private_gold_paper"]
+        private_tomorrow = projected["settlements"]["TOMORROW"]["inputs"]["private_gold_paper"]
+        self.assertEqual(private_cash["status"], "NO_DATA")
+        self.assertIsNone(private_cash["point_price"])
+        self.assertEqual(private_tomorrow["point_price"], 96_300_000)
+        self.assertTrue(private_tomorrow["display_only"])
+        private_card = render_input_cards(projected["settlements"]).split(
+            "data-source='private_gold_paper'", 1
+        )[1].split("</article>", 1)[0]
+        self.assertIn("۹۶,۳۰۰,۰۰۰ تومان", private_card)
+        self.assertNotIn("۱۱۷,۳۰۰,۰۰۰", private_card)
+        self.assertNotIn("۹۶,۱۵۰,۰۰۰", private_card)
+        self.assertIn("میانگین وزنی دقیقه‌ای", private_card)
+
+    def test_stale_private_cash_does_not_borrow_a_fresh_tomorrow_or_public_price(self) -> None:
+        now = datetime(2026, 11, 5, 6, 0, tzinfo=timezone.utc)
+        primary = snapshot(now)
+        tomorrow = next(
+            item for item in primary.inputs
+            if item.component == "PRIVATE_GOLD_PAPER_NORMAL_TOMORROW"
+        )
+        stale_cash = SimpleNamespace(**vars(tomorrow))
+        stale_cash.component = "PRIVATE_GOLD_PAPER_NORMAL_TODAY"
+        stale_cash.point_value = "99000000"
+        stale_cash.mean_value = "99000000"
+        stale_cash.freshness = "STALE"
+        stale_cash.age_seconds = 3600
+        primary.inputs += (stale_cash,)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.json"
+            path.write_text("{}", encoding="utf-8")
+            with patch("live_server.EstimatorSnapshotV2.model_validate", return_value=primary):
+                projected = overlay_primary_snapshot_rates(
+                    {"settlements": {}}, snapshot_path=path, now_utc=now
+                )
+        cash = projected["settlements"]["CASH"]["inputs"]["private_gold_paper"]
+        self.assertEqual(cash["primary_freshness"], "STALE")
+        self.assertEqual(cash["status"], "NO_DATA")
+        self.assertIsNone(cash["point_price"])
+        self.assertIsNone(cash["average_price"])
+
+    def test_melted_source_details_preserve_legacy_values_and_escape_labels(self) -> None:
+        settlements = {
+            "CASH": {"inputs": {"melted_gold": {
+                "status": "OBSERVED", "point_price": 113_000_000,
+                "average_price": 112_000_000,
+                "display_label": "کانال خصوصی آب‌شده",
+                "price_source": "<script>public</script>",
+            }}},
+            "TOMORROW": {"inputs": {"melted_gold": {
+                "status": "NO_DATA", "point_price": None,
+                "price_source": "کانال خصوصی آب‌شده · کاغذی فردایی",
+            }}},
+        }
+        original = json.dumps(settlements, sort_keys=True)
+        card = render_input_cards(settlements).split(
+            "data-source='melted_gold'", 1
+        )[1].split("</article>", 1)[0]
+        self.assertIn("آب‌شدهٔ انتخاب‌شده", card)
+        self.assertIn("&lt;script&gt;public&lt;/script&gt;", card)
+        self.assertNotIn("<script>", card)
+        self.assertEqual(json.dumps(settlements, sort_keys=True), original)
+
     def test_projects_complete_fresh_primary_grid(self) -> None:
         now = datetime(2026, 8, 31, 8, 0, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as directory:

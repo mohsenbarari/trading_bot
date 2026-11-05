@@ -82,6 +82,51 @@ class CoinRateEngineTests(unittest.TestCase):
 
         self.assertEqual((rate.status, rate.reason), ("NO_DATA", "NO_FRESH_MELTED"))
 
+    def test_private_minute_prevents_public_cash_and_single_physical_bid_poison(self) -> None:
+        self.add("public-117300000", instrument="MELTED_GOLD_AGGREGATE", price=117_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:40Z", settlement="UNKNOWN", form="PHYSICAL", source_code="MELTED_AGGREGATE")
+        self.add("physical-bid-112000000", instrument="MELTED_GOLD_PRIVATE", price=112_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:50Z", settlement="TOMORROW", form="PHYSICAL", event_type="OFFER", source_code="PRIVATE_GOLD_CHANNEL")
+        self.add("private-minute", instrument="MELTED_GOLD_PRIVATE", price=113_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:08:59Z", settlement="TOMORROW", form="PAPER_NORMAL", source_code="PRIVATE_GOLD_PAPER_MINUTE")
+        # Raw constituents must not be counted again with their minute summary.
+        self.add("paper-raw-outlier", instrument="MELTED_GOLD_PRIVATE", price=117_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:55Z", settlement="TOMORROW", form="PAPER_NORMAL", event_type="OFFER", source_code="PRIVATE_GOLD_CHANNEL")
+        self.connection.commit()
+        cash = self.rate("BAHAR", "CASH")
+        tomorrow = self.rate("BAHAR", "TOMORROW")
+        self.assertEqual(cash.underlying_source, "PRIVATE_PAPER_TOMORROW_CASH_BRIDGE")
+        self.assertEqual(tomorrow.underlying_source, "PRIVATE_PAPER_TOMORROW")
+        self.assertEqual(cash.estimated_project_price, 255_250)
+        self.assertEqual(tomorrow.estimated_project_price, 255_250)
+        self.assertEqual(cash.confidence, "LOW_PAPER_FALLBACK")
+
+    def test_fresh_confirmed_physical_trade_still_outranks_paper_reference(self) -> None:
+        self.add("private-minute", instrument="MELTED_GOLD_PRIVATE", price=113_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:08:59Z", settlement="TOMORROW", form="PAPER_NORMAL", source_code="PRIVATE_GOLD_PAPER_MINUTE")
+        self.add("confirmed-physical", instrument="MELTED_GOLD_PRIVATE", price=113_100_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:20Z", settlement="TOMORROW", form="PHYSICAL", event_type="TRADE", source_code="PRIVATE_GOLD_CHANNEL")
+        self.add("isolated-low-bid", instrument="MELTED_GOLD_PRIVATE", price=112_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:50Z", settlement="TOMORROW", form="PHYSICAL", event_type="OFFER", source_code="PRIVATE_GOLD_CHANNEL")
+        self.connection.commit()
+        rate = self.rate("BAHAR", "TOMORROW")
+        self.assertEqual(rate.underlying_source, "PRIVATE_PHYSICAL_TOMORROW")
+        self.assertEqual(rate.estimated_project_price, 254_800)
+
+    def test_unsettled_public_physical_price_cannot_establish_cash_authority(self) -> None:
+        self.add("public-physical", instrument="MELTED_GOLD_AGGREGATE", price=117_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:40Z", settlement="UNKNOWN", form="PHYSICAL", source_code="MELTED_AGGREGATE")
+        self.connection.commit()
+        self.assertEqual(self.rate("BAHAR", "CASH").status, "NO_DATA")
+
+    def test_private_minute_unavailable_at_evaluation_time_is_not_used(self) -> None:
+        self.add("late-private-minute", instrument="MELTED_GOLD_PRIVATE", price=113_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:08:59Z", settlement="TOMORROW", form="PAPER_NORMAL", source_code="PRIVATE_GOLD_PAPER_MINUTE")
+        self.connection.execute("UPDATE market_observations SET available_at_utc='2026-08-04T10:10:01Z'")
+        self.connection.commit()
+        self.assertEqual(self.rate("BAHAR", "CASH").status, "NO_DATA")
+
+    def test_historical_anchor_does_not_claim_high_confidence(self) -> None:
+        self.add("anchor-gold", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:00:00Z", settlement="TODAY", form="PHYSICAL")
+        self.add("old-coin", instrument="COIN_IMAM", price=186_900, unit="PROJECT_THOUSAND_TOMAN", at="2026-08-04T10:00:30Z", settlement="CASH", form="PHYSICAL", event_type="TRADE")
+        self.add("current-gold", instrument="MELTED_GOLD_PRIVATE", price=81_000_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TODAY", form="PHYSICAL")
+        self.connection.commit()
+        rate = self.rate("IMAM", "CASH")
+        self.assertEqual(rate.estimated_project_price, 188_500)
+        self.assertEqual(rate.anchor_age_seconds, 570)
+        self.assertEqual(rate.confidence, "MEDIUM")
+
     def test_low_date_uses_physical_melted_without_any_coin_offer(self) -> None:
         self.add("gold", instrument="MELTED_GOLD_PRIVATE", price=80_300_000, unit="TOMAN_PER_MESGHAL_750", at="2026-08-04T10:09:30Z", settlement="TODAY", form="PHYSICAL")
         self.connection.commit()

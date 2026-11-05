@@ -93,6 +93,8 @@ Discover optional memory without loading it. Entries here are not default loads.
 - `areas/frontend-uiux.md` — load for Vue/PWA UI/UX refactoring, Design System V2, Figma/Sites evidence, or shared UI changes that can affect protected surfaces.
 - `areas/coin-market-intelligence.md`: load for estimator, Market Store,
   coin-group parsing/trade linking, and public market ingestion work.
+- `areas/coin-market-display.md` — also load for melted-reference selection,
+  the estimator dashboard, displayed source prices, or input attribution.
 - `areas/coin-market-persistence.md` — also load for permanent market archives,
   cross-server input transfer, or exact estimator-input replay.
 - `areas/coin-market-two-site.md` — load for two-site Market roles, canonical Product

@@ -136,6 +136,14 @@ by inference from the trailing-window average, and exposes the selected
 market/form, fallback or proxy, observation/anchor time and machine selection
 code. It must not issue an independent market query to construct these cards.
 
+The normal-paper reference from the private melted channel has its own card,
+using the settled `PRIVATE_GOLD_PAPER_NORMAL_TODAY/TOMORROW` minute traces in
+that same snapshot. It shows the weighted minute value, not an individual
+physical buy offer. Missing or stale cash data stays missing. This reference
+is display-only; the separate selected-underlying card identifies the exact
+public/private source and form for each settlement and preserves its values.
+Public fallback prices must never carry the private-channel heading.
+
 Coin-group collector liveness, stored activity and model eligibility are also
 separate. The dashboard lists the selected five-minute live anchor and the
 selected historical transfer anchor per commodity/settlement, including the

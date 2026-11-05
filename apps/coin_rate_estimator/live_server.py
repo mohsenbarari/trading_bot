@@ -1037,10 +1037,28 @@ def _project_primary_inputs(
                 str(source or ""),
                 str(source or "PRIVATE_PRIMARY"),
             ),
-            display_label="کانال خصوصی آب‌شده",
+            # The model can choose a public fallback independently for each
+            # settlement. A shared card title must not attribute it to the
+            # private channel; retain the exact source on each book below.
+            display_label="آب‌شدهٔ انتخاب‌شده",
         )
         if source:
             melted["selection"] = source
+
+        # A channel reference is distinct from whichever public/private form
+        # the model selected. Keep the settled normal-paper minute feed
+        # source-bound; missing cash data must not borrow a tomorrow quote.
+        private_paper = _primary_input_payload(
+            traces.get(
+                "PRIVATE_GOLD_PAPER_NORMAL_TODAY"
+                if settlement == "CASH"
+                else "PRIVATE_GOLD_PAPER_NORMAL_TOMORROW"
+            ),
+            snapshot_age_seconds=snapshot_age_seconds,
+            source_label="کانال خصوصی آب‌شده · کاغذی معمول",
+            display_label="کانال خصوصی آب‌شده · کاغذی معمول",
+        )
+        private_paper["display_only"] = True
 
         herat_components = (
             ("USD_HERAT_CASH", "USD_HERAT_TODAY", "USD_HERAT_TOMORROW")
@@ -1076,6 +1094,7 @@ def _project_primary_inputs(
         )
         settlement_payloads[settlement] = {
             "melted_gold": melted,
+            "private_gold_paper": private_paper,
             "usd": herat,
             "xauusd": xau,
             "usdt": usdt,
@@ -3512,6 +3531,7 @@ def _input_source_text(key: str, payload: dict[str, Any]) -> str:
 
 def render_input_cards(settlements: dict[str, dict[str, Any]]) -> str:
     labels = {
+        "private_gold_paper": "کانال خصوصی آب‌شده · کاغذی معمول",
         "melted_gold": "طلا آب‌شده",
         "generic_coin": "سکه عمومی (غیرگروهی)",
         "xauusd": "اونس جهانی",
@@ -3519,6 +3539,7 @@ def render_input_cards(settlements: dict[str, dict[str, Any]]) -> str:
         "usdt": "تتر / تومان",
     }
     icons = {
+        "private_gold_paper": "◆",
         "melted_gold": "◆",
         "generic_coin": "●",
         "xauusd": "◎",
@@ -3527,6 +3548,11 @@ def render_input_cards(settlements: dict[str, dict[str, Any]]) -> str:
     }
     cards = []
     for key, label in labels.items():
+        if key == "private_gold_paper" and not any(
+            key in _settlement_inputs(settlements, term)
+            for term in ("CASH", "TOMORROW")
+        ):
+            continue
         cash = _settlement_inputs(settlements, "CASH").get(key)
         cash = cash if isinstance(cash, dict) else {}
         tomorrow = _settlement_inputs(settlements, "TOMORROW").get(key)
@@ -3547,11 +3573,24 @@ def render_input_cards(settlements: dict[str, dict[str, Any]]) -> str:
             or tomorrow.get("display_label")
             or label
         )
+        source_detail = ""
+        if key == "melted_gold":
+            label = "آب‌شدهٔ انتخاب‌شده"
+            source_detail = (
+                "<small class='input-source'>"
+                f"نقدی: {html.escape(_input_source_text(key, cash))}<br>"
+                f"فردایی: {html.escape(_input_source_text(key, tomorrow))}"
+                "</small>"
+            )
         if key == "xauusd" and (
             cash.get("is_proxy") is True or tomorrow.get("is_proxy") is True
         ):
             label = "پراکسی اونس جهانی (PAXG)"
         detail = "نقطهٔ زندهٔ مصرف‌شده؛ در نبود آن برآورد/میانگین فعال"
+        if key == "private_gold_paper":
+            detail = "مرجع کانال · میانگین وزنی دقیقه‌ای · تومان به‌ازای مثقال"
+        elif key == "melted_gold":
+            detail = "آخرین مشاهدهٔ منبع انتخاب‌شده · تومان به‌ازای مثقال"
         cards.append(
             f"<article class='input-card {css}' data-source='{html.escape(key)}'>"
             f"<div class='input-card-head'><span class='input-icon' aria-hidden='true'>"
@@ -3560,6 +3599,7 @@ def render_input_cards(settlements: dict[str, dict[str, Any]]) -> str:
             f"{_input_value_text(key, values['CASH'])}<br>"
             f"<span class='settlement-value'>فردایی</span> "
             f"{_input_value_text(key, values['TOMORROW'])}</strong>"
+            f"{source_detail}"
             f"<small>{html.escape(detail)}</small></article>"
         )
     return "".join(cards)

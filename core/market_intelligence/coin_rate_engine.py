@@ -22,7 +22,7 @@ from .price_magnitude_policy import RIAL_PER_TOMAN, TRUE_IRT_MESGHAL_FLOOR
 from .private_gold import filter_comparable_private_gold_physical_rows
 
 
-COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v8"
+COIN_RATE_ENGINE_VERSION = "coin-rate-engine-v9"
 PROJECT_TOMAN_PER_UNIT = 1_000.0  # 1 project unit = 1,000 toman
 _MESGHAL_TOMAN_MIN = 30_000_000.0
 _MESGHAL_TOMAN_MAX = 200_000_000.0
@@ -171,12 +171,19 @@ def _rows(
     trade_forms: Iterable[str],
     price_unit: str,
     event_types: Iterable[str] = ("OFFER", "TRADE", "QUOTE", "REFERENCE"),
+    source_codes: Iterable[str] | None = None,
+    earliest_event_utc: datetime | None = None,
     include_comparable_conditional: bool = False,
     knowledge_as_of: datetime | None = None,
 ) -> list[sqlite3.Row]:
     settlements = tuple(settlement_terms)
     forms = tuple(trade_forms)
     kinds = tuple(event_types)
+    sources = tuple(source_codes or ())
+    source_clause = (
+        f"AND source_code IN ({','.join('?' for _ in sources)})" if sources else ""
+    )
+    earliest_clause = "AND event_time_utc >= ?" if earliest_event_utc else ""
     conditional_clause = "" if include_comparable_conditional else "AND is_conditional = 0"
     rows = list(
         connection.execute(
@@ -188,6 +195,7 @@ def _rows(
               AND settlement_term IN ({','.join('?' for _ in settlements)})
               AND trade_form IN ({','.join('?' for _ in forms)})
               AND event_type IN ({','.join('?' for _ in kinds)})
+              {source_clause}
               AND quality_state = 'ELIGIBLE'
               {conditional_clause}
               AND price_unit = ?
@@ -196,6 +204,7 @@ def _rows(
               AND (CASE WHEN instr(inserted_at_utc, '.')=0
                         THEN replace(inserted_at_utc, 'Z', '.000000Z')
                         ELSE inserted_at_utc END) <= ?
+              {earliest_clause}
             ORDER BY event_time_utc DESC, id DESC
             LIMIT 250
             """,
@@ -204,10 +213,12 @@ def _rows(
                 *settlements,
                 *forms,
                 *kinds,
+                *sources,
                 price_unit,
                 _iso(as_of),
                 _iso(as_of),
                 _iso(knowledge_as_of or as_of).replace("Z", ".000000Z"),
+                *((_iso(earliest_event_utc),) if earliest_event_utc else ()),
             ),
         ).fetchall()
     )
@@ -259,7 +270,6 @@ def _melted_point(
     if settlement == "CASH":
         policies = (
             ("MELTED_GOLD_PRIVATE", ("TODAY",), ("PHYSICAL",), "PRIVATE_PHYSICAL_TODAY", False, 900),
-            ("MELTED_GOLD_AGGREGATE", ("UNKNOWN",), ("PHYSICAL",), "PUBLIC_PHYSICAL_UNSPECIFIED", False, 900),
             ("MELTED_GOLD_PRIVATE", ("TODAY",), ("PAPER_NORMAL",), "PRIVATE_PAPER_TODAY", True, 180),
             ("MELTED_GOLD_FLOW", ("TODAY",), ("PAPER_NORMAL",), "PUBLIC_PAPER_TODAY", True, 180),
             # After bank hours the cash book can go quiet while the tomorrow
@@ -284,6 +294,47 @@ def _melted_point(
             ("MELTED_GOLD_FLOW", ("TOMORROW",), ("PAPER_NORMAL",), "PUBLIC_PAPER_TOMORROW", True, 180),
             ("MELTED_GOLD_AGGREGATE", ("UNKNOWN",), ("PAPER_NORMAL",), "PUBLIC_PAPER_UNSPECIFIED_TOMORROW_BRIDGE", True, 180),
         )
+
+    # The private channel's closed normal-paper minute is already weighted by
+    # verified trade/offer evidence. A single physical bid must not override
+    # it just because that bid was the newest message. Keep genuine physical
+    # trades authoritative while this minute reference is fresh; otherwise
+    # use the minute itself, without mixing it with its constituent raw rows.
+    paper_policies = [p for p in policies if p[0] == "MELTED_GOLD_PRIVATE" and p[2] == ("PAPER_NORMAL",)]
+    for instrument, terms, forms, label, fallback, maximum_age in paper_policies:
+        minute_rows = _rows(
+            connection, as_of=as_of, instrument=instrument,
+            settlement_terms=terms, trade_forms=forms,
+            price_unit="TOMAN_PER_MESGHAL_750", event_types=("QUOTE",),
+            source_codes=("PRIVATE_GOLD_PAPER_MINUTE",),
+            earliest_event_utc=as_of - timedelta(seconds=maximum_age + 3600),
+            knowledge_as_of=knowledge_as_of,
+        )
+        paper = _robust_project_point(
+            minute_rows[:1], as_of=as_of, source_kind=label,
+            fallback=fallback, maximum_age=maximum_age,
+        )
+        if paper.value_project is None:
+            continue
+        physical_policy = policies[0]
+        physical_trades = _rows(
+            connection, as_of=as_of, instrument=physical_policy[0],
+            settlement_terms=physical_policy[1], trade_forms=physical_policy[2],
+            price_unit="TOMAN_PER_MESGHAL_750",
+            source_codes=("PRIVATE_GOLD_CHANNEL",),
+            earliest_event_utc=as_of - timedelta(seconds=_TRADE_PREFERENCE_MAX_LAG_SECONDS + 3600),
+            include_comparable_conditional=True, knowledge_as_of=knowledge_as_of,
+        )
+        physical = _robust_project_point(
+            [row for row in physical_trades if row["event_type"] == "TRADE"],
+            as_of=as_of, source_kind=physical_policy[3],
+            fallback=False, maximum_age=_TRADE_PREFERENCE_MAX_LAG_SECONDS,
+        )
+        return physical if physical.value_project is not None else paper
+
+    # UNKNOWN settlement from the aggregate physical feed remains observable,
+    # but cannot establish a cash basis. Only explicit settled books or the
+    # labelled paper bridges above can drive coin estimates.
     for instrument, terms, forms, label, fallback, maximum_age in policies:
         point = _robust_project_point(
             _rows(
@@ -637,7 +688,13 @@ def build_coin_rate_estimates(connection: sqlite3.Connection, *, as_of_utc: date
             center = _round_project(estimate)
             lower = min(center, _round_project(estimate * (1.0 - negative)))
             upper = max(center, _round_project(estimate * (1.0 + positive)))
-            confidence = "HIGH" if anchor_age is not None and not current.fallback else "MEDIUM" if not current.fallback else "LOW_PAPER_FALLBACK"
+            confidence = (
+                "HIGH"
+                if anchor_age is not None
+                and anchor_age <= _TRADE_PREFERENCE_MAX_LAG_SECONDS
+                and not current.fallback
+                else "MEDIUM" if not current.fallback else "LOW_PAPER_FALLBACK"
+            )
             output.append(
                 CoinRateEstimate(
                     code,
