@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "stage": "P1-00b",
+  "assignment_id": "WA-P1-00B-QODER-HANDOFF-20261105-002",
+  "assignment_scope_sha256": "e3150c15246bbb1f8fefc07c9594b3b098bc0b3e8934f85eccef706aa13a24f2",
+  "task_id": "p1-00b-sync-health-grouped-row-consumption-registration-20261105-c001",
+  "scenario_key": "sync-health-grouped-row-consumption-boundary-canonical-registration",
+  "source_head": "a5e43cf04e441cf3f4e52b6a02cc387e2b6fa050",
+  "status": "PARTIAL_CANONICAL_INTEGRATION",
+  "receipt_type": "SINGLE_ACCEPTED_BEHAVIOR_UNIT_REGISTRATION",
+  "source": {
+    "accepted_source_commit": "0b159bc5addeb6430e31ec3e5a279ae01b4a4a58",
+    "accepted_parent": "b3dcc429d139fa36e301a239c9535a7ec58ff7be"
+  },
+  "evidence_authority": "PREEXISTING_TRACKED_CHARACTERIZATION_TEST_UNCHANGED_BY_THIS_UNIT",
+  "provenance_note": "The evidence file is a pre-existing tracked characterization test unchanged by this unit; the record pins its sha256, mode, last_commit and resolvable selector. Its seed was already raw-evidenced by the first-only registration, so this receipt registers the accepted grouped-row boundary without changing raw membership, counts, strict classification, origin cells or Stage credit.",
+  "registered_unit": {
+    "task_id": "p1-00b-sync-health-grouped-row-consumption-failure-20261104-c001",
+    "task_sha256": "3ed9c55846213e013181d470fc2e89d7a13c6d5ce5365baebe28f090837a3c8e",
+    "task_semantic_fingerprint": "8d0469ffd1da85fa4807bf06e4ea2ec677cbce285138c1e10592968f8145a8d1",
+    "task_scenario_key": "GROUPED_ROW_CONSUMPTION_ONLY.sync-health-grouped-table-rows-all-exception-after-second-execute-before-observability",
+    "accepted_commit": "0b159bc5addeb6430e31ec3e5a279ae01b4a4a58",
+    "accepted_parent": "b3dcc429d139fa36e301a239c9535a7ec58ff7be",
+    "broker_request_id": "2c8a1438b7a94f82bdf34e20abe0aef5",
+    "controller_run_id": "cycle-0001-20261104T070102Z-3174740",
+    "correction_count": 1,
+    "worker": {
+      "run_id": "qoder-grouped-rows-c001-20261104-worker-1",
+      "conversation_id": "29a95add-cf70-47a6-afad-36c59c5e41e0",
+      "state": "PROPOSAL_READY",
+      "proposal_sha256": "07da486c3c271eaae60b0ef4b7c9227953df2d53c59f5d9239186bf6fa402a01"
+    },
+    "reviewer": {
+      "run_id": "qoder-grouped-rows-c001-20261104-reviewer-1",
+      "role": "verifier",
+      "conversation_id": "5ba0b678-1ca0-434f-998f-3a2f11abe6b0",
+      "state": "VERIFIED",
+      "findings": [],
+      "result_sha256": "4bb5b885d23b2640ab570f293d0eed33bf4d730d90f368e8bb96b02c4e3789e6"
+    },
+    "native_test_receipt_sha256": "89cacd2fe8eeff15faee831e55256f918df133e818ddc2b37456897a04ef777e",
+    "qoder_final_review": {
+      "session_id": "fc555b3c-6b24-4c6c-a065-82114669bada",
+      "decision": "APPROVE",
+      "record_sha256": "708c85dfe134a33846d8b32fe1543de2f1f6edb13e3a6b55ebf4f986944e1e8a",
+      "result_sha256": "913897c2bf71dced5d2c17b0bffcbaba5e892705ddf7c7b082e4030426d2d9cd"
+    }
+  },
+  "records": [
+    {
+      "path": "tests/test_p1_00b_characterization_sync_health_grouped_row_consumption_failure.py",
+      "sha256": "ebcd4dee6ff68db22a4239c66b5591560ea805c2fb711ba65cd56cccc23833b0",
+      "utf8_bytes": 29545,
+      "mode": "100644",
+      "git_blob_sha1": "202618b524c2ec3e51c1064a217e96e9642fe71c",
+      "last_commit": "0b159bc5addeb6430e31ec3e5a279ae01b4a4a58",
+      "canonical_symbol": "api/routers/sync.py:4890",
+      "seed_ids": [
+        "API-SYNC-GET-SYNC-GET-SYNC-HEALTH-L4890"
+      ],
+      "seed_provenance": "PARTIAL_OR_SEED_ONLY",
+      "characterized_boundary": "GROUPED_TABLE_ROWS_ALL_EXCEPTION_AFTER_SECOND_EXECUTE_BEFORE_OBSERVABILITY",
+      "test_selectors": [
+        "tests/test_p1_00b_characterization_sync_health_grouped_row_consumption_failure.py::SyncHealthGroupedRowConsumptionFailureCharacterizationTests::test_grouped_rows_all_exception_propagates_after_second_execute_before_observability"
+      ],
+      "excluded": [
+        "first summary execute failure (separately registered)",
+        "summary-result consumption",
+        "health success/Redis fallback",
+        "HTTP Depends/full authorization",
+        "real persistence/service interiors",
+        "concurrency/retry/reload",
+        "origin cells",
+        "whole-handler/full-seed acceptance",
+        "HIGH blocker resolution",
+        "Stage closure"
+      ]
+    }
+  ],
+  "promotion_assessment": {
+    "registered_seed_ids": [],
+    "delta_distinct_seed_count": 0,
+    "removed_seed_ids": [],
+    "duplicate_new_seed_ids": [
+      "API-SYNC-GET-SYNC-GET-SYNC-HEALTH-L4890"
+    ],
+    "canonical_before": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 269,
+      "evidenced": 404,
+      "remaining": 61
+    },
+    "canonical_after_on_exact_acceptance": {
+      "expected": 465,
+      "baseline": 135,
+      "reconciled_new": 269,
+      "evidenced": 404,
+      "remaining": 61
+    },
+    "strict_progress_unchanged": true,
+    "full_seed_acceptance": "NOT_ASSESSED"
+  },
+  "manifest_registration": {
+    "added_key": "sync_health_grouped_row_consumption_failure_registration_path",
+    "added_path": "docs/refactor/two-server/section-1/inventory/recent-characterization-sync-health-grouped-row-registration.json",
+    "before_utf8_bytes": 5825,
+    "before_sha256": "23b3a56d64c6596034eb722fdcdc55d5969112ac884479dc77d39b2c93857a6b",
+    "after_utf8_bytes": 6008,
+    "after_sha256": "82a10447418f7348eddd87cd24b9d0f43b05abfe3bff7e2b52108e33cacdce40",
+    "before_evidence_source_count": 36,
+    "after_evidence_source_count": 37,
+    "evidence_sources_append_only_last_position": true,
+    "counts_before": {
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 269,
+      "evidenced_seed_count": 404,
+      "remaining_seed_count": 61
+    },
+    "counts_after_on_exact_acceptance": {
+      "baseline_evidenced_seed_count": 135,
+      "reconciled_new_seed_count": 269,
+      "evidenced_seed_count": 404,
+      "remaining_seed_count": 61
+    },
+    "raw_evidenced_before": 404,
+    "raw_evidenced_after_on_exact_acceptance": 404,
+    "raw_remaining_after_on_exact_acceptance": 61,
+    "delta_distinct_seed_count": 0
+  },
+  "proof_limits": {
+    "record_proves_only_declared_handler_boundary": true,
+    "seed_was_already_evidenced_by_prior_registration": true,
+    "full_handler_and_full_seed_acceptance": "NOT_ASSESSED",
+    "no_origin_High_or_Stage_closure": true
+  },
+  "reconciliation": {
+    "canonical_base_capture_units_since_reconciliation": 0,
+    "registered_evidence_files_in_this_unit": 1,
+    "units_since_reconciliation_on_exact_acceptance": 2,
+    "threshold": 5,
+    "group_reconciliation_complete": false,
+    "canonical_base_edited": false,
+    "capture_is_not_future_live_counter_constraint": true
+  },
+  "accounting": {
+    "added_behavior_units": 0,
+    "added_handler_scenarios": 0,
+    "registered_accepted_behavior_units": 1,
+    "registered_accepted_handler_scenarios": 1,
+    "accepted_full_seeds": 0,
+    "raw_registration_delta": 0,
+    "manifest_file_edited_by_this_unit": true,
+    "count_values_unchanged_by_this_unit": true,
+    "documentation_unit_adds_no_product_behavior": true,
+    "ledger_edited_by_this_unit": false,
+    "scenario_records_and_recent_characterization_edited": false
+  },
+  "origin_matrix_unresolved_cells": 24,
+  "canonical_blockers": [
+    "P1-00-HIGH-SEED-HANDLER-ASSERTIONS-INCOMPLETE",
+    "P1-00-HIGH-ORIGIN-MATRIX-UNPROVEN"
+  ],
+  "coverage_status": "PARTIAL",
+  "seed_acceptance_status": "FULL_SEED_ACCEPTANCE_NOT_ASSESSED",
+  "closures_authorized": false,
+  "stages": {
+    "P1-00": "COMPLETE",
+    "P1-00b": "IN_PROGRESS"
+  }
+}
