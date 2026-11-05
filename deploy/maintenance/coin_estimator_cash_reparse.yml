@@ -1,0 +1,69 @@
+---
+- name: Request bounded normal reconciliation of existing cash-group captures
+  hosts: price_fix_web
+  gather_facts: false
+  tasks:
+    - name: Require the verified Web host and exact processor identity
+      ansible.builtin.assert:
+        that:
+          - ansible_host == '65.109.220.59'
+          - processor_cid is match('^[a-f0-9]{64}$')
+
+    - name: Verify the selected processor is the running production role
+      ansible.builtin.command:
+        argv:
+          - docker
+          - ps
+          - --quiet
+          - --no-trunc
+          - --filter
+          - 'id={{ processor_cid }}'
+          - --filter
+          - label=com.docker.compose.project=market-private-pipeline-primary
+          - --filter
+          - label=com.docker.compose.service=market-processor
+      changed_when: false
+      register: selected_processor
+
+    - name: Require exact runtime ownership
+      ansible.builtin.assert:
+        that:
+          - selected_processor.stdout == processor_cid
+
+    - name: Queue only the retained incident window for the normal single processor
+      ansible.builtin.command:
+        argv: [docker, exec, -i, '{{ processor_cid }}', python, -B, '-']
+        stdin: |
+          from datetime import datetime, timezone
+          import json, os, sqlite3
+          from core.market_intelligence.capture_event_adapter import _mark_dirty_group
+          now = datetime.now(timezone.utc)
+          since = datetime(2026, 11, 5, 6, 0, tzinfo=timezone.utc)
+          assert 0 <= (now - since).total_seconds() <= 6 * 3600, 'bounded_incident_window_required'
+          ledger = sqlite3.connect('file:' + os.environ['MARKET_PROCESSOR_PREDICTION_DB'] + '?mode=ro', uri=True)
+          epoch = ledger.execute('SELECT active_epoch FROM coin_estimate_prediction_authority WHERE singleton=1').fetchone()[0]
+          assert epoch == 'PRIVATE_PRIMARY:coin-rate-engine-v9', 'qualified_epoch_required'
+          latest = ledger.execute('SELECT MAX(prediction_time_utc) FROM coin_estimate_predictions WHERE authority_epoch=?', (epoch,)).fetchone()[0]
+          assert latest and 0 <= (now - datetime.fromisoformat(latest.replace('Z', '+00:00'))).total_seconds() <= 30, 'fresh_price_anchors_required'
+          ledger.close()
+          stamp = now.isoformat().replace('+00:00', 'Z')
+          lower = since.isoformat().replace('+00:00', 'Z')
+          staging = sqlite3.connect('file:/var/lib/market-data/state/market-processor/capture-staging.sqlite3?mode=rw', uri=True, timeout=30)
+          try:
+              staging.execute('BEGIN IMMEDIATE')
+              queued = []
+              for group in (1, 2):
+                  first, count = staging.execute('SELECT MIN(event_time_utc),COUNT(*) FROM coin_group_staged_messages WHERE group_number=? AND event_time_utc>=? AND event_time_utc<=? AND available_at_utc<=? AND expires_at_utc>?', (group, lower, stamp, stamp, stamp)).fetchone()
+                  if first:
+                      _mark_dirty_group(staging, group, stamp, first)
+                      queued.append({'group': group, 'since_utc': first, 'retained_messages': count})
+              staging.commit()
+          finally:
+              staging.close()
+          print(json.dumps({'status': 'QUEUED_NORMAL_RECONCILIATION', 'groups': queued, 'raw_events_or_market_facts_rewritten': False}))
+      register: cash_reparse
+      changed_when: true
+
+    - name: Report only public reconciliation scope
+      ansible.builtin.debug:
+        var: cash_reparse.stdout

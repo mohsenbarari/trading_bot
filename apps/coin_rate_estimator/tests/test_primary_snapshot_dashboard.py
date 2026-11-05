@@ -170,6 +170,7 @@ class PrimarySnapshotDashboardTests(unittest.TestCase):
         self.assertNotIn("۱۱۷,۳۰۰,۰۰۰", private_card)
         self.assertNotIn("۹۶,۱۵۰,۰۰۰", private_card)
         self.assertIn("میانگین وزنی دقیقه‌ای", private_card)
+        self.assertIn("نقدی: داده‌ای ثبت نشده", private_card)
 
     def test_stale_private_cash_does_not_borrow_a_fresh_tomorrow_or_public_price(self) -> None:
         now = datetime(2026, 11, 5, 6, 0, tzinfo=timezone.utc)
@@ -197,6 +198,11 @@ class PrimarySnapshotDashboardTests(unittest.TestCase):
         self.assertEqual(cash["status"], "NO_DATA")
         self.assertIsNone(cash["point_price"])
         self.assertIsNone(cash["average_price"])
+        private_card = render_input_cards(projected["settlements"]).split(
+            "data-source='private_gold_paper'", 1
+        )[1].split("</article>", 1)[0]
+        self.assertIn("نقدی: دادهٔ تازه نرسیده؛ آخرین داده", private_card)
+        self.assertNotIn("۹۹,۰۰۰,۰۰۰", private_card)
 
     def test_melted_source_details_preserve_legacy_values_and_escape_labels(self) -> None:
         settlements = {

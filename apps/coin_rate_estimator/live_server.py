@@ -3582,6 +3582,20 @@ def render_input_cards(settlements: dict[str, dict[str, Any]]) -> str:
                 f"فردایی: {html.escape(_input_source_text(key, tomorrow))}"
                 "</small>"
             )
+        elif key == "private_gold_paper":
+            missing_details = []
+            for term, payload in (("CASH", cash), ("TOMORROW", tomorrow)):
+                if values[term] is not None:
+                    continue
+                if str(payload.get("primary_freshness") or "").upper() == "STALE":
+                    reason = "دادهٔ تازه نرسیده"
+                    if observed_at := _input_time(payload):
+                        reason += "؛ آخرین داده " + fa_datetime(observed_at)
+                else:
+                    reason = "داده‌ای ثبت نشده"
+                missing_details.append(html.escape(SETTLEMENT_FA[term] + ": " + reason))
+            if missing_details:
+                source_detail = "<small class='input-source'>" + "<br>".join(missing_details) + "</small>"
         if key == "xauusd" and (
             cash.get("is_proxy") is True or tomorrow.get("is_proxy") is True
         ):
