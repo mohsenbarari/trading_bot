@@ -253,11 +253,12 @@ def _verify_external_main_git(root, record):
     """Read fixed Git facts only; FF is not approval, merge or Source acceptance."""
     try:
         transition = record['external_main_transition']
-        old, new, head = transition['old_main'], transition['new_main'], record['repository']['head']
-        _require(_hex(old, 40) and _hex(new, 40) and _hex(head, 40))
+        old, new = transition['old_main'], transition['new_main']
+        prior, head = record['prior_head'], record['repository']['head']
+        _require(all(_hex(value, 40) for value in (old, new, prior, head)))
         expected = ''.join(row['head'] + ' ' + row['parent'] + '\n'
                            for row in transition['commits']).encode('ascii')
-        queries = (
+        queries = [
             (['cat-file', '-t', old], b'commit\n', 64),
             (['cat-file', '-t', new], b'commit\n', 64),
             (['rev-parse', '--verify', 'refs/heads/main'], (new + '\n').encode('ascii'), 64),
@@ -265,10 +266,19 @@ def _verify_external_main_git(root, record):
              (record['repository']['protected_refs']['refs/remotes/origin/main'] + '\n').encode('ascii'), 64),
             (['rev-list', '--reverse', '--parents', old + '..' + new], expected, 4096),
             (['merge-base', '--is-ancestor', old, new], b'', 64),
-            (['merge-base', '--all', head, new], (old + '\n').encode('ascii'), 64),
-        )
+        ]
         for args, expected, limit in queries:
             _require(_run_git_query(root, args, output_limit=limit) == expected)
+        # The integration history and the externally advanced protected Main
+        # may already be independent descendants of an older common base.  A
+        # valid bridge proves that the same single merge base survives across
+        # both endpoints on both histories.  This admits that real topology
+        # without allowing Main to absorb integration (or the reverse).
+        base = _run_git_query(root, ['merge-base', '--all', prior, old], output_limit=64)
+        _require(re.fullmatch(b'[0-9a-f]{40}\\n', base) is not None)
+        for left, right in ((prior, new), (head, old), (head, new)):
+            _require(_run_git_query(root, ['merge-base', '--all', left, right],
+                                    output_limit=64) == base)
     except (KeyboardInterrupt, SystemExit):
         raise
     except Exception:

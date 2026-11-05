@@ -129,6 +129,11 @@ def test_actual_main_overlap_reaches_and_fails_only_common_base_gate(lab, monkey
          (record['repository']['protected_refs'][ORIGIN] + '\n').encode()),
         (['rev-list', '--reverse', '--parents', old + '..' + new], rows),
         (['merge-base', '--is-ancestor', old, new], b''),
+        (['merge-base', '--all', lab['v2_record']['prior_head'], old],
+         (old + '\n').encode()),
+        (['merge-base', '--all', lab['v2_record']['prior_head'], new],
+         (old + '\n').encode()),
+        (['merge-base', '--all', integration, old], (old + '\n').encode()),
         (['merge-base', '--all', integration, new], (integration + '\n').encode()),
     ]
     actual = subject._run_git_query
@@ -142,7 +147,7 @@ def test_actual_main_overlap_reaches_and_fails_only_common_base_gate(lab, monkey
         monkeypatch.setattr(subject, '_run_git_query', observed)
         with pytest.raises(subject.RootMaintenanceBridgeError, match=ERROR):
             helpers.run(lab)
-        assert seen[:7] == expected
+        assert seen[:10] == expected
         assert helpers.custody(lab) == before
     finally:
         monkeypatch.setattr(subject, '_run_git_query', actual)
@@ -150,6 +155,30 @@ def test_actual_main_overlap_reaches_and_fails_only_common_base_gate(lab, monkey
         _publish(lab, lab['v2_record'])
     assert helpers.run(lab) == {**copy.deepcopy(lab['v2_record']),
         'new_repository': ap.validate_accepted_repository(lab['repository'])}
+
+
+def test_external_main_ff_accepts_independent_integration_with_one_stable_base(lab):
+    root = lab['root']
+    record = copy.deepcopy(lab['v2_record'])
+    old = record['external_main_transition']['old_main']
+    base = helpers.git(root, 'rev-list', '--max-parents=0', old).splitlines()[0]
+    tree = helpers.git(root, 'rev-parse', old + '^{tree}')
+    prior = helpers.git(root, 'commit-tree', tree, '-p', base,
+                        '-m', 'LAB independent prior integration')
+    head = helpers.git(root, 'commit-tree', tree, '-p', prior,
+                       '-m', 'LAB independent current integration')
+    record['prior_head'] = prior
+    record['repository']['head'] = head
+
+    subject._verify_external_main_git(root, record)
+    expected_base = base + '\n'
+    for left, right in (
+        (prior, old),
+        (prior, record['external_main_transition']['new_main']),
+        (head, old),
+        (head, record['external_main_transition']['new_main']),
+    ):
+        assert helpers.git(root, 'merge-base', '--all', left, right) == expected_base.strip()
 
 
 @pytest.mark.parametrize('count', [32, 33])
