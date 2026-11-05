@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import pytest
 
@@ -154,6 +155,7 @@ def run_validation_fragment(
     stdout_content: str | bytes,
     stderr_content: str | bytes = "",
     root: str = "/root/test",
+    expected_model: str = "gemini-4-argon-high",
 ) -> subprocess.CompletedProcess:
     tmp_path.mkdir(parents=True, exist_ok=True)
     stdout_file = tmp_path / "stdout.tmp"
@@ -170,6 +172,7 @@ def run_validation_fragment(
     frag = extract_preflight_validation_fragment()
     script = (
         f'integration_root="{root}"\n'
+        'probe_model=' + shlex.quote(expected_model) + '\n'
         f'probe_stdout_tmp="{stdout_file}"\n'
         f'probe_stderr_tmp="{stderr_file}"\n'
         f'if {frag}; then\n'
@@ -179,6 +182,39 @@ def run_validation_fragment(
         'fi\n'
     )
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+
+
+def test_probe_validation_binds_the_configured_model_not_a_fixed_name(tmp_path):
+    events = make_ndjson(make_valid_events(model="gemini-fixture-alternate"))
+    assert run_validation_fragment(tmp_path / "matching", events,
+                                   expected_model="gemini-fixture-alternate").returncode == 0
+    assert run_validation_fragment(tmp_path / "mismatch", events,
+                                   expected_model="gemini-4-argon-high").returncode != 0
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "wrong-provider"])
+def test_monitor_probe_loads_typed_worker_policy_without_fallback(tmp_path, fault):
+    import shlex
+    source = MONITOR.read_text()
+    line = next(line.strip() for line in source.splitlines() if line.strip().startswith('probe_role_json='))
+    config = json.loads((MONITOR.parents[1] / "docs/refactor/two-server/templates/automation-models.json").read_text())
+    config["roles"]["worker"].update(model="gemini-fixture-alternate", reasoning_effort="medium")
+    if fault == "wrong-provider":
+        config["roles"]["worker"]["provider"] = "qoder"
+    if fault != "missing":
+        path = tmp_path / "docs/refactor/two-server/templates/automation-models.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(config))
+    script = 'integration_root=' + shlex.quote(str(tmp_path)) + '\n' + line + '\nprintf "%s" "$probe_role_json"'
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                            timeout=25, check=True)
+    assert result.stderr == ""
+    if fault:
+        assert result.stdout == ""
+    else:
+        assert json.loads(result.stdout) == config["roles"]["worker"]
+    assert '--model "$probe_model" --effort "$probe_effort"' in source
+    assert '--model gemini-4-argon-high' not in source
 
 
 def run_publication_fragment(

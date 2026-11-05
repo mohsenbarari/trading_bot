@@ -469,25 +469,29 @@ if [[ "$restart_eligible" == true ]]; then
       probe_cli_dir="$(/usr/bin/mktemp -d "$report_root/.provider-cli.XXXXXX")"
       probe_cli="$probe_cli_dir/agy"
       cli_sha256="$(/usr/bin/sha256sum -- "$antigravity_cli" 2>/dev/null | /usr/bin/awk '{print $1}' || true)"
-      if /usr/bin/cp --reflink=auto -- "$antigravity_cli" "$probe_cli" 2>/dev/null \
+      probe_role_json="$(/usr/bin/timeout 20 /usr/bin/python3 -c 'import json,sys; from pathlib import Path; from scripts.two_site_ai_config import role_settings; print(json.dumps(role_settings(Path(sys.argv[1]), "worker")))' "$integration_root" 2>/dev/null || true)"
+      if [[ -n "$probe_role_json" ]] \
+          && probe_model="$(/usr/bin/printf '%s' "$probe_role_json" | /usr/bin/jq -er '.model')" \
+          && probe_effort="$(/usr/bin/printf '%s' "$probe_role_json" | /usr/bin/jq -er '.reasoning_effort')" \
+          && /usr/bin/cp --reflink=auto -- "$antigravity_cli" "$probe_cli" 2>/dev/null \
           && /usr/bin/chmod 700 "$probe_cli" \
           && [[ "$cli_sha256" == "$expected_antigravity_sha256" ]] \
           && [[ "$(/usr/bin/sha256sum -- "$probe_cli" 2>/dev/null | /usr/bin/awk '{print $1}' || true)" == "$expected_antigravity_sha256" ]] \
           && [[ "$(AGY_CLI_DISABLE_AUTO_UPDATE=true /usr/bin/timeout 10 "$probe_cli" --version 2>/dev/null || true)" == "1.4.2" ]] \
           && (ulimit -f 2048; AGY_CLI_DISABLE_AUTO_UPDATE=true /usr/bin/timeout 150 "$probe_cli" \
-            --model gemini-4-argon-high --effort high --sandbox --mode plan \
+            --model "$probe_model" --effort "$probe_effort" --sandbox --mode plan \
             --disable-slash-commands --output-format stream-json --print-timeout 2m \
             -p 'Health probe only. Do not invoke tools and do not read or write files. Reply exactly AUTOPILOT_PROVIDER_OK' \
             >"$probe_stdout_tmp" 2>"$probe_stderr_tmp") \
           && [[ "$(/usr/bin/stat -c %s -- "$probe_stdout_tmp" 2>/dev/null || printf '1048577')" -le 1048576 ]] \
           && [[ "$(/usr/bin/stat -c %s -- "$probe_stderr_tmp" 2>/dev/null || printf '1048577')" -le 1048576 ]] \
-          && /usr/bin/jq -s -e --arg root "$integration_root" '
+          && /usr/bin/jq -s -e --arg root "$integration_root" --arg expected_model "$probe_model" '
             ([.[] | select(.event == "init")] | length) == 1 and
             ([.[] | select(.event == "result")] | length) == 1 and
             ([.[] | select(.event == "init")][0]) as $init |
             ([.[] | select(.event == "result")][0].result) as $result |
             $init.init.cwd == $root and
-            $init.init.model == "gemini-4-argon-high" and
+            $init.init.model == $expected_model and
             $init.init.permission_mode == "request-review" and
             $result.conversation_id == $init.conversation_id and
             $result.status == "SUCCESS" and
