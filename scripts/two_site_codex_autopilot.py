@@ -3084,8 +3084,8 @@ def run_cycle(
                     raise AutopilotError(f"Coordinator CLI exited with status {process.returncode}")
                 if file_sha256(codex) != identity["sha256"]:
                     raise AutopilotError("Coordinator CLI identity changed during the cycle")
-                if coordinator_settings["provider"] != "qoder" and codex_runtime_identity(codex) != identity["runtime"]:
-                    raise AutopilotError("Codex runtime changed during the cycle")
+                if coordinator_settings["provider"] != "qoder":
+                    raise AutopilotError("operational coordinator provider must remain qoder")
                 if load_ai_config(root) != cycle_ai_config:
                     raise AutopilotError("Model configuration changed during the cycle")
                 _validate_startup_file(root, startup_file, startup, startup_bytes)
@@ -3753,7 +3753,7 @@ def run_loop(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--coordinator", "--codex", dest="codex", type=Path, default=None)
+    parser.add_argument("--coordinator", dest="coordinator", type=Path, default=None)
     parser.add_argument("--max-cycles", type=int, default=DEFAULT_MAX_CYCLES)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--once", action="store_true")
@@ -3765,8 +3765,8 @@ def main() -> int:
         default="one_shot",
     )
     args = parser.parse_args()
-    if args.codex is None:
-        args.codex = Path(load_runtime_config(args.root)["coordinator"]["path"])
+    if args.coordinator is None:
+        args.coordinator = Path(load_runtime_config(args.root)["coordinator"]["path"])
     if not 1 <= args.max_cycles <= DEFAULT_MAX_CYCLES or not 300 <= args.timeout <= 14_400:
         raise SystemExit("invalid max-cycles or timeout")
     for handled in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
@@ -3780,7 +3780,7 @@ def main() -> int:
             with exclusive_supervisor_lock(lock_path):
                 _validate_legacy_preparation_startup(resolved_root, state_root)
         with tempfile.TemporaryDirectory(prefix="two-site-autopilot-check-") as temporary:
-            identity = coordinator_identity(args.root, args.codex, Path(temporary))
+            identity = coordinator_identity(args.root, args.coordinator, Path(temporary))
         print(json.dumps({
             "state": "READY", "branch": BRANCH, "head": state["head"],
             "codex": identity,
@@ -3796,7 +3796,7 @@ def main() -> int:
         if args.preparation_route == "legacy":
             loop_kwargs["preparation_route"] = args.preparation_route
         return run_loop(
-            args.root, args.codex, args.max_cycles, args.timeout, args.once, **loop_kwargs
+            args.root, args.coordinator, args.max_cycles, args.timeout, args.once, **loop_kwargs
         )
     except KeyboardInterrupt:
         return 130

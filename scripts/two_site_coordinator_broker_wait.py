@@ -149,8 +149,16 @@ def finish_owned_request(root, original_dir, before, model_config, *,
           "OWNED_BROKER_DEADLINE")
     deadline = min(deadline_monotonic, time.monotonic() + remaining)
     _need(deadline > time.monotonic(), "OWNED_BROKER_DEADLINE")
-    original_terminal = qoder.validate_qoder_terminal(
-        original_dir, expected_model=model_config["roles"]["coordinator"]["model"])
+    try:
+        original_terminal = qoder.validate_qoder_terminal(
+            original_dir, expected_model=model_config["roles"]["coordinator"]["model"])
+    except qoder.QoderError as error:
+        # Only a genuine two-lifecycle wait stream may be re-read; every other
+        # SDK defect stays fail-closed and never reaches a fresh completion.
+        if str(error) != "QODER_TERMINAL_CARDINALITY":
+            raise
+        original_terminal = qoder.validate_qoder_owned_wait_terminal(
+            original_dir, expected_model=model_config["roles"]["coordinator"]["model"])
     # A complete genuine BLOCKED decision after a finished request is not
     # silently rejudged. Only pending ownership or missing JSON needs completion.
     terminal_path = original_dir / broker._CYCLE_TERMINAL

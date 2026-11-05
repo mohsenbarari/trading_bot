@@ -24,11 +24,24 @@ def put(path, value):
     path.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")))
     path.chmod(0o600)
 
+def sdk_frames(text, session="original-session"):
+    return [{"type":"system","subtype":"init","model":MODEL,"session_id":session,"tools":["Read"]},
+            {"type":"result","subtype":"success","is_error":False,"stop_reason":"end_turn",
+             "session_id":session,"num_turns":1,"result":text}]
+
+def write_frames(path, values):
+    path.write_text("".join(json.dumps(e)+"\n" for e in values)); path.chmod(0o600)
+
 def sdk(path, text, session="original-session"):
-    frames = [{"type":"system","subtype":"init","model":MODEL,"session_id":session,"tools":["Read"]},
-              {"type":"result","subtype":"success","is_error":False,"stop_reason":"end_turn",
-               "session_id":session,"num_turns":1,"result":text}]
-    path.write_text("".join(json.dumps(e)+"\n" for e in frames)); path.chmod(0o600)
+    write_frames(path, sdk_frames(text, session))
+
+def sdk_split(path, text, session="original-session"):
+    """The exact retained incident: two complete same-session SDK lifecycles."""
+    second = sdk_frames(text, session)
+    notification = {"type":"system","subtype":"task_notification","session_id":session}
+    write_frames(path, [*sdk_frames("Waiting for the exact background request.", session),
+                        second[0], notification, second[1]])
+    return path
 
 def blocked():
     return dict(schema_version="1.0",state="BLOCKED",disposition="HALT",category="EXTERNAL_GATE",
@@ -209,6 +222,67 @@ def test_unqualified_original_sdk_never_starts_completion(owned, fault):
     complete=Mock(side_effect=AssertionError("completion forbidden"))
     with pytest.raises(qoder.QoderError):invoke(owned,complete=complete)
     complete.assert_not_called()
+
+
+def test_exact_split_original_lifecycle_reaches_one_fresh_completion(owned):
+    terminal(owned)
+    sdk_split(owned["directory"]/"stream.jsonl","Second provisional observation, never business JSON.")
+    phases=[];complete=completion(owned)
+    def progress(phase):
+        phases.append(phase)
+        if phases.count("WAITING_PROVIDER")==2:terminal(owned)
+    value=invoke(owned,progress=progress,complete=complete)
+    assert value["kind"]=="OWNED_BROKER_COORDINATOR_COMPLETION" and value["result"]==blocked()
+    assert complete.call_count==1 and "COORDINATOR_COMPLETION" in phases
+    owned["prepare"].assert_called_once();owned["final"].assert_called_once()
+    receipt=json.loads((owned["directory"]/"owned-broker-completion/receipt.json").read_text())
+    assert receipt["original_session_id"]=="original-session"
+    assert receipt["completion_session_id"]=="new-session" and receipt["observed_exit_code"]==0
+    prompt=complete.call_args[0][1]
+    assert "Second provisional observation, never business JSON." in prompt
+    assert "Waiting for the exact background request." not in prompt
+    with pytest.raises(FileExistsError):invoke(owned,complete=complete)
+    assert complete.call_count==1
+
+
+def test_split_original_terminal_is_still_never_rejudged_as_accepted(owned):
+    terminal(owned)
+    sdk_split(owned["directory"]/"stream.jsonl",json.dumps(blocked()))
+    complete=Mock(side_effect=AssertionError("rejudging forbidden"))
+    assert invoke(owned,complete=complete) is None;complete.assert_not_called()
+
+
+def test_split_lifecycle_with_foreign_second_session_never_completes(owned):
+    terminal(owned);path=owned["directory"]/"stream.jsonl"
+    sdk_split(path,"Second provisional observation.")
+    frames=[json.loads(line) for line in path.read_text().splitlines()]
+    second_init=[index for index,event in enumerate(frames) if event.get("subtype")=="init"][1]
+    frames[second_init]["session_id"]="foreign";write_frames(path,frames)
+    complete=Mock(side_effect=AssertionError("completion forbidden"))
+    with pytest.raises(qoder.QoderError,match="CROSS_SESSION"):invoke(owned,complete=complete)
+    complete.assert_not_called()
+    assert not (owned["directory"]/"owned-broker-completion").exists()
+
+
+@pytest.mark.parametrize("fault", ["foreign-session", "wrong-model", "error-terminal"])
+def test_non_cardinality_defects_never_use_the_split_validator(owned, monkeypatch, fault):
+    terminal(owned)
+    fallback=Mock(side_effect=AssertionError("split fallback forbidden"))
+    monkeypatch.setattr(qoder,"validate_qoder_owned_wait_terminal",fallback)
+    test_unqualified_original_sdk_never_starts_completion(owned, fault)
+    fallback.assert_not_called()
+
+
+def test_split_validator_is_never_used_for_a_single_lifecycle(owned, monkeypatch):
+    terminal(owned)
+    fallback=Mock(side_effect=AssertionError("split fallback forbidden"))
+    monkeypatch.setattr(qoder,"validate_qoder_owned_wait_terminal",fallback)
+    phases=[];complete=completion(owned)
+    def progress(phase):
+        phases.append(phase)
+        if phases.count("WAITING_PROVIDER")==2:terminal(owned)
+    assert invoke(owned,progress=progress,complete=complete)["kind"]=="OWNED_BROKER_COORDINATOR_COMPLETION"
+    fallback.assert_not_called();assert complete.call_count==1
 
 
 def test_cycle_terminal_publication_is_idempotent_and_never_rewrites(owned):

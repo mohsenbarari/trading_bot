@@ -301,54 +301,116 @@ def _tool_blocks(event: dict):
             yield block
 
 
-def validate_qoder_terminal(run_dir: Path, *, stream_filename: str = "stream.jsonl",
-                            expected_model: str | None = None, role: str = "coordinator") -> dict:
-    """Validate the whole genuine SDK stream without parsing or rewriting its text."""
-    _need(role in TOOLS and stream_filename in {"stream.jsonl", "qoder.stdout", "codex.stdout"}, "QODER_STREAM_NAME")
-    run_dir = Path(run_dir).resolve(strict=True)
+def _stream_events(run_dir: Path, stream_filename: str) -> list[dict]:
     raw = _regular(run_dir / stream_filename, MAX_STREAM_BYTES)
     _need(raw.endswith(b"\n"), "QODER_TRUNCATED_STREAM")
     events = [_json(line) for line in raw.splitlines() if line.strip()]
     _need(events and all(type(event) is dict for event in events), "QODER_EVENT_SHAPE")
-    initial = [event for event in events if event.get("type") == "system" and event.get("subtype") == "init"]
-    terminal = [event for event in events if event.get("type") == "result"]
-    _need(len(initial) == len(terminal) == 1 and events[0] is initial[0] and events[-1] is terminal[0],
-          "QODER_TERMINAL_CARDINALITY")
-    session = initial[0].get("session_id")
+    return events
+
+
+def _session_id(init: dict) -> str:
+    session = init.get("session_id")
     _need(type(session) is str and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", session), "QODER_SESSION_ID")
+    return session
+
+
+def _init_gates(init: dict, session: str, expected_model: str | None, role: str) -> None:
     if expected_model is not None:
-        _need(initial[0].get("model") == expected_model, "QODER_MODEL_MISMATCH")
-    advertised = initial[0].get("tools")
+        _need(init.get("model") == expected_model, "QODER_MODEL_MISMATCH")
+    advertised = init.get("tools")
     if advertised is not None:
         # Qoder advertises intrinsic discovery even with an empty tool list.
         # Advertisement is not permission to execute MCP or delegation tools.
         discovery = ("mcp_call", "mcp_get", "mcp_list")
         _need(type(advertised) is list and all(type(name) is str and name in (*TOOLS[role], *discovery) for name in advertised),
               "QODER_UNEXPECTED_TOOLS")
-    _need(initial[0].get("mcp_servers", []) == [] and initial[0].get("plugins", []) == [],
+    _need(init.get("mcp_servers", []) == [] and init.get("plugins", []) == [],
           "QODER_UNEXPECTED_EXTENSIONS")
-    for event in events:
-        _need(event.get("type") in {"system", "assistant", "user", "stream_event", "result"},
-              "QODER_EVENT_TYPE")
-        _need(event.get("session_id", session) == session, "QODER_CROSS_SESSION")
-        for nested in (event.get("message"), event.get("event")):
-            if type(nested) is dict:
-                _need(nested.get("session_id", session) == session, "QODER_CROSS_SESSION")
-        if event.get("type") in {"assistant", "user"}:
-            _need(type(event.get("message")) is dict
-                  and type(event["message"].get("content")) is list, "QODER_MESSAGE_SHAPE")
-        _need(event.get("type") not in {"error", "tool_error"}
-              and event.get("subtype") not in {"error", "error_during_execution", "error_max_turns"}, "QODER_ERROR_EVENT")
-        for block in _tool_blocks(event):
-            _need(block.get("name") in TOOLS[role], "QODER_FORBIDDEN_TOOL")
-    result = terminal[0]
+
+
+def _event_gates(event: dict, session: str, role: str) -> None:
+    _need(event.get("type") in {"system", "assistant", "user", "stream_event", "result"},
+          "QODER_EVENT_TYPE")
+    _need(event.get("session_id", session) == session, "QODER_CROSS_SESSION")
+    for nested in (event.get("message"), event.get("event")):
+        if type(nested) is dict:
+            _need(nested.get("session_id", session) == session, "QODER_CROSS_SESSION")
+    if event.get("type") in {"assistant", "user"}:
+        _need(type(event.get("message")) is dict
+              and type(event["message"].get("content")) is list, "QODER_MESSAGE_SHAPE")
+    _need(event.get("type") not in {"error", "tool_error"}
+          and event.get("subtype") not in {"error", "error_during_execution", "error_max_turns"}, "QODER_ERROR_EVENT")
+    for block in _tool_blocks(event):
+        _need(block.get("name") in TOOLS[role], "QODER_FORBIDDEN_TOOL")
+
+
+def _result_gates(result: dict, session: str) -> str:
     _need(result.get("subtype") == "success" and result.get("is_error") is False
           and result.get("session_id") == session and not result.get("permission_denials")
           and not result.get("error") and result.get("stop_reason") == "end_turn", "QODER_NOT_SUCCESS")
     if "num_turns" in result:
         _need(type(result["num_turns"]) is int and result["num_turns"] >= 1, "QODER_TURN_COUNT")
     _need(type(result.get("result")) is str, "QODER_MISSING_RESULT")
-    return {"session_id": session, "text": result["result"]}
+    return result["result"]
+
+
+def _task_notification(event: dict) -> bool:
+    if event.get("type") == "system" and event.get("subtype") == "task_notification":
+        return True
+    message = event.get("message")
+    return (type(message) is dict and type(message.get("content")) is list
+            and any(type(block) is dict and block.get("type") == "task_notification"
+                    for block in message["content"]))
+
+
+def validate_qoder_terminal(run_dir: Path, *, stream_filename: str = "stream.jsonl",
+                            expected_model: str | None = None, role: str = "coordinator") -> dict:
+    """Validate the whole genuine SDK stream without parsing or rewriting its text."""
+    _need(role in TOOLS and stream_filename in {"stream.jsonl", "qoder.stdout", "codex.stdout"}, "QODER_STREAM_NAME")
+    run_dir = Path(run_dir).resolve(strict=True)
+    events = _stream_events(run_dir, stream_filename)
+    initial = [event for event in events if event.get("type") == "system" and event.get("subtype") == "init"]
+    terminal = [event for event in events if event.get("type") == "result"]
+    _need(len(initial) == len(terminal) == 1 and events[0] is initial[0] and events[-1] is terminal[0],
+          "QODER_TERMINAL_CARDINALITY")
+    session = _session_id(initial[0])
+    _init_gates(initial[0], session, expected_model, role)
+    for event in events:
+        _event_gates(event, session, role)
+    return {"session_id": session, "text": _result_gates(terminal[0], session)}
+
+
+def validate_qoder_owned_wait_terminal(run_dir: Path, *, stream_filename: str = "stream.jsonl",
+                                       expected_model: str | None = None,
+                                       role: str = "coordinator") -> dict:
+    """Validate a genuine two-lifecycle owned-wait stream; never parse its text.
+
+    An owned Broker wait can emit a provisional result and then restart the same
+    session for the actual completion.  Both lifecycles must be same-session,
+    same-model genuine successes, and the second must carry the structural task
+    notification that proves it is a real continuation rather than a replay.
+    Only the final text is returned, and it stays a provisional observation.
+    """
+    _need(role in TOOLS and stream_filename in {"stream.jsonl", "qoder.stdout", "codex.stdout"}, "QODER_STREAM_NAME")
+    run_dir = Path(run_dir).resolve(strict=True)
+    events = _stream_events(run_dir, stream_filename)
+    initial = [index for index, event in enumerate(events)
+               if event.get("type") == "system" and event.get("subtype") == "init"]
+    terminal = [index for index, event in enumerate(events) if event.get("type") == "result"]
+    _need(len(initial) == len(terminal) == 2 and initial[0] == 0 and terminal[1] == len(events) - 1
+          and initial[0] < terminal[0] < initial[1] < terminal[1], "QODER_OWNED_WAIT_CARDINALITY")
+    session = _session_id(events[initial[0]])
+    for index in initial:
+        _need(events[index].get("session_id") == session, "QODER_CROSS_SESSION")
+        _init_gates(events[index], session, expected_model, role)
+    for event in events:
+        _event_gates(event, session, role)
+    _need(any(_task_notification(event) for event in events[initial[1] + 1:terminal[1]]),
+          "QODER_OWNED_WAIT_NOTIFICATION")
+    _result_gates(events[terminal[0]], session)
+    return {"session_id": session, "text": _result_gates(events[terminal[1]], session),
+            "segments": 2}
 
 
 def finalize_qoder_output(run_dir: Path, *, stream_filename: str = "stream.jsonl",

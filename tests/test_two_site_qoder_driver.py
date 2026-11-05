@@ -61,6 +61,17 @@ def stream(root, values):
     return path
 
 
+def owned_wait_events(second_text="Second provisional observation, never business JSON."):
+    """The exact retained incident: init@0/result@3 then init@4/notification@6/result@8."""
+    first = copy.deepcopy(events())
+    first[-1]["result"] = "First provisional observation, never business JSON."
+    second = copy.deepcopy(events())
+    second[-1]["result"] = second_text
+    notification = {"type": "system", "subtype": "task_notification",
+                    "session_id": "synthetic-session-1"}
+    return [*first, second[0], second[1], notification, second[2], second[-1]]
+
+
 def test_real_local_metadata_probe_returns_only_public_bound_identity(tmp_path):
     binary, runtime = setup_runtime(tmp_path)
     identity = driver.qoder_identity(binary, runtime, tmp_path, role())
@@ -217,6 +228,49 @@ def test_allowed_tool_activity_is_not_confused_with_proposal_only_policy(tmp_pat
     values = events(); values[2]["message"]["content"] = [{"type": "tool_use", "name": "Bash", "input": {"command": "synthetic"}}]
     stream(tmp_path, values)
     assert driver.finalize_qoder_output(tmp_path) == FINAL
+
+
+def test_exact_split_lifecycle_is_provisional_and_never_parsed_as_json(tmp_path):
+    values = owned_wait_events()
+    assert [value.get("subtype") for value in values if value.get("type") == "system"] == [
+        "init", "hook_diagnostics", "init", "hook_diagnostics", "task_notification"]
+    path = stream(tmp_path, values); original = path.read_bytes()
+    with pytest.raises(driver.QoderError, match="QODER_TERMINAL_CARDINALITY"):
+        driver.validate_qoder_terminal(tmp_path, expected_model=role()["model"])
+    with pytest.raises(driver.QoderError, match="QODER_TERMINAL_CARDINALITY"):
+        driver.finalize_qoder_output(tmp_path, expected_model=role()["model"])
+    assert driver.validate_qoder_owned_wait_terminal(tmp_path, expected_model=role()["model"]) == {
+        "session_id": "synthetic-session-1", "segments": 2,
+        "text": "Second provisional observation, never business JSON."}
+    assert path.read_bytes() == original
+    assert not (tmp_path / "result.json").exists()
+
+
+@pytest.mark.parametrize("fault", [
+    "missing-notification", "misordered-notification", "foreign-session", "nested-foreign-session",
+    "wrong-model", "third-segment", "forbidden-tool", "permission-denial", "error-result",
+    "first-error-result", "nonfinal-second-result", "interleaved-lifecycles",
+])
+def test_split_lifecycle_validation_stays_fail_closed(tmp_path, fault):
+    values = owned_wait_events()
+    if fault == "missing-notification": values.pop(6)
+    elif fault == "misordered-notification": values.insert(2, values.pop(6))
+    elif fault == "foreign-session": values[4]["session_id"] = "different"
+    elif fault == "nested-foreign-session": values[7]["message"]["session_id"] = "different"
+    elif fault == "wrong-model": values[4]["model"] = "different-model"
+    elif fault == "third-segment":
+        values += [copy.deepcopy(values[4]), copy.deepcopy(values[-1])]
+    elif fault == "forbidden-tool":
+        values[7]["message"]["content"] = [{"type": "tool_use", "name": "Task"}]
+    elif fault == "permission-denial": values[-1]["permission_denials"] = [{"tool_name": "Bash"}]
+    elif fault == "error-result": values[-1]["is_error"] = True
+    elif fault == "first-error-result": values[3]["stop_reason"] = "max_tokens"
+    elif fault == "nonfinal-second-result": values.append({"type": "system", "subtype": "late"})
+    else: values[3], values[4] = values[4], values[3]
+    stream(tmp_path, values)
+    with pytest.raises(driver.QoderError):
+        driver.validate_qoder_owned_wait_terminal(tmp_path, expected_model=role()["model"])
+    assert not (tmp_path / "result.json").exists()
 
 
 @pytest.mark.parametrize("name", ["Read", "Glob", "Grep", "Edit", "Bash", "mcp_call"])
