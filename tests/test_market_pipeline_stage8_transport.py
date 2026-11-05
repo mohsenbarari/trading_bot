@@ -470,6 +470,55 @@ class Stage8ReceiverTests(unittest.TestCase):
 
 
 class Stage8TransportTests(unittest.TestCase):
+    def test_recent_resolution_of_old_group_offer_precedes_history_cursor_wrap(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            old = now - timedelta(hours=1)
+
+            def add(identity, event_time, available, source="GROUP_1"):
+                key = derive_event_key("recent-cash-revision", identity)
+                upsert_observation(market, MarketObservation(
+                    event_key=key, source_code=source, source_family="GROUP",
+                    event_time_utc=event_time, available_at_utc=available,
+                    instrument="COIN_IMAM", market_label="FIXTURE",
+                    settlement_term="CASH", trade_form="PHYSICAL",
+                    event_type="OFFER", side="SELL", price="263500",
+                    price_unit="PROJECT_THOUSAND_TOMAN", currency="TOMAN",
+                    parser_version="fixture-v1", quality_state="ELIGIBLE",
+                ))
+                return key
+
+            revised = add("resolved-old-offer", old, now)
+            # The discovery cursor has passed this formerly pending row.
+            market.execute("INSERT INTO market_fact_export_ledger VALUES(?,?,'SUCCESS',?,1,NULL,1,?)",
+                           (revised, old.isoformat(), "a" * 64, old.isoformat()))
+            market.execute("INSERT INTO market_fact_export_discovery_cursor VALUES('non_xau',1)")
+            add("older-history", old - timedelta(days=1), old - timedelta(days=1))
+            fresh = {add(str(i), now - timedelta(seconds=i), now - timedelta(seconds=i))
+                     for i in range(12)}
+            other = add("other-group", now, now, "GROUP_2")
+            queries = []
+            market.set_trace_callback(queries.append)
+            rows = _pending_export_rows(market, max_rows=25)
+            market.set_trace_callback(None)
+            keys = {bytes(row["event_key"]) for row in rows}
+            self.assertIn(revised, keys)
+            self.assertTrue(fresh & keys)
+            self.assertIn(other, keys)
+            self.assertEqual(len(rows), len(keys))
+            self.assertLessEqual(len(rows), 25)
+            row = next(row for row in rows if bytes(row["event_key"]) == revised)
+            self.assertEqual(row["event_time_utc"], old.isoformat().replace("+00:00", "Z"))
+            revision_queries = [sql for sql in queries if "INDEXED BY idx_market_observations_source_available" in sql]
+            self.assertEqual(len(revision_queries), 2)
+            for sql in revision_queries:
+                plans = [entry[3] for entry in market.execute("EXPLAIN QUERY PLAN " + sql)]
+                self.assertTrue(any("SEARCH o USING INDEX idx_market_observations_source_available" in item for item in plans))
+            market.close()
+
     def test_history_discovery_is_bounded_resumable_and_does_not_skip_pending(self):
         with tempfile.TemporaryDirectory() as directory:
             market = connect_market_store(Path(directory) / "market.sqlite3")

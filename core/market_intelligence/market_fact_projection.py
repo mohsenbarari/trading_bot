@@ -462,11 +462,28 @@ def _pending_export_rows(
         group_budget = min(max_rows // 2, max_rows - len(references) - history_reserve)
         group_share = max(1, group_budget // 2)
         for source in ("GROUP_1", "GROUP_2"):
+            # A newly resolved old offer is new economic knowledge too. Its
+            # source clock must remain historical, but waiting for the cyclic
+            # history scan leaves the dashboard showing its superseded review
+            # state. Reserve a bounded share for recent-availability revisions
+            # using the existing source/availability index; preserve live and
+            # other-source capacity and the original observation clocks.
+            revisions = select(
+                "AND o.source_code=? AND o.available_at_utc >= "
+                "strftime('%Y-%m-%dT%H:%M:%SZ','now','-2 hours') "
+                "AND o.event_time_utc < "
+                "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
+                "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
+                "o.available_at_utc,o.id", (source,), max(1, group_share // 4),
+                from_sql="market_observations o INDEXED BY idx_market_observations_source_available",
+                eligibility="o.source_code<>'XAUUSD'",
+            )
+            rows.extend(revisions)
             rows.extend(select(
                 "AND o.source_code=? AND o.event_time_utc >= "
                 "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
                 "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
-                "o.event_time_utc DESC,o.id DESC", (source,), group_share,
+                "o.event_time_utc DESC,o.id DESC", (source,), group_share - len(revisions),
                 from_sql="market_observations o INDEXED BY idx_market_observations_export_source_latest",
                 eligibility="o.source_code<>'XAUUSD'",
             ))
