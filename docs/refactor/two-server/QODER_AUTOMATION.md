@@ -9,7 +9,15 @@
 `.local/two-site-refactor/ai-runtime.json` خوانده می‌شوند؛ این فایل وارد Git نمی‌شود.
 نام مدل در منطق Python یا نام پوشهٔ CLI تعیین نمی‌شود.
 
-پیکربندی جاری نقش‌های Qoder، `DeepSeek-Flash` با استدلال `max` است. محدودیت
+پیکربندی پایهٔ نقش‌های Qoder، `DeepSeek-Flash` با استدلال `max` است. دو کار سنگین
+`proposal_author` و `schema_final_review` از بخش داده‌ای `qoder_tasks` به
+`Qwen3.8-Max` با استدلال `max` مسیریابی می‌شوند. انتخاب بر اساس نام محدود و
+معناییِ کار، پیش از فراخوانی مدل انجام می‌شود؛ Python فقط نگاشت مالکیت کار به نقش
+را می‌شناسد و هیچ نام مدلی در کد ندارد. نبود profile اختیاری به مدل نقش مالک
+برمی‌گردد و مدل در میانهٔ یک اجرا عوض نمی‌شود. این سیاست نتیجهٔ اجرای واقعی است:
+DeepSeek در یک بازبینی چندفایلی با وجود سقف ۶۵٬۵۳۶ thinking و تنها حدود ۱٫۷٪
+مصرف context، بدون JSON نهایی به سقف thinking رسید؛ بنابراین افزایش context یا
+retry همان درخواست راه‌حل محسوب نمی‌شود. محدودیت
 خروجی از `qoder_execution.max_output_tokens` و سقف استدلال داخلی از
 `qoder_execution.max_thinking_tokens` همین فایل خوانده می‌شود؛
 `role_max_thinking_tokens` برای نقش‌های سنگین override محدود و صریح می‌دهد.
@@ -46,7 +54,8 @@ Coordinator یا بکارگیری یک PASS برای ورودی تغییرکرد
 ## تغییر مدل
 
 ۱. با `scripts/two_site_autopilot_tmux.sh stop` پایان امن واحد جاری را درخواست کنید.
-۲. فقط `model` و `reasoning_effort` نقش مورد نظر را در automation-models.json تغییر دهید.
+۲. فقط `model` و `reasoning_effort` نقش مورد نظر یا profile کار محدود در
+`qoder_tasks` را در automation-models.json تغییر دهید.
 اگر سقف خروجی یا استدلال لازم است، فقط `qoder_execution.max_output_tokens` و
 `qoder_execution.max_thinking_tokens` یا overrideهای بستهٔ
 `qoder_execution.role_max_thinking_tokens` را در همان فایل و در بازهٔ

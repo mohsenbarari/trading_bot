@@ -13,6 +13,9 @@ AI_RUNTIME_REL = Path(".local/two-site-refactor/ai-runtime.json")
 ROLES = ("coordinator", "final_reviewer", "worker", "reviewer")
 _PROVIDERS = {"coordinator": "qoder", "final_reviewer": "qoder",
               "worker": "antigravity", "reviewer": "antigravity"}
+QODER_TASKS = ("proposal_author", "schema_final_review")
+_QODER_TASK_FALLBACK = {"proposal_author": "coordinator",
+                        "schema_final_review": "final_reviewer"}
 _EFFORTS = frozenset({"low", "medium", "high", "xhigh", "max"})
 _MAX_BYTES = 65536
 _QODER_OUTPUT_MIN = 32768
@@ -78,8 +81,8 @@ def _read(root: Path, relative: Path, *, private: bool = False) -> dict:
 
 def load_ai_config(root: Path) -> dict:
     value = _read(root, AI_CONFIG_REL)
-    _need(set(value) in ({"schema_version", "roles"},
-                         {"schema_version", "roles", "qoder_execution"})
+    _need({"schema_version", "roles"} <= set(value)
+          and set(value) <= {"schema_version", "roles", "qoder_execution", "qoder_tasks"}
           and type(value["schema_version"]) is int
           and value["schema_version"] == 1, "AI_CONFIG_SCHEMA")
     _need(type(value["roles"]) is dict and set(value["roles"]) == set(ROLES), "AI_CONFIG_ROLES")
@@ -92,6 +95,21 @@ def load_ai_config(root: Path) -> dict:
               and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", setting["model"]), "AI_CONFIG_MODEL")
         _need(type(setting["reasoning_effort"]) is str and setting["reasoning_effort"] in _EFFORTS,
               "AI_CONFIG_EFFORT")
+    if "qoder_tasks" in value:
+        tasks = value["qoder_tasks"]
+        _need(type(tasks) is dict and tasks and set(tasks) <= set(QODER_TASKS),
+              "AI_CONFIG_QODER_TASKS")
+        for task, setting in tasks.items():
+            _need(type(setting) is dict
+                  and set(setting) == {"provider", "model", "reasoning_effort"},
+                  "AI_CONFIG_QODER_TASK_FIELDS")
+            _need(setting["provider"] == "qoder", "AI_CONFIG_QODER_TASK_PROVIDER")
+            _need(type(setting["model"]) is str
+                  and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}", setting["model"]),
+                  "AI_CONFIG_QODER_TASK_MODEL")
+            _need(type(setting["reasoning_effort"]) is str
+                  and setting["reasoning_effort"] in _EFFORTS,
+                  "AI_CONFIG_QODER_TASK_EFFORT")
     if "qoder_execution" in value:
         execution = value["qoder_execution"]
         allowed = {"max_output_tokens", "max_thinking_tokens",
@@ -125,6 +143,18 @@ def load_ai_config(root: Path) -> dict:
 def role_settings(root: Path, role: str) -> dict:
     _need(type(role) is str and role in ROLES, "AI_CONFIG_ROLE")
     return load_ai_config(root)["roles"][role]
+
+
+def qoder_task_settings(root: Path, task: str) -> dict:
+    """Resolve a Qoder task profile, falling back to its owning role.
+
+    Models remain public policy data.  Callers select a bounded semantic task;
+    they never select or embed a model name.
+    """
+    _need(type(task) is str and task in QODER_TASKS, "AI_CONFIG_QODER_TASK")
+    value = load_ai_config(root)
+    return value.get("qoder_tasks", {}).get(task,
+        value["roles"][_QODER_TASK_FALLBACK[task]])
 
 
 def load_runtime_config(root: Path) -> dict:

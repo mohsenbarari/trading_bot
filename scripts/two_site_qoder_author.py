@@ -363,7 +363,7 @@ def _proof(root, directory, *, task, sources, status, result):
         from scripts.two_site_qoder_author_resume import validate_author_recovery
         validate_author_recovery(root, snapshot["author_recovery"], task=task, sources=sources, source_head=status["head"], authorization=auth, run_id=status["run_id"])
     role = role_snapshot(status)
-    need(role == config.role_settings(root, "coordinator"), "QODER_AUTHOR_POLICY_CHANGED")
+    need(role == config.qoder_task_settings(root, "proposal_author"), "QODER_AUTHOR_POLICY_CHANGED")
     runtime = config.load_runtime_config(root)["coordinator"]
     terminal = qoder.validate_qoder_terminal(directory, expected_model=role["model"], role="proposal_author")
     need(status.get("conversation_id") == terminal["session_id"], "QODER_AUTHOR_SESSION")
@@ -479,7 +479,7 @@ def run_prepared_author(root, run_id, *, task, sources, source_head, authorizati
         if state_check is not None:
             state_check()
     check()
-    role = config.role_settings(root, "coordinator")
+    role = config.qoder_task_settings(root, "proposal_author")
     runtime = config.load_runtime_config(root)
     directory = root / ".local/two-site-refactor/proposals" / run_id
     need(not os.path.lexists(directory), "QODER_AUTHOR_RUN_EXISTS")
@@ -567,7 +567,7 @@ def run_prepared_author(root, run_id, *, task, sources, source_head, authorizati
             finally:
                 runner.release_proposal_lock(descriptor)
         check()
-        need(config.role_settings(root, "coordinator") == role and config.load_runtime_config(root) == runtime,
+        need(config.qoder_task_settings(root, "proposal_author") == role and config.load_runtime_config(root) == runtime,
              "QODER_AUTHOR_POLICY_CHANGED")
         terminal = qoder.validate_qoder_terminal(directory, expected_model=role["model"], role="proposal_author")
         raw_result = qoder._json(terminal["text"])

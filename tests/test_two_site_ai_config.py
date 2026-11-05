@@ -49,6 +49,44 @@ def test_new_qoder_model_and_catalog_max_effort_need_only_json_edit(tmp_path):
         "provider": "qoder", "model": "synthetic-new-model", "reasoning_effort": "max"}
 
 
+def test_qoder_heavy_tasks_are_selected_from_policy_and_detached(tmp_path):
+    path = write_policy(tmp_path); data = json.loads(path.read_text())
+    assert config.qoder_task_settings(tmp_path, "proposal_author")["model"] == "Qwen3.8-Max"
+    assert config.qoder_task_settings(tmp_path, "schema_final_review")["model"] == "Qwen3.8-Max"
+    selected = config.qoder_task_settings(tmp_path, "proposal_author")
+    selected["model"] = "tampered"
+    assert config.qoder_task_settings(tmp_path, "proposal_author") == data["qoder_tasks"]["proposal_author"]
+
+
+def test_qoder_task_falls_back_to_owner_role_for_legacy_policy(tmp_path):
+    path = write_policy(tmp_path); data = json.loads(path.read_text()); data.pop("qoder_tasks")
+    path.write_text(json.dumps(data))
+    assert config.qoder_task_settings(tmp_path, "proposal_author") == data["roles"]["coordinator"]
+    assert config.qoder_task_settings(tmp_path, "schema_final_review") == data["roles"]["final_reviewer"]
+
+
+@pytest.mark.parametrize("tasks,code", [
+    ({}, "AI_CONFIG_QODER_TASKS"),
+    ({"unknown": {"provider": "qoder", "model": "x", "reasoning_effort": "max"}},
+     "AI_CONFIG_QODER_TASKS"),
+    ({"proposal_author": {"provider": "antigravity", "model": "x", "reasoning_effort": "max"}},
+     "AI_CONFIG_QODER_TASK_PROVIDER"),
+    ({"proposal_author": {"provider": "qoder", "model": "bad\nmodel", "reasoning_effort": "max"}},
+     "AI_CONFIG_QODER_TASK_MODEL"),
+])
+def test_qoder_task_policy_fails_closed(tmp_path, tasks, code):
+    path = write_policy(tmp_path); data = json.loads(path.read_text()); data["qoder_tasks"] = tasks
+    path.write_text(json.dumps(data))
+    with pytest.raises(config.AIConfigError, match=code):
+        config.load_ai_config(tmp_path)
+
+
+def test_unknown_qoder_task_is_rejected(tmp_path):
+    write_policy(tmp_path)
+    with pytest.raises(config.AIConfigError, match="AI_CONFIG_QODER_TASK"):
+        config.qoder_task_settings(tmp_path, "unbounded")
+
+
 @pytest.mark.parametrize("mutation", [
     lambda v: v.update(schema_version=True),
     lambda v: v.update(secret="forbidden"),

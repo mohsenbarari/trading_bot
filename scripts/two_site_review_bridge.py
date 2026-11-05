@@ -52,7 +52,7 @@ def _policy(root):
     lines = authorization.decode("utf-8").splitlines()
     need("authorization: APPROVED" in lines and AUTHORIZATION_SCOPE in lines,
          "QODER_SOURCE_REVIEW_NOT_AUTHORIZED")
-    role = config.role_settings(root, "final_reviewer")
+    role = config.qoder_task_settings(root, "schema_final_review")
     runtime = config.load_runtime_config(root)
     return authorization, role, runtime
 

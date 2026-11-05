@@ -51,7 +51,7 @@ def test_check_only_uses_identity_and_has_no_generation(setup, monkeypatch):
     result = bridge.check(root)
     assert result["state"] == "READY" and result["provider"] == "qoder"
     assert result["model_calls"] == 0
-    assert result["model"] == config.role_settings(root, "final_reviewer")["model"]
+    assert result["model"] == config.qoder_task_settings(root, "schema_final_review")["model"]
 
 
 def test_schema_valid_result_and_truthful_execution_sidecar_are_published(setup):
@@ -61,7 +61,7 @@ def test_schema_valid_result_and_truthful_execution_sidecar_are_published(setup)
     assert json.loads(Path(str(output) + ".execution.json").read_text()) == proof
     assert proof["provider"] == "qoder" and proof["exit_code"] == 0
     assert proof["normal_exit_observed"] is True
-    assert proof["model_config"] == config.role_settings(root, "final_reviewer")
+    assert proof["model_config"] == config.qoder_task_settings(root, "schema_final_review")
     assert proof["session_id"] == "synthetic-schema-session"
     assert proof["result_sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
     assert proof["schema_role_aliases"]["CODEX_FINAL_REVIEWER"].startswith("historical SCHEMA_ROLE")

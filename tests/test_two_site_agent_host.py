@@ -405,15 +405,15 @@ class HostTests(unittest.TestCase):
         from scripts import two_site_qoder_driver as qoder
 
         root = Path(__file__).resolve().parents[1]
-        configured = ai_config.role_settings(root, 'final_reviewer')
+        configured = ai_config.qoder_task_settings(root, 'schema_final_review')
         policy = json.loads((root / ai_config.AI_CONFIG_REL).read_text())
-        self.assertEqual(policy['roles']['final_reviewer'], configured)
+        self.assertEqual(policy['qoder_tasks']['schema_final_review'], configured)
         self.assertEqual('qoder', configured['provider'])
         self.assertTrue(configured['model'])
         self.assertTrue(configured['reasoning_effort'])
         self.assertEqual((), qoder.TOOLS['final_reviewer'])
         bridge = (root / 'scripts/two_site_review_bridge.py').read_text()
-        self.assertIn('config.role_settings(root, "final_reviewer")', bridge)
+        self.assertIn('config.qoder_task_settings(root, "schema_final_review")', bridge)
         self.assertIn('role="final_reviewer"', bridge)
         for relative in (
             'scripts/two_site_codex_final_review.sh',

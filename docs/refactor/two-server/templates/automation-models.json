@@ -30,5 +30,17 @@
       "model": "gemini-4-argon-high",
       "reasoning_effort": "high"
     }
+  },
+  "qoder_tasks": {
+    "proposal_author": {
+      "provider": "qoder",
+      "model": "Qwen3.8-Max",
+      "reasoning_effort": "max"
+    },
+    "schema_final_review": {
+      "provider": "qoder",
+      "model": "Qwen3.8-Max",
+      "reasoning_effort": "max"
+    }
   }
 }
