@@ -144,6 +144,22 @@ is display-only; the separate selected-underlying card identifies the exact
 public/private source and form for each settlement and preserves its values.
 Public fallback prices must never carry the private-channel heading.
 
+Engine v9 excludes unsettled public physical quotes from cash authority and
+prefers a fresh completed private normal-paper minute over unconfirmed physical
+offers; a fresh verified private physical trade retains priority. Historical
+knowledge bounds and after-close behavior remain enforced. An old coin anchor
+does not qualify for HIGH confidence even when its snapshot is freshly built.
+
+Deploy a compatible snapshot receiver before changing the producer's model
+version. The v9 receiver explicitly also supports unchanged-contract v8 for
+producer rollback and rejects unknown versions. Check actual Web acknowledgements
+and snapshot age, not just producer health; also inventory strict product-reader,
+inference and legacy-snapshot version checks before a product feed cutover.
+The finite source-only builds and isolated dashboard restart are versioned under
+`deploy/maintenance/coin_estimator_*price_fix*.yml`. Preserve previous images,
+containers and data, update existing public image/revision references with the
+normal CAS helper, and release each operation's watchdog hold after acceptance.
+
 Coin-group collector liveness, stored activity and model eligibility are also
 separate. The dashboard lists the selected five-minute live anchor and the
 selected historical transfer anchor per commodity/settlement, including the
