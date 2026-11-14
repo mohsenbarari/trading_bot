@@ -5,6 +5,7 @@ import unittest
 
 from telegram_price_collector.db import (
     connect,
+    infer_naghdp_trade_sides,
     initialize,
     rebuild_minute_prices,
     replace_price_events,
@@ -161,6 +162,85 @@ class DatabaseTests(unittest.TestCase):
         ).fetchone()
         self.assertEqual(row["price_value"], "185600")
         self.assertIn("herat-temporal-range-v1", row["parser_version"])
+
+    def test_infer_naghdp_trade_sides_respects_since_utc_and_bounded_offer_window(
+        self,
+    ) -> None:
+        old_trade_post = self._post(
+            1, "2026-07-20T08:00:00Z", "old trade", source_code="MELTED_FLOW"
+        )
+        replace_price_events(
+            self.connection,
+            raw_post_id=old_trade_post,
+            event_time_utc="2026-07-20T08:00:00Z",
+            events=[
+                PriceEvent(
+                    instrument="MELTED_GOLD_FLOW",
+                    market_label="جریان آبشده فردایی",
+                    price=Decimal("49100000"),
+                    currency="TOMAN",
+                    price_unit="TOMAN_PER_MESGHAL_750",
+                    settlement_term="TOMORROW",
+                    trade_form="PAPER",
+                    event_type="TRADE",
+                    side="UNKNOWN",
+                )
+            ],
+        )
+        offer_post = self._post(
+            2, "2026-07-20T10:00:10Z", "offer", source_code="MELTED_FLOW"
+        )
+        replace_price_events(
+            self.connection,
+            raw_post_id=offer_post,
+            event_time_utc="2026-07-20T10:00:10Z",
+            events=[
+                PriceEvent(
+                    instrument="MELTED_GOLD_FLOW",
+                    market_label="جریان آبشده فردایی",
+                    price=Decimal("49250000"),
+                    currency="TOMAN",
+                    price_unit="TOMAN_PER_MESGHAL_750",
+                    settlement_term="TOMORROW",
+                    trade_form="PAPER",
+                    event_type="OFFER",
+                    side="SELL",
+                )
+            ],
+        )
+        trade_post = self._post(
+            3, "2026-07-20T10:01:00Z", "trade", source_code="MELTED_FLOW"
+        )
+        replace_price_events(
+            self.connection,
+            raw_post_id=trade_post,
+            event_time_utc="2026-07-20T10:01:00Z",
+            events=[
+                PriceEvent(
+                    instrument="MELTED_GOLD_FLOW",
+                    market_label="جریان آبشده فردایی",
+                    price=Decimal("49250000"),
+                    currency="TOMAN",
+                    price_unit="TOMAN_PER_MESGHAL_750",
+                    settlement_term="TOMORROW",
+                    trade_form="PAPER",
+                    event_type="TRADE",
+                    side="UNKNOWN",
+                )
+            ],
+        )
+
+        result = infer_naghdp_trade_sides(
+            self.connection, since_utc="2026-07-20T09:55:00Z"
+        )
+        self.assertEqual(result, {"examined": 1, "matched": 1, "unresolved": 0})
+        sides = [
+            row["side"]
+            for row in self.connection.execute(
+                "SELECT side FROM price_events WHERE event_type = 'TRADE' ORDER BY id"
+            ).fetchall()
+        ]
+        self.assertEqual(sides, ["UNKNOWN", "SELL"])
 
 
 if __name__ == "__main__":

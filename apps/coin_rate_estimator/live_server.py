@@ -8417,6 +8417,9 @@ def persist_message(
     source_code: str,
     username: str,
     message: object,
+    *,
+    commit: bool = True,
+    infer_trade_sides: bool = True,
 ) -> int:
     post = raw_post_from_message(message)
     if post is None:
@@ -8439,8 +8442,10 @@ def persist_message(
                 event_time_utc=post.published_at_utc,
                 events=events,
             )
-            infer_naghdp_trade_sides(connection, raw_post_id=raw_post_id)
-            connection.commit()
+            if infer_trade_sides and source_code == "MELTED_FLOW":
+                infer_naghdp_trade_sides(connection, raw_post_id=raw_post_id)
+            if commit:
+                connection.commit()
             return event_count
         except sqlite3.OperationalError as exc:
             connection.rollback()
@@ -9045,11 +9050,18 @@ async def live_collection_loop(
                     backfill_messages.append(message)
                 for message in reversed(backfill_messages):
                     price_events += persist_message(
-                        connection, source_code, username, message
+                        connection,
+                        source_code,
+                        username,
+                        message,
+                        commit=False,
+                        infer_trade_sides=False,
                     )
                     messages += 1
+                    if messages % 250 == 0:
+                        connection.commit()
                 side_links = (
-                    infer_naghdp_trade_sides(connection)
+                    infer_naghdp_trade_sides(connection, since_utc=iso_utc(cutoff))
                     if source_code == "MELTED_FLOW"
                     else {"examined": 0, "matched": 0, "unresolved": 0}
                 )

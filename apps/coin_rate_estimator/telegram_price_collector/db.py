@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import replace
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 from typing import Iterable
@@ -503,6 +503,16 @@ def _tehran_time_parts(event_time_utc: str) -> tuple[str, str, str, int, str]:
     )
 
 
+def _utc_window_lower_bound(event_time_utc: str, lookback_seconds: int) -> str:
+    parsed = datetime.fromisoformat(event_time_utc.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    lower = parsed.astimezone(timezone.utc) - timedelta(
+        seconds=max(0, int(lookback_seconds)) + 2
+    )
+    return lower.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def replace_price_events(
     connection: sqlite3.Connection,
     *,
@@ -533,6 +543,7 @@ def replace_price_events(
         if event.instrument != "USD_HERAT":
             normalized_events.append(event)
             continue
+        herat_lower_utc = _utc_window_lower_bound(event_time_utc, HERAT_LOOKBACK_SECONDS)
         prior = connection.execute(
             """
             SELECT price.price_value
@@ -542,6 +553,7 @@ def replace_price_events(
               AND price.instrument = 'USD_HERAT'
               AND price.settlement_term = ?
               AND price.trade_form = ?
+              AND price.event_time_utc >= ?
               AND price.event_time_utc < ?
               AND (julianday(?) - julianday(price.event_time_utc)) * 86400.0
                   BETWEEN 0 AND ?
@@ -552,6 +564,7 @@ def replace_price_events(
                 source["source_code"],
                 event.settlement_term,
                 event.trade_form,
+                herat_lower_utc,
                 event_time_utc,
                 event_time_utc,
                 HERAT_LOOKBACK_SECONDS,
@@ -632,14 +645,19 @@ def infer_naghdp_trade_sides(
     connection: sqlite3.Connection,
     *,
     raw_post_id: int | None = None,
+    since_utc: str | None = None,
     max_age_seconds: int = 180,
 ) -> dict[str, int]:
     """Link side-less NaghdP trades to the latest matching explicit offer."""
     parameters: list[object] = []
-    raw_post_clause = ""
+    clauses: list[str] = []
     if raw_post_id is not None:
-        raw_post_clause = "AND trade.raw_post_id = ?"
+        clauses.append("AND trade.raw_post_id = ?")
         parameters.append(raw_post_id)
+    if since_utc is not None:
+        clauses.append("AND trade.event_time_utc >= ?")
+        parameters.append(since_utc)
+    extra_clause = "\n          ".join(clauses)
 
     trades = connection.execute(
         f"""
@@ -651,7 +669,7 @@ def infer_naghdp_trade_sides(
           AND trade.instrument = 'MELTED_GOLD_FLOW'
           AND trade.event_type = 'TRADE'
           AND trade.side = 'UNKNOWN'
-          {raw_post_clause}
+          {extra_clause}
         ORDER BY trade.event_time_utc, trade.id
         """,
         parameters,
@@ -660,6 +678,10 @@ def infer_naghdp_trade_sides(
     matched = 0
     unresolved = 0
     for trade in trades:
+        offer_lower_utc = _utc_window_lower_bound(
+            str(trade["event_time_utc"]),
+            max_age_seconds,
+        )
         offer = connection.execute(
             """
             SELECT offer.id, offer.side,
@@ -673,6 +695,7 @@ def infer_naghdp_trade_sides(
               AND offer.side IN ('BUY', 'SELL')
               AND offer.price_num = ?
               AND offer.settlement_term = ?
+              AND offer.event_time_utc >= ?
               AND offer.event_time_utc <= ?
               AND (julianday(?) - julianday(offer.event_time_utc)) * 86400.0
                     BETWEEN -0.001 AND ?
@@ -683,6 +706,7 @@ def infer_naghdp_trade_sides(
                 trade["event_time_utc"],
                 trade["price_num"],
                 trade["settlement_term"],
+                offer_lower_utc,
                 trade["event_time_utc"],
                 trade["event_time_utc"],
                 max_age_seconds,

@@ -252,7 +252,9 @@ async def collect_history(
                             )
                         connection.commit()
                     if canonical_username.lower() == "naghdp":
-                        side_links = infer_naghdp_trade_sides(connection)
+                        side_links = infer_naghdp_trade_sides(
+                            connection, since_utc=cutoff_iso
+                        )
                         connection.commit()
                     finish_scrape_run(
                         connection,
