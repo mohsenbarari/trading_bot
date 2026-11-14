@@ -252,6 +252,11 @@ def semantic_payload_hash(value: Mapping[str, Any]) -> str:
         message.pop("is_backfill", None)
     if normalized.get("event_type") in {"message_created", "message_snapshot"}:
         normalized["event_type"] = "message_upsert"
+    elif normalized.get("event_type") == "message_deleted":
+        # Telegram deletion updates carry no server deletion timestamp;
+        # occurred_at_utc is local receipt time and must not turn a redelivered
+        # delete into an event-identity conflict.
+        normalized.pop("occurred_at_utc", None)
     return sha256(canonical_json(normalized)).hexdigest()
 
 
@@ -1224,7 +1229,7 @@ class CaptureState:
                   published_at_utc=COALESCE(excluded.published_at_utc,capture_messages.published_at_utc),
                   edited_at_utc=excluded.edited_at_utc,
                   available_at_utc=MAX(excluded.available_at_utc,capture_messages.available_at_utc),
-                  deleted=excluded.deleted,
+                  deleted=MAX(capture_messages.deleted,excluded.deleted),
                   expires_at_utc=MAX(excluded.expires_at_utc,capture_messages.expires_at_utc)
                 """,
                 (

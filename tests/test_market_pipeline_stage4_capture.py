@@ -2446,6 +2446,52 @@ class CaptureContractTests(unittest.TestCase):
             finally:
                 state.close()
 
+    def test_redelivered_delete_and_late_reconcile_snapshot_do_not_conflict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = capture.CaptureState(root / "state.sqlite", account="account1")
+            try:
+                spool = capture.DurableEventSpool(root / "spool", account="account1")
+                engine = capture.CaptureEngine(state, spool)
+                moment = datetime(2026, 8, 26, 10, 0, tzinfo=UTC)
+                policy = SOURCE_POLICIES["MELTED_PRIMARY_FLOW"]
+
+                first_delete = engine.accept(
+                    build_deleted_event(
+                        policy,
+                        message_id=777,
+                        received_at=moment + timedelta(seconds=5),
+                    )
+                )
+                self.assertEqual(first_delete.status, "staged")
+                self.assertTrue(state.message_deleted("MELTED_PRIMARY_FLOW", 777))
+
+                # A reconciliation snapshot taken right before deletion completes
+                # afterward; monotonic deletion must remain True.
+                late_reconcile = build_market_event(
+                    policy,
+                    snapshot(777, published=moment, text="فروش فردایی ۴۵۱۰۰"),
+                    event_type="message_snapshot",
+                    received_at=moment + timedelta(seconds=6),
+                    backfill=True,
+                )
+                engine.accept(late_reconcile)
+                self.assertTrue(state.message_deleted("MELTED_PRIMARY_FLOW", 777))
+
+                # Even if Telegram redelivers the delete with a later receipt
+                # timestamp, semantic_payload_hash treats it as a duplicate
+                # rather than raising capture_event_identity_conflict.
+                redelivered = engine.accept(
+                    build_deleted_event(
+                        policy,
+                        message_id=777,
+                        received_at=moment + timedelta(minutes=30),
+                    )
+                )
+                self.assertEqual(redelivered.status, "duplicate")
+            finally:
+                state.close()
+
     def test_config_requires_exact_account_allowlist(self):
         bindings = tuple(
             CaptureBinding(source_code=source, peer_id=-(index + 1))

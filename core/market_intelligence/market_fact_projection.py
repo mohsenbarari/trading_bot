@@ -235,22 +235,22 @@ def _refresh_xau_model_input_buckets(
     ).fetchone()
     if state is None:
         raise MarketFactProjectionError("xau_model_input_cursor_missing")
+    insert_order_expr = (
+        "CASE WHEN instr(inserted_at_utc,'.')=0 "
+        "THEN replace(inserted_at_utc,'Z','.000000Z') "
+        "ELSE inserted_at_utc END"
+    )
     rows = connection.execute(
-        """
+        f"""
         SELECT id,event_key,event_time_utc,
-               CASE WHEN instr(inserted_at_utc,'.')=0
-                    THEN replace(inserted_at_utc,'Z','.000000Z')
-                    ELSE inserted_at_utc END AS insert_order
+               {insert_order_expr} AS insert_order
         FROM market_observations
         WHERE source_code='XAUUSD'
+          AND ({insert_order_expr})>=?
           AND (
-                (CASE WHEN instr(inserted_at_utc,'.')=0
-                      THEN replace(inserted_at_utc,'Z','.000000Z')
-                      ELSE inserted_at_utc END)>?
+                ({insert_order_expr})>?
                 OR (
-                    (CASE WHEN instr(inserted_at_utc,'.')=0
-                          THEN replace(inserted_at_utc,'Z','.000000Z')
-                          ELSE inserted_at_utc END)=?
+                    ({insert_order_expr})=?
                     AND id>?
                 )
               )
@@ -258,6 +258,7 @@ def _refresh_xau_model_input_buckets(
         LIMIT ?
         """,
         (
+            str(state["last_inserted_at_utc"]),
             str(state["last_inserted_at_utc"]),
             str(state["last_inserted_at_utc"]),
             int(state["last_observation_id"]),
@@ -446,6 +447,77 @@ def _pending_export_rows(
             (*parameters, limit),
         ).fetchall()
 
+    def select_live_reference(
+        source: str,
+        limit: int,
+        excluded: tuple[bytes, ...] = (),
+    ):
+        exclusion = (
+            "AND o.event_key NOT IN (" + ",".join("?" for _ in excluded) + ") "
+            if excluded
+            else ""
+        )
+        if source == "XAUUSD":
+            return select(
+                exclusion + "ORDER BY b.bucket_number DESC",
+                excluded,
+                limit,
+                from_sql=(
+                    "market_xau_model_input_buckets b CROSS JOIN "
+                    "market_observations o INDEXED BY idx_market_observations_export_xau_state"
+                ),
+                eligibility=(
+                    "o.event_key=b.selected_event_key AND o.source_code='XAUUSD' "
+                    "AND b.bucket_number >= CAST(strftime('%s','now') AS INTEGER) / "
+                    f"{XAU_MODEL_INPUT_BUCKET_SECONDS} - {600 // XAU_MODEL_INPUT_BUCKET_SECONDS} "
+                    "AND CAST(strftime('%s','now') AS INTEGER) >= "
+                    f"(b.bucket_number + 1) * {XAU_MODEL_INPUT_BUCKET_SECONDS} "
+                    f"+ {XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS}"
+                ),
+            )
+        order_by = (
+            "ORDER BY o.event_time_utc DESC,"
+            "CASE o.trade_form WHEN 'PAPER_NORMAL' THEN 0 ELSE 1 END,"
+            "CASE o.settlement_term WHEN 'TODAY' THEN 0 WHEN 'TOMORROW' THEN 1 ELSE 2 END,"
+            "o.id DESC"
+            if source == "PRIVATE_GOLD_PAPER_MINUTE"
+            else "ORDER BY o.event_time_utc DESC,o.id DESC"
+        )
+        return select(
+            "AND o.source_code=? "
+            + exclusion
+            + "AND o.event_time_utc >= "
+            + "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
+            + order_by,
+            (source, *excluded),
+            limit,
+            from_sql="market_observations o INDEXED BY idx_market_observations_export_source_latest",
+            eligibility="o.source_code<>'XAUUSD'",
+        )
+
+    def select_live_group(
+        source: str,
+        limit: int,
+        excluded: tuple[bytes, ...] = (),
+    ):
+        exclusion = (
+            "AND o.event_key NOT IN (" + ",".join("?" for _ in excluded) + ") "
+            if excluded
+            else ""
+        )
+        return select(
+            "AND o.source_code=? "
+            + exclusion
+            + "AND o.event_time_utc >= "
+            + "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
+            + "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
+            + "o.event_time_utc DESC,o.id DESC",
+            (source, *excluded),
+            limit,
+            from_sql="market_observations o INDEXED BY idx_market_observations_export_source_latest",
+            eligibility="o.source_code<>'XAUUSD'",
+        )
+
     # Coin-group facts are the primary estimator input and must not be starved
     # by the continuous public-reference stream. Offers sort ahead of trades,
     # so dependent trades follow their offer roots in this or an earlier batch.
@@ -459,8 +531,10 @@ def _pending_export_rows(
         # minutes instead of sorting the entire permanent group history.
         rows = []
         history_reserve = min(max(1, max_rows // 5), max_rows - len(references) - 2)
+        live_target = max(0, max_rows - history_reserve)
         group_budget = min(max_rows // 2, max_rows - len(references) - history_reserve)
         group_share = max(1, group_budget // 2)
+        overflow_groups: list[str] = []
         for source in ("GROUP_1", "GROUP_2"):
             # A newly resolved old offer is new economic knowledge too. Its
             # source clock must remain historical, but waiting for the cyclic
@@ -479,40 +553,52 @@ def _pending_export_rows(
                 eligibility="o.source_code<>'XAUUSD'",
             )
             rows.extend(revisions)
-            rows.extend(select(
-                "AND o.source_code=? AND o.event_time_utc >= "
-                "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
-                "ORDER BY CASE o.event_type WHEN 'OFFER' THEN 0 ELSE 1 END,"
-                "o.event_time_utc DESC,o.id DESC", (source,), group_share - len(revisions),
-                from_sql="market_observations o INDEXED BY idx_market_observations_export_source_latest",
-                eligibility="o.source_code<>'XAUUSD'",
-            ))
-        reference_share = max(1, (max_rows - 2 * group_share - history_reserve) // max(1, len(references)))
+            live_limit = group_share - len(revisions)
+            live_group = (
+                select_live_group(source, live_limit)
+                if live_limit > 0
+                else []
+            )
+            rows.extend(live_group)
+            if live_limit > 0 and len(live_group) >= live_limit:
+                overflow_groups.append(source)
+        reference_share = max(
+            1, (live_target - len(rows)) // max(1, len(references))
+        )
+        overflow_references: list[str] = []
         for source in references:
-            remaining = max_rows - len(rows)
-            if remaining <= 0:
+            remaining_live = live_target - len(rows)
+            if remaining_live <= 0:
                 break
-            if source == "XAUUSD":
-                rows.extend(select(
-                    "ORDER BY b.bucket_number DESC", (), min(reference_share, remaining),
-                    from_sql="market_xau_model_input_buckets b CROSS JOIN market_observations o INDEXED BY idx_market_observations_export_xau_state",
-                    eligibility=(
-                        "o.event_key=b.selected_event_key AND o.source_code='XAUUSD' "
-                        "AND b.bucket_number >= CAST(strftime('%s','now') AS INTEGER) / "
-                        f"{XAU_MODEL_INPUT_BUCKET_SECONDS} - {600 // XAU_MODEL_INPUT_BUCKET_SECONDS} "
-                        "AND CAST(strftime('%s','now') AS INTEGER) >= "
-                        f"(b.bucket_number + 1) * {XAU_MODEL_INPUT_BUCKET_SECONDS} "
-                        f"+ {XAU_MODEL_INPUT_EXPORT_SETTLE_SECONDS}"
-                    ),
-                ))
-            else:
-                rows.extend(select(
-                    "AND o.source_code=? AND o.event_time_utc >= "
-                    "strftime('%Y-%m-%dT%H:%M:%SZ','now','-10 minutes') "
-                    "ORDER BY o.event_time_utc DESC,o.id DESC", (source,), min(reference_share, remaining),
-                    from_sql="market_observations o INDEXED BY idx_market_observations_export_source_latest",
-                    eligibility="o.source_code<>'XAUUSD'",
-                ))
+            share = min(reference_share, remaining_live)
+            batch = select_live_reference(source, share)
+            rows.extend(batch)
+            if len(batch) >= share:
+                overflow_references.append(source)
+        for candidates, selector in (
+            (overflow_references, select_live_reference),
+            (overflow_groups, select_live_group),
+        ):
+            active = list(candidates)
+            while active and len(rows) < live_target:
+                remaining_live = live_target - len(rows)
+                per_source = max(1, remaining_live // len(active))
+                next_active: list[str] = []
+                excluded_keys = tuple(bytes(row["event_key"]) for row in rows)
+                for source in active:
+                    remaining_live = live_target - len(rows)
+                    if remaining_live <= 0:
+                        break
+                    share = min(per_source, remaining_live)
+                    batch = selector(source, share, excluded_keys)
+                    if batch:
+                        rows.extend(batch)
+                        excluded_keys = tuple(
+                            bytes(row["event_key"]) for row in rows
+                        )
+                    if len(batch) >= share:
+                        next_active.append(source)
+                active = next_active
     else:
         rows = select(
             "AND o.source_code IN ('GROUP_1','GROUP_2') "

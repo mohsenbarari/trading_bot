@@ -606,6 +606,108 @@ class Stage8TransportTests(unittest.TestCase):
             self.assertIn("idx_market_observations_export_source_latest", plan)
             market.close()
 
+    def test_private_gold_paper_minute_prioritizes_paper_normal_and_uses_idle_live_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            market = connect_market_store(Path(directory) / "market.sqlite3")
+            initialize_market_store(market)
+            initialize_export_ledger(market)
+            now = datetime.now(timezone.utc).replace(microsecond=0)
+            old = now - timedelta(days=2)
+            minute_end = now.replace(second=59)
+
+            for index in range(25):
+                upsert_observation(
+                    market,
+                    MarketObservation(
+                        event_key=derive_event_key("backlog-history", index),
+                        source_code="GROUP_1",
+                        source_family="GROUP",
+                        event_time_utc=old - timedelta(seconds=index),
+                        available_at_utc=old - timedelta(seconds=index),
+                        instrument="COIN_IMAM",
+                        market_label="FIXTURE",
+                        settlement_term="CASH",
+                        trade_form="PHYSICAL",
+                        event_type="OFFER",
+                        side="SELL",
+                        price="187500",
+                        price_unit="PROJECT_THOUSAND_TOMAN",
+                        currency="TOMAN",
+                        parser_version="fixture-v1",
+                    ),
+                )
+
+            # Match refresh_private_gold_paper_minutes insertion order so
+            # PAPER_REVERSE / PAPER_SWIM receive higher row IDs at the same
+            # minute timestamp than PAPER_NORMAL.
+            for settlement in ("TODAY", "TOMORROW"):
+                for form in ("PAPER_NORMAL", "PAPER_REVERSE", "PAPER_SWIM"):
+                    upsert_observation(
+                        market,
+                        MarketObservation(
+                            event_key=derive_event_key("pgpm-minute", settlement, form),
+                            source_code="PRIVATE_GOLD_PAPER_MINUTE",
+                            source_family="TELEGRAM_PRIVATE",
+                            event_time_utc=minute_end,
+                            available_at_utc=minute_end,
+                            instrument="MELTED_GOLD_PRIVATE",
+                            market_label="PRIVATE_GOLD_PAPER_MINUTE",
+                            settlement_term=settlement,
+                            trade_form=form,
+                            event_type="QUOTE",
+                            side="MID",
+                            price="45100000",
+                            price_unit="TOMAN_PER_MESGHAL_750",
+                            currency="TOMAN",
+                            parser_version="fixture-v1",
+                        ),
+                    )
+            for index in range(3):
+                upsert_observation(
+                    market,
+                    MarketObservation(
+                        event_key=derive_event_key("pgc-live", index),
+                        source_code="PRIVATE_GOLD_CHANNEL",
+                        source_family="TELEGRAM_PRIVATE",
+                        event_time_utc=now - timedelta(seconds=index),
+                        available_at_utc=now - timedelta(seconds=index),
+                        instrument="MELTED_GOLD_PRIVATE",
+                        market_label="PRIVATE_GOLD_CHANNEL",
+                        settlement_term="TOMORROW",
+                        trade_form="PAPER_NORMAL",
+                        event_type="OFFER",
+                        side="SELL",
+                        price="45120000",
+                        price_unit="TOMAN_PER_MESGHAL_750",
+                        currency="TOMAN",
+                        parser_version="fixture-v1",
+                    ),
+                )
+            market.commit()
+
+            rows = _pending_export_rows(market, max_rows=25)
+            self.assertEqual(len(rows), 25)
+            pgpm_rows = [
+                (str(row["settlement_term"]), str(row["trade_form"]))
+                for row in rows
+                if str(row["source_code"]) == "PRIVATE_GOLD_PAPER_MINUTE"
+            ]
+            self.assertEqual(
+                pgpm_rows[:2],
+                [("TODAY", "PAPER_NORMAL"), ("TOMORROW", "PAPER_NORMAL")],
+            )
+            self.assertEqual(len(pgpm_rows), 6)
+            pgc_rows = [
+                row for row in rows if str(row["source_code"]) == "PRIVATE_GOLD_CHANNEL"
+            ]
+            self.assertEqual(len(pgc_rows), 3)
+            # Bounded history still receives its reserved share (plus unused live slots).
+            backlog_rows = [
+                row for row in rows if str(row["source_code"]) == "GROUP_1"
+            ]
+            self.assertEqual(len(backlog_rows), 16)
+            market.close()
+
     def test_pending_export_prioritizes_fresh_events_over_old_backlog(self):
         with tempfile.TemporaryDirectory() as directory:
             market = connect_market_store(Path(directory) / "market.sqlite3")

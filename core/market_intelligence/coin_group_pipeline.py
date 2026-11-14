@@ -35,6 +35,7 @@ from .coin_group_trades import (
     link_coin_group_trades,
 )
 from .coin_groups import (
+    _PRICE_BOUNDS,
     _dimensions as coin_group_dimensions,
     _text as normalize_coin_group_text,
     CoinGroupMessageInput,
@@ -722,6 +723,9 @@ def _pattern_calibrated_observation(
         ),
         attributes=attributes,
     )
+_ANCHOR_INSTRUMENTS = tuple(f"COIN_{code}" for code in sorted(_PRICE_BOUNDS))
+
+
 def _store_anchors(
     connection: sqlite3.Connection,
     *,
@@ -730,11 +734,14 @@ def _store_anchors(
     """Read only unit-compatible eligible facts; never infer a conversion here."""
 
     horizon_clause = " AND event_time_utc >= ?" if minimum_event_time_utc else ""
+    instrument_placeholders = ",".join("?" for _ in _ANCHOR_INSTRUMENTS)
     parameters: tuple[object, ...] = (
-        (minimum_event_time_utc,) if minimum_event_time_utc else ()
+        (*_ANCHOR_INSTRUMENTS, minimum_event_time_utc)
+        if minimum_event_time_utc
+        else _ANCHOR_INSTRUMENTS
     )
     rows = connection.execute(
-        """
+        f"""
         SELECT source_family,instrument,price_num,event_time_utc,available_at_utc,
                settlement_term, trade_form, quality_state, is_conditional
         FROM market_observations
@@ -742,7 +749,7 @@ def _store_anchors(
           AND is_conditional = 0
           AND event_type IN ('OFFER', 'TRADE')
           AND price_unit = 'PROJECT_THOUSAND_TOMAN'
-          AND instrument LIKE 'COIN_%'
+          AND instrument IN ({instrument_placeholders})
         """ + horizon_clause,
         parameters,
     ).fetchall()
@@ -861,6 +868,7 @@ def _reconcile_missing_current_facts(
         SELECT event_key,quality_state,attributes_json
         FROM market_observations
         WHERE source_code IN ('GROUP_1','GROUP_2')
+          AND source_code <> 'XAUUSD'
           AND source_family='GROUP'
           AND event_type IN ('OFFER','TRADE')
           AND event_time_utc >= ?
@@ -928,7 +936,6 @@ def process_coin_group_staging(
 
     as_of = normalize_utc(as_of_utc, field_name="coin_group_pipeline_as_of_utc")
     feedback = dict(parser_feedback or {})
-    pattern_calibrations = _store_parser_calibrations(market_connection)
     pattern_calibrations_applied = 0
     messages = list_current_staged_coin_group_messages(staging_connection, as_of_utc=as_of)
     if included_message_keys is not None:
@@ -946,21 +953,30 @@ def process_coin_group_staging(
         if reconciliation_horizon_utc is not None
         else staging_horizon
     )
-    minimum_anchor_time = (
-        (_stamp(staging_horizon) - timedelta(seconds=MAXIMUM_ANCHOR_AGE_SECONDS))
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-        if staging_horizon is not None
-        else None
-    )
-    base_anchors = tuple(
-        _store_anchors(
-            market_connection,
-            minimum_event_time_utc=minimum_anchor_time,
+    if messages:
+        pattern_calibrations = _store_parser_calibrations(market_connection)
+        minimum_anchor_time = (
+            (_stamp(staging_horizon) - timedelta(seconds=MAXIMUM_ANCHOR_AGE_SECONDS))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+            if staging_horizon is not None
+            else None
         )
-    ) + tuple(additional_anchors) + _feedback_anchors(feedback.values())
-    anchor_index = CoinPriceAnchorIndex(base_anchors)
+        base_anchors = (
+            tuple(
+                _store_anchors(
+                    market_connection,
+                    minimum_event_time_utc=minimum_anchor_time,
+                )
+            )
+            + tuple(additional_anchors)
+            + _feedback_anchors(feedback.values())
+        )
+        anchor_index = CoinPriceAnchorIndex(base_anchors)
+    else:
+        pattern_calibrations = []
+        anchor_index = CoinPriceAnchorIndex(())
     all_resolved: dict[tuple[int, int], list] = {}
     explicit_claims: list[_ExplicitClaim] = []
     active_event_keys: set[bytes] = set()

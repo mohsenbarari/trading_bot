@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+import math
 import sqlite3
 from typing import Mapping, Sequence
 
@@ -87,6 +88,21 @@ def _event_key(
     )
 
 
+def _utc_lexical_bounds(
+    event_time_utc: str,
+    window_seconds: int | float,
+) -> tuple[str, str]:
+    parsed = datetime.fromisoformat(
+        str(event_time_utc).strip().replace("Z", "+00:00")
+    ).astimezone(timezone.utc)
+    margin = timedelta(seconds=max(0, int(math.ceil(float(window_seconds)))) + 1)
+    # In ASCII, '.' < 'Z', so '.000000Z' is a strict lexical floor for both
+    # whole-second and fractional-second UTC strings while 'Z' is a ceiling.
+    lower = (parsed - margin).strftime("%Y-%m-%dT%H:%M:%S.000000Z")
+    upper = (parsed + margin).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return lower, upper
+
+
 def link_melted_flow_trade_sides(
     connection: sqlite3.Connection,
     *,
@@ -127,6 +143,9 @@ def link_melted_flow_trade_sides(
             "SELL",
         }:
             continue
+        _, upper_bound_utc = _utc_lexical_bounds(
+            str(offer["event_time_utc"]), maximum_offer_age_seconds
+        )
         for trade in connection.execute(
             """
             SELECT id,event_type,side,price_num,settlement_term,event_time_utc
@@ -140,6 +159,7 @@ def link_melted_flow_trade_sides(
               AND price_num=?
               AND settlement_term=?
               AND event_time_utc>?
+              AND event_time_utc<=?
               AND (julianday(event_time_utc)-julianday(?))*86400.0
                   BETWEEN 0 AND ?
             ORDER BY event_time_utc,id
@@ -148,6 +168,7 @@ def link_melted_flow_trade_sides(
                 offer["price_num"],
                 offer["settlement_term"],
                 offer["event_time_utc"],
+                upper_bound_utc,
                 offer["event_time_utc"],
                 maximum_offer_age_seconds,
             ),
@@ -158,6 +179,9 @@ def link_melted_flow_trade_sides(
     )
     linked = 0
     for trade in trades:
+        lower_bound_utc, _ = _utc_lexical_bounds(
+            str(trade["event_time_utc"]), maximum_offer_age_seconds
+        )
         offer = connection.execute(
             """
             SELECT side,
@@ -171,6 +195,7 @@ def link_melted_flow_trade_sides(
               AND price_num = ?
               AND settlement_term = ?
               AND trade_form = 'PAPER_NORMAL'
+              AND event_time_utc >= ?
               AND event_time_utc < ?
               AND (julianday(?) - julianday(event_time_utc)) * 86400.0
                   BETWEEN 0 AND ?
@@ -181,6 +206,7 @@ def link_melted_flow_trade_sides(
                 trade["event_time_utc"],
                 trade["price_num"],
                 trade["settlement_term"],
+                lower_bound_utc,
                 trade["event_time_utc"],
                 trade["event_time_utc"],
                 maximum_offer_age_seconds,

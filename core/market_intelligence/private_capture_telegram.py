@@ -1356,12 +1356,18 @@ class TelegramCaptureProvider:
             if policy is None:
                 return
             try:
-                for message_id in tuple(getattr(event, "deleted_ids", ()) or ()):
-                    if self.engine.state.message_deleted(policy.source_code, int(message_id)):
+                deleted_ids = tuple(
+                    dict.fromkeys(
+                        int(message_id)
+                        for message_id in (getattr(event, "deleted_ids", ()) or ())
+                    )
+                )
+                for message_id in deleted_ids:
+                    if self.engine.state.message_deleted(policy.source_code, message_id):
                         continue
                     self.engine.accept(
                         build_deleted_event(
-                            policy, message_id=int(message_id), received_at=utc_now()
+                            policy, message_id=message_id, received_at=utc_now()
                         )
                     )
             except BaseException as exc:
