@@ -1612,6 +1612,76 @@ class Stage10SnapshotTests(unittest.TestCase):
                     stop=threading.Event(),
                 )
 
+    def test_v9_medium_confidence_with_stale_anchor_roundtrips_sender_and_receiver(self):
+        self._seed_remaining_primary_inventory()
+        private_fact = _fact(
+            250,
+            source_code="PRIVATE_GOLD_CHANNEL",
+            stream_id="market.fact.private-gold",
+            source_sequence=2,
+            occurred_at_utc="2026-08-26T05:10:00Z",
+            available_at_utc="2026-08-26T05:10:01Z",
+            persisted_at_utc="2026-08-26T05:10:02Z",
+            payload={
+                "kind": "PRIVATE_GOLD_OFFER",
+                "instrument": "MELTED_GOLD_PRIVATE",
+                "side": "SELL",
+                "settlement": "TODAY",
+                "trade_form": "PHYSICAL",
+                "offered_price_value": "80150000",
+                "price_unit": "TOMAN_PER_MESGHAL_750",
+                "quantity_value": "10",
+                "quantity_unit": "LOT_COUNT",
+                "lifetime_seconds": 120,
+            },
+        )
+        with patch(
+            "core.market_intelligence.market_fact_receiver._utc_now",
+            return_value=datetime(2026, 8, 26, 5, 10, 3, tzinfo=timezone.utc),
+        ):
+            status, response = apply_fact_batch(
+                self.fact_receiver,
+                _batch(
+                    250,
+                    stream_id="market.fact.private-gold",
+                    deliveries=[(2, private_fact)],
+                ),
+            )
+            self.assertEqual((status, response["status"]), (200, "ACK"))
+        with patch(
+            "core.market_intelligence.market_store._utc_now",
+            return_value="2026-08-26T05:10:04.000000Z",
+        ):
+            report = run_adapter_cycle(self.fact_receiver, self.market)
+        self.assertEqual((report.applied, report.rejected), (1, 0))
+        self.market.commit()
+
+        document = self._publish(
+            at="2026-08-26T05:10:10Z",
+            feed_mode="PRIVATE_PRIMARY",
+        )
+        imam_cash = next(
+            row
+            for row in document["rates"]
+            if row["instrument"] == "COIN_IMAM" and row["settlement"] == "CASH"
+        )
+        self.assertEqual(imam_cash["status"], "ESTIMATED")
+        self.assertEqual(imam_cash["confidence"], "MEDIUM")
+        self.assertGreater(float(imam_cash["anchor_age_seconds"]), 300.0)
+
+        send_result = send_latest_snapshot(
+            snapshot_path=self.snapshot_path,
+            state_path=self.estimator_state,
+            expected_feed_mode="PRIVATE_PRIMARY",
+            acknowledged_view_path=self.root / "bot-ack-primary.json",
+            send=lambda payload: self._apply_web(
+                dict(payload),
+                allow_private_primary=True,
+                now_utc=datetime(2026, 8, 26, 5, 10, 12, tzinfo=timezone.utc),
+            ),
+        )
+        self.assertEqual(send_result.status, "ACKNOWLEDGED")
+
 
 if __name__ == "__main__":
     unittest.main()

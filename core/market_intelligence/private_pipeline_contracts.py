@@ -57,6 +57,7 @@ ESTIMATOR_RATE_GRID_V1 = tuple(
     for settlement in ("CASH", "TOMORROW")
     for instrument in ESTIMATOR_RATE_INSTRUMENTS_V1
 )
+HIGH_CONFIDENCE_ANCHOR_MAX_AGE_SECONDS = 5 * 60
 
 QualityState = Literal["ELIGIBLE", "REVIEW", "REJECTED", "AUDIT_ONLY"]
 Side = Literal["BUY", "SELL", "MID", "UNKNOWN"]
@@ -553,7 +554,11 @@ class EstimatorRateV2(ContractModel):
                 raise ValueError("estimated_rate_underlying_metadata_required")
             if self.confidence == "HIGH" and self.anchor_age_seconds is None:
                 raise ValueError("high_confidence_rate_anchor_required")
-            if self.confidence == "MEDIUM" and self.anchor_age_seconds is not None:
+            if (
+                self.confidence == "MEDIUM"
+                and self.anchor_age_seconds is not None
+                and self.anchor_age_seconds <= HIGH_CONFIDENCE_ANCHOR_MAX_AGE_SECONDS
+            ):
                 raise ValueError("medium_confidence_rate_anchor_forbidden")
         if (self.underlying_source is None) != (self.underlying_age_seconds is None):
             raise ValueError("estimator_rate_underlying_metadata_incomplete")

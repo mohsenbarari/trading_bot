@@ -6,7 +6,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from .config import Settings, source_code_for_channel
+from .config import Settings, resolve_configured_channel
 from .db import (
     connect,
     finish_scrape_run,
@@ -111,10 +111,12 @@ async def collect_history(
         await client.start(phone=settings.phone)
         try:
             for requested_username in channels:
-                entity = await client.get_entity(requested_username)
-                canonical_username = getattr(entity, "username", None) or requested_username
-                channel_title = getattr(entity, "title", None) or canonical_username
-                source_code = source_code_for_channel(canonical_username)
+                (
+                    entity,
+                    source_code,
+                    canonical_username,
+                    channel_title,
+                ) = await resolve_configured_channel(client, requested_username)
                 run_id = start_scrape_run(connection, source_code, cutoff_iso or "")
                 message_count = 0
                 event_count = 0

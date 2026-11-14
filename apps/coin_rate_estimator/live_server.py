@@ -69,6 +69,7 @@ from offer_text_parser import (  # noqa: E402
 from telegram_price_collector.config import (  # noqa: E402
     DEFAULT_CHANNELS,
     Settings,
+    resolve_configured_channel,
     source_code_for_channel,
 )
 from telegram_price_collector.db import (  # noqa: E402
@@ -8889,21 +8890,59 @@ async def estimation_loop(
         await asyncio.sleep(1)
 
 
+def _channel_backfill_cutoff(
+    connection: sqlite3.Connection,
+    source_code: str,
+    *,
+    now_utc: datetime,
+    backfill_minutes: int,
+    max_gap_minutes: int = 360,
+) -> datetime:
+    default_cutoff = now_utc - timedelta(minutes=backfill_minutes)
+    max_gap_cutoff = now_utc - timedelta(minutes=max(backfill_minutes, max_gap_minutes))
+    row = connection.execute(
+        "SELECT MAX(published_at_utc) AS latest_utc FROM raw_posts WHERE source_code = ?",
+        (source_code,),
+    ).fetchone()
+    latest_raw = row["latest_utc"] if row is not None else None
+    if not latest_raw:
+        return default_cutoff
+    try:
+        latest_utc = datetime.fromisoformat(str(latest_raw).replace("Z", "+00:00"))
+    except ValueError:
+        return default_cutoff
+    if latest_utc.tzinfo is None:
+        latest_utc = latest_utc.replace(tzinfo=timezone.utc)
+    else:
+        latest_utc = latest_utc.astimezone(timezone.utc)
+    gap_cutoff = latest_utc - timedelta(minutes=2)
+    return max(max_gap_cutoff, min(default_cutoff, gap_cutoff))
+
+
 async def _public_collector_heartbeat(
     client: object,
     health_path: Path,
     *,
     channel_count: int,
+    configured_channel_count: int | None = None,
+    unavailable_channel_count: int = 0,
 ) -> None:
     while True:
         connected = bool(client.is_connected())  # type: ignore[attr-defined]
+        details: dict[str, object] = {
+            "connected": connected,
+            "channel_count": channel_count,
+            "unavailable_channel_count": unavailable_channel_count,
+        }
+        if configured_channel_count is not None:
+            details["configured_channel_count"] = configured_channel_count
         update_probe_state(
             health_path,
             source="PUBLIC_MARKET_TELEGRAM",
             status="HEALTHY" if connected else "FAILED",
             successful=connected,
             error_code=None if connected else "TELEGRAM_DISCONNECTED",
-            details={"connected": connected, "channel_count": channel_count},
+            details=details,
         )
         if not connected:
             raise RuntimeError("public_market_telegram_disconnected")
@@ -8952,37 +8991,87 @@ async def live_collection_loop(
             await client.start(phone=settings.phone)
         entities = []
         channel_by_peer: dict[int, tuple[str, str, str]] = {}
+        unavailable_channels: dict[str, str] = {}
         for requested in channels:
-            entity = await client.get_entity(requested)
-            username = getattr(entity, "username", None) or requested
-            title = getattr(entity, "title", None) or username
-            source_code = source_code_for_channel(username)
-            peer_id = int(getattr(entity, "id"))
+            try:
+                entity, source_code, username, title = await resolve_configured_channel(
+                    client, requested
+                )
+                peer_id = int(getattr(entity, "id"))
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                raise
+            except Exception as exc:  # noqa: BLE001
+                unavailable_channels[requested] = type(exc).__name__
+                print(
+                    json.dumps(
+                        {
+                            "event": "channel_resolution_degraded",
+                            "channel": f"@{requested.lstrip('@')}",
+                            "error_type": type(exc).__name__,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                continue
             channel_by_peer[peer_id] = (source_code, username, title)
             entities.append(entity)
 
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=backfill_minutes)
+        if not entities:
+            raise RuntimeError("no_public_telegram_channels_resolved")
+
+        now_utc = datetime.now(timezone.utc)
         for entity in entities:
             peer_id = int(getattr(entity, "id"))
             source_code, username, title = channel_by_peer[peer_id]
+            cutoff = _channel_backfill_cutoff(
+                connection,
+                source_code,
+                now_utc=now_utc,
+                backfill_minutes=backfill_minutes,
+            )
             messages = 0
             price_events = 0
-            async for message in client.iter_messages(entity):
-                published = getattr(message, "date", None)
-                if published is None:
-                    continue
-                if published.tzinfo is None:
-                    published = published.replace(tzinfo=timezone.utc)
-                if published < cutoff:
-                    break
-                price_events += persist_message(connection, source_code, username, message)
-                messages += 1
-            side_links = (
-                infer_naghdp_trade_sides(connection)
-                if username.lower() == "naghdp"
-                else {"examined": 0, "matched": 0, "unresolved": 0}
-            )
-            connection.commit()
+            backfill_messages = []
+            try:
+                async for message in client.iter_messages(entity):
+                    published = getattr(message, "date", None)
+                    if published is None:
+                        continue
+                    if published.tzinfo is None:
+                        published = published.replace(tzinfo=timezone.utc)
+                    if published < cutoff:
+                        break
+                    backfill_messages.append(message)
+                for message in reversed(backfill_messages):
+                    price_events += persist_message(
+                        connection, source_code, username, message
+                    )
+                    messages += 1
+                side_links = (
+                    infer_naghdp_trade_sides(connection)
+                    if source_code == "MELTED_FLOW"
+                    else {"examined": 0, "matched": 0, "unresolved": 0}
+                )
+                connection.commit()
+            except (asyncio.CancelledError, KeyboardInterrupt):
+                raise
+            except Exception as exc:  # noqa: BLE001
+                connection.rollback()
+                unavailable_channels[username] = type(exc).__name__
+                print(
+                    json.dumps(
+                        {
+                            "event": "live_backfill_degraded",
+                            "channel": f"@{username}",
+                            "error_type": type(exc).__name__,
+                            "cutoff_utc": iso_utc(cutoff),
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
+                continue
             print(
                 json.dumps(
                     {
@@ -9040,16 +9129,37 @@ async def live_collection_loop(
             source="PUBLIC_MARKET_TELEGRAM",
             status="HEALTHY",
             successful=True,
-            details={"connected": True, "channel_count": len(entities)},
+            details={
+                "connected": True,
+                "channel_count": len(entities),
+                "configured_channel_count": len(channels),
+                "unavailable_channel_count": len(unavailable_channels),
+            },
         )
-        await asyncio.gather(
-            client.run_until_disconnected(),
+        heartbeat_task = asyncio.create_task(
             _public_collector_heartbeat(
                 client,
                 health_path,
                 channel_count=len(entities),
-            ),
+                configured_channel_count=len(channels),
+                unavailable_channel_count=len(unavailable_channels),
+            )
         )
+        disconnect_task = asyncio.create_task(client.run_until_disconnected())
+        try:
+            done, pending = await asyncio.wait(
+                {disconnect_task, heartbeat_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for finished in done:
+                finished.result()
+        finally:
+            for task in (disconnect_task, heartbeat_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                disconnect_task, heartbeat_task, return_exceptions=True
+            )
     except asyncio.CancelledError:
         update_probe_state(
             health_path,

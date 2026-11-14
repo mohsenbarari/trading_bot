@@ -308,6 +308,63 @@ class MarketSnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(MarketSnapshotError, "snapshot_estimated_count_invalid"):
             validate_market_snapshot(mutated)
 
+    def test_v9_medium_confidence_accepts_stale_anchor_above_fresh_window(self) -> None:
+        self._store(
+            identity="private-physical-anchor-gold-v9",
+            source_code="PRIVATE_GOLD_CHANNEL",
+            instrument="MELTED_GOLD_PRIVATE",
+            price=80_000_000,
+            price_unit="TOMAN_PER_MESGHAL_750",
+            event_time=self.now - timedelta(seconds=610),
+            settlement="TODAY",
+            trade_form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self._store(
+            identity="private-physical-v9-medium",
+            source_code="PRIVATE_GOLD_CHANNEL",
+            instrument="MELTED_GOLD_PRIVATE",
+            price=80_300_000,
+            price_unit="TOMAN_PER_MESGHAL_750",
+            event_time=self.now - timedelta(seconds=20),
+            settlement="TODAY",
+            trade_form="PHYSICAL",
+            event_type="TRADE",
+        )
+        self._store(
+            identity="coin-imam-stale-anchor-v9",
+            source_code="GROUP_1",
+            instrument="COIN_IMAM",
+            price=187_500,
+            price_unit="PROJECT_THOUSAND_TOMAN",
+            event_time=self.now - timedelta(seconds=600),
+            settlement="CASH",
+            trade_form="PHYSICAL",
+            event_type="TRADE",
+        )
+        snapshot = build_market_snapshot(self.connection, as_of_utc=self.now)
+        rate = next(
+            item
+            for item in snapshot["rates"]["items"]
+            if item["commodity_code"] == "IMAM" and item["settlement_term"] == "CASH"
+        )
+        self.assertEqual(rate["status"], "ESTIMATED")
+        self.assertEqual(rate["confidence"], "MEDIUM")
+        self.assertEqual(rate["anchor_age_seconds"], 600.0)
+        validate_market_snapshot(snapshot)
+
+        mutated = json.loads(json.dumps(snapshot))
+        target = next(
+            item
+            for item in mutated["rates"]["items"]
+            if item["commodity_code"] == "IMAM" and item["settlement_term"] == "CASH"
+        )
+        target["anchor_age_seconds"] = 300.0
+        with self.assertRaisesRegex(
+            MarketSnapshotError, "snapshot_medium_confidence_anchor_invalid"
+        ):
+            validate_market_snapshot(mutated)
+
     def test_atomic_publish_preserves_valid_snapshot_on_invalid_replacement(self) -> None:
         snapshot = build_market_snapshot(self.connection, as_of_utc=self.now)
         digest = publish_market_snapshot_atomically(self.snapshot_path, snapshot)

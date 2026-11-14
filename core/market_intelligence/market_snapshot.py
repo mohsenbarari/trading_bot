@@ -20,7 +20,12 @@ import stat
 import tempfile
 from typing import Any, Iterable, Mapping, Sequence
 
-from .coin_rate_engine import COIN_RATE_ENGINE_VERSION, COIN_SPECS, build_coin_rate_estimates
+from .coin_rate_engine import (
+    COIN_RATE_ENGINE_VERSION,
+    COIN_SPECS,
+    _TRADE_PREFERENCE_MAX_LAG_SECONDS as HIGH_CONFIDENCE_ANCHOR_MAX_AGE_SECONDS,
+    build_coin_rate_estimates,
+)
 from .market_contracts import MARKET_STORE_CONTRACT_VERSION, normalize_utc
 from .market_regime import detect_canonical_market_regime, product_market_regime
 from .private_gold import filter_comparable_private_gold_physical_rows
@@ -794,7 +799,11 @@ def _validate_coin_rates(rates: Mapping[str, Any]) -> None:
             raise MarketSnapshotError("snapshot_anchor_age_invalid")
         if confidence == "HIGH" and anchor_age is None:
             raise MarketSnapshotError("snapshot_high_confidence_anchor_required")
-        if confidence == "MEDIUM" and anchor_age is not None:
+        if (
+            confidence == "MEDIUM"
+            and anchor_age is not None
+            and float(anchor_age) <= HIGH_CONFIDENCE_ANCHOR_MAX_AGE_SECONDS
+        ):
             raise MarketSnapshotError("snapshot_medium_confidence_anchor_invalid")
     if int(rates.get("estimated_count") or 0) != estimated_count:
         raise MarketSnapshotError("snapshot_estimated_count_invalid")

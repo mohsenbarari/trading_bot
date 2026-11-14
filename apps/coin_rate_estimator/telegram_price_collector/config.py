@@ -28,6 +28,12 @@ SOURCE_PARSER_CHANNELS = {
     "USD_HERAT": "ToofanHarirodOfficial",
     "XAUUSD": "qheimat_ounce",
 }
+SOURCE_PEER_IDS = {
+    "MELTED_AGGREGATE": -1001491344050,
+    "MELTED_FLOW": -1001209799291,
+    "USD_HERAT": -1001419309254,
+    "XAUUSD": -1001459105711,
+}
 
 
 def source_code_for_channel(username: str) -> str:
@@ -36,6 +42,63 @@ def source_code_for_channel(username: str) -> str:
         return SOURCE_CODES[key]
     except KeyError as exc:
         raise ValueError(f"No compact source code is configured for @{username.lstrip('@')}") from exc
+
+
+def _expected_channel_id(peer_id: int) -> int:
+    value = abs(int(peer_id))
+    return value - 1_000_000_000_000 if value > 1_000_000_000_000 else value
+
+
+async def resolve_configured_channel(
+    client: object,
+    requested: str,
+) -> tuple[object, str, str, str]:
+    """Resolve one configured Telegram channel, preferring authoritative peer_id."""
+
+    configured_source_code: str | None = None
+    try:
+        configured_source_code = source_code_for_channel(requested)
+    except ValueError:
+        configured_source_code = None
+
+    if configured_source_code is not None and configured_source_code in SOURCE_PEER_IDS:
+        peer_id = SOURCE_PEER_IDS[configured_source_code]
+        expected_id = _expected_channel_id(peer_id)
+        entity = None
+        peer_error: Exception | None = None
+        try:
+            candidate = await client.get_entity(peer_id)  # type: ignore[attr-defined]
+            if getattr(candidate, "id", None) is not None:
+                entity = candidate
+        except Exception as exc:  # noqa: BLE001
+            peer_error = exc
+        if entity is None:
+            try:
+                entity = await client.get_entity(requested)  # type: ignore[attr-defined]
+            except Exception:
+                if peer_error is not None:
+                    raise peer_error
+                raise
+            if type(entity).__module__.startswith("telethon"):
+                observed_id = getattr(entity, "id", None)
+                if observed_id is None or int(observed_id) != expected_id:
+                    raise ValueError(
+                        f"Telegram peer mismatch for @{requested.lstrip('@')}"
+                    )
+        parser_channel = SOURCE_PARSER_CHANNELS[configured_source_code]
+        title = (
+            getattr(entity, "title", None)
+            or getattr(entity, "username", None)
+            or parser_channel
+        )
+        return entity, configured_source_code, parser_channel, str(title)
+
+    entity = await client.get_entity(requested)  # type: ignore[attr-defined]
+    username = getattr(entity, "username", None) or requested
+    source_code = source_code_for_channel(username)
+    parser_channel = SOURCE_PARSER_CHANNELS.get(source_code, username)
+    title = getattr(entity, "title", None) or parser_channel
+    return entity, source_code, parser_channel, str(title)
 
 
 @dataclass(frozen=True, slots=True)
