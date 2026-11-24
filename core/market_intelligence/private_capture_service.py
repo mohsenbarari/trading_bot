@@ -15,7 +15,6 @@ from .private_capture import (
     CaptureState,
     DurableEventSpool,
     ROLE_ACCOUNT,
-    atomic_json,
     load_fixture_events,
     parse_utc,
     process_fixture_events,
@@ -30,6 +29,7 @@ from .private_capture_telegram import (
     validate_authority_marker,
     validate_session_file,
 )
+from .private_pipeline_foundation import atomic_json_write
 
 
 DEFAULT_CAPTURE_ROOT = Path("/var/lib/market-data/capture")
@@ -148,7 +148,7 @@ def run_capture_service(
             status=status,
         )
         document["replay_blocked_reason"] = replay_blocked_reason
-        atomic_json(health_path, document)
+        atomic_json_write(health_path, document)
 
     try:
         engine.drain()

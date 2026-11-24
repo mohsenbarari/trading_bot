@@ -1,5 +1,6 @@
 # Coin Market Intelligence
 
+- 2026-11-23 | Web disk exhaustion stopped six Market roles; stale PID-based temporaries blocked restart. Byte-verified OP08 archive relocation preserved its path and freed 10.9 GiB; quarantining 30 empty temporaries restored existing containers/checkpoints. Web snapshot 1459344 OK with both groups fresh; dashboard AVAILABLE. Historical gap remains before Nov 23 05:30 UTC. Unique same-directory temporary patch verified locally, pending release.
 - Estimator `f5b98fee`: trade≤5m; non-fallback anchors same-source; retention7d/rollback. Old trades must not mask fresh offers.
 - Processor `aeaa3f0c`: numeric poison atomically FILTERED; preserve raw/exact lineage, other contracts fail closed. Fair live/history export with bounded cyclic discovery; keep indexes/timings. `docs/MARKET_PROCESSOR_NUMERIC_ISOLATION_20261018.md` links prior recovery.
 - Sender/adapter `532a9804`/`7aa96bdd`: bound ACK, fair streams, trigger counters; no resets. Release-bound endpoint/progress watchdog:15s/two failures/cooldown5m/deploy mutex; silence/catch-up never restart.

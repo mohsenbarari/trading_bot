@@ -9,7 +9,7 @@ service receives product authority merely by entering live runtime mode.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager, ExitStack, suppress
 from datetime import datetime, timezone
 import errno
 import fcntl
@@ -21,6 +21,7 @@ import re
 import signal
 import sqlite3
 import sys
+import tempfile
 import threading
 import time
 from typing import Any, Iterator, Mapping, Sequence
@@ -108,21 +109,24 @@ def _fsync_directory(path: Path) -> None:
 
 def atomic_json_write(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     payload = (safe_json(value) + "\n").encode("utf-8")
-    descriptor = os.open(
-        temporary,
-        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-        0o600,
+    # Container restarts can reuse a PID while leaving a failed write behind.
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
     )
+    temporary = Path(temporary_name)
     try:
-        with os.fdopen(descriptor, "wb", closefd=False) as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
+        try:
+            with os.fdopen(descriptor, "wb", closefd=False) as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+        finally:
+            os.close(descriptor)
+        os.replace(temporary, path)
     finally:
-        os.close(descriptor)
-    os.replace(temporary, path)
+        with suppress(OSError):
+            temporary.unlink(missing_ok=True)
     _fsync_directory(path.parent)
 
 

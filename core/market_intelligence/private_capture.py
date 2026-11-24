@@ -268,25 +268,6 @@ def fsync_directory(path: Path) -> None:
         os.close(descriptor)
 
 
-def atomic_json(path: Path, document: Mapping[str, Any]) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        payload = canonical_json(document) + b"\n"
-        view = memoryview(payload)
-        while view:
-            written = os.write(descriptor, view)
-            if written <= 0:
-                raise OSError("capture_atomic_short_write")
-            view = view[written:]
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-    os.replace(temporary, path)
-    fsync_directory(path.parent)
-
-
 def _safe_reason(value: object) -> str:
     normalized = "".join(
         character

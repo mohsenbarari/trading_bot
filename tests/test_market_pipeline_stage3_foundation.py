@@ -1,4 +1,5 @@
 import copy
+import errno
 import json
 import os
 from pathlib import Path
@@ -125,6 +126,23 @@ class MarketPipelineStage3FoundationTests(unittest.TestCase):
                 ):
                     with foundation.exclusive_lock(lock):
                         self.fail("a second owner must never acquire the same lock")
+
+    def test_atomic_write_recovers_after_disk_full_and_container_pid_reuse(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "health.json"
+            foundation.atomic_json_write(target, {"version": 1})
+            with patch.object(foundation.os, "fsync", side_effect=OSError(errno.ENOSPC, "disk full")):
+                with self.assertRaises(OSError) as raised:
+                    foundation.atomic_json_write(target, {"version": 2})
+            self.assertEqual(raised.exception.errno, errno.ENOSPC)
+            self.assertEqual(json.loads(target.read_text()), {"version": 1})
+            self.assertEqual(list(target.parent.glob(".*.tmp")), [])
+
+            stale = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+            stale.touch()
+            foundation.atomic_json_write(target, {"version": 3})
+            self.assertEqual(json.loads(target.read_text()), {"version": 3})
+            self.assertTrue(stale.exists())
 
     def test_fact_fixture_is_durable_idempotent_and_gap_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(

@@ -1,5 +1,6 @@
 # Estimator display
 
+- 2026-11-23 | Native dashboard falls back to `MAIN_ONLINE` for stale or `SAFE_NO_DATA` Primary snapshots. Incident ledger: Imam tomorrow 244.35m at 10:00:04Z, upper 245.8m. Read-only replay was within 0.10m; ~5.65d-old group anchor had 12% weight, structural model 88%. Audit outage bias and interval coverage separately by settlement/anchor age before changing fallback.
 - Snapshot receiver imports the engine version and rejects unsupported models.
   Deploy the compatible reader first; v9 explicitly also accepts unchanged-wire
   v8 for producer rollback. Accept activation only after actual Web ACK/freshness.
